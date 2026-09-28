@@ -1,0 +1,29 @@
+{
+  "name": "product-video-studio",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/src/web/server.js",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "tsc -p tsconfig.json && node --test dist/tests/*.test.js",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate dev",
+    "license:gate": "node scripts/license-gate.mjs",
+    "license:archive": "node scripts/archive-licenses.mjs"
+  },
+  "dependencies": {
+    "@prisma/client": "6.12.0",
+    "image-size": "2.0.4",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.3",
+    "prisma": "6.12.0",
+    "typescript": "7.0.2"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

@@ -1,0 +1,137 @@
+{
+  "schemaVersion": "p0-v1",
+  "identity": {
+    "id": "dreamina-official-windows-amd64-1.4.18-ec1b9fa",
+    "officialSourceUrl": "https://jimeng.jianying.com/ai-tool/install",
+    "publisher": "即梦AI / 剪映",
+    "packageName": "dreamina_cli_windows_amd64.exe@1.4.18",
+    "executablePath": "C:\\Users\\Administrator\\bin\\dreamina.exe",
+    "executableSha256": "13A817E455179AB994495EEDB875CF845348D05F526B21C2EF207E1FC47F6014",
+    "signatureInfo": "Official installer https://jimeng.jianying.com/cli; version.json=1.4.18 (2026-09-10); SKILL.md MD5=fc22c32619bc9e248e7bf8b320462b37; binary build version=ec1b9fa-dirty",
+    "cliVersion": "ec1b9fa-dirty",
+    "officialLoginOrigins": [
+      "https://jimeng.jianying.com/"
+    ],
+    "verificationStatus": "VERIFIED",
+    "verifiedAt": "2026-09-27T11:35:02.6926535Z"
+  },
+  "probe": {
+    "versionArgs": [
+      "version"
+    ],
+    "helpArgs": [
+      "multimodal2video",
+      "--help"
+    ],
+    "versionRegex": "\"version\"\\s*:\\s*\"ec1b9fa-dirty\"",
+    "helpRequiredFragments": [
+      "seedance2.0",
+      "seedance2.0mini",
+      "--image",
+      "--duration",
+      "--ratio",
+      "--video_resolution",
+      "4-15",
+      "--poll"
+    ],
+    "supportedOperations": [
+      "accountStatus",
+      "estimate",
+      "submit",
+      "status",
+      "download",
+      "reconcileSubmission"
+    ],
+    "supportedModels": [
+      "seedance-2.0",
+      "seedance-2.0-mini"
+    ],
+    "supportedDurationsMs": [
+      4000,
+      5000,
+      6000,
+      7000,
+      8000,
+      9000,
+      10000,
+      11000,
+      12000,
+      13000,
+      14000,
+      15000
+    ]
+  },
+  "account": {
+    "args": [
+      "user_credit"
+    ],
+    "authenticatedRegex": "\"total_credit\"\\s*:\\s*\\d+",
+    "notAuthenticatedRegex": "(?:未登录|not logged|login required|unauthorized|authentication required)"
+  },
+  "estimate": {
+    "argsTemplate": [
+      "user_credit"
+    ]
+  },
+  "submit": {
+    "argsTemplate": [
+      "multimodal2video",
+      "--prompt",
+      "{promptText}",
+      "--duration",
+      "{durationSeconds}",
+      "--ratio",
+      "{aspectRatio}",
+      "--video_resolution",
+      "720p",
+      "--model_version",
+      "{modelVersion}",
+      "--poll",
+      "0"
+    ],
+    "modelVersionMap": {
+      "seedance-2.0": "seedance2.0",
+      "seedance-2.0-mini": "seedance2.0mini"
+    },
+    "assetFlag": "--image",
+    "minAssets": 1,
+    "taskIdRegex": "\"submit_id\"\\s*:\\s*\"([^\"]+)\"",
+    "submitIdRegex": "\"submit_id\"\\s*:\\s*\"([^\"]+)\"",
+    "failedRegex": "(?:\"gen_status\"\\s*:\\s*\"fail\"|AigcComplianceConfirmationRequired)",
+    "outcomeUnknownRegex": "(?:timeout|timed out|connection reset|connection aborted|EOF|unexpected end)"
+  },
+  "status": {
+    "argsTemplate": [
+      "query_result",
+      "--submit_id",
+      "{externalTaskId}"
+    ],
+    "submittedRegex": "\"gen_status\"\\s*:\\s*\"submitted\"",
+    "processingRegex": "\"gen_status\"\\s*:\\s*\"(?:querying|processing)\"",
+    "succeededRegex": "\"gen_status\"\\s*:\\s*\"success\"",
+    "failedRegex": "\"gen_status\"\\s*:\\s*\"fail\""
+  },
+  "download": {
+    "argsTemplate": [
+      "query_result",
+      "--submit_id",
+      "{externalTaskId}",
+      "--download_dir",
+      "{outputDir}"
+    ],
+    "outputMode": "DIRECTORY"
+  },
+  "reconcile": {
+    "argsTemplate": [
+      "query_result",
+      "--submit_id",
+      "{knownExternalTaskId}"
+    ],
+    "foundActiveRegex": "\"gen_status\"\\s*:\\s*\"(?:querying|processing|submitted)\"",
+    "foundSucceededRegex": "\"gen_status\"\\s*:\\s*\"success\"",
+    "foundFailedRegex": "\"gen_status\"\\s*:\\s*\"fail\"",
+    "notFoundRegex": "(?:not found|not exist|未找到|不存在)",
+    "taskIdRegex": "\"submit_id\"\\s*:\\s*\"([^\"]+)\"",
+    "failureReasonRegex": "\"fail_reason\"\\s*:\\s*\"([^\"]+)\""
+  }
+}

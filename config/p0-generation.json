@@ -1,0 +1,8 @@
+{
+  "schemaVersion": "p0-v1",
+  "model": "seedance-2.0-mini",
+  "videoResolution": "720p",
+  "aspectRatio": "9:16",
+  "updatedAt": "2026-09-27T11:59:00.000Z",
+  "reason": "User requested switching the active generation model to official dreamina CLI seedance2.0mini. Existing Seedance 2.0 Attempt remains historical and is not cancelled/resubmitted."
+}
