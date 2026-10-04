@@ -8,6 +8,7 @@ import type {
 } from "../ports/research-provider.js";
 import type {
   ResearchBrief,
+  ResearchBrowserState,
   ResearchCandidateClaim,
   ResearchConfidence,
   ResearchEvidence,
@@ -23,6 +24,11 @@ import type { ProductFlowService } from "./product-flow.js";
 import { productTruthSchema } from "../../domain/schemas.js";
 import { hashValue } from "../../domain/hashing.js";
 import { DomainValidationError } from "../../domain/validation.js";
+import {
+  fetchedDocumentMatchesIdentity,
+  scoreResearchCandidate,
+  type ResearchIdentity
+} from "./research-source-quality.js";
 
 const briefProposalSchema = z.object({
   summary: z.string().trim().min(1),
@@ -61,8 +67,123 @@ const briefProposalSchema = z.object({
   uncertainties: z.array(z.string().trim().min(1)).max(30)
 });
 
+const researchRerankSchema = z.object({
+  candidates: z.array(
+    z.object({
+      candidateId: z.string().trim().min(1),
+      relevanceScore: z.number().min(0).max(100),
+      reason: z.string().trim().min(1).max(300)
+    })
+  ).max(20)
+});
+
 function uniqueStrings(values: string[]): string[] {
   return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
+}
+
+type DiscoveryRoundAudit = NonNullable<
+  ResearchBrowserState["discoveryRounds"]
+>[number];
+
+function discoveredSourceSelection(input: {
+  sources: WebResearchSource[];
+  identity: ResearchIdentity;
+  round: number;
+  queries: string[];
+  semanticScores?: Map<string, { score: number; reason: string }>;
+}): {
+  selected: WebResearchSource[];
+  audit: DiscoveryRoundAudit;
+} {
+  const hostCounts = new Map<string, number>();
+  const scored = input.sources.map((source) => {
+    let host = "";
+    try {
+      host = new URL(source.url).hostname.toLowerCase();
+    } catch {
+      // Invalid URLs will be rejected by downstream fetch validation.
+    }
+    const baseScore = scoreResearchCandidate({
+      source,
+      identity: input.identity,
+      sameHostAcceptedCount: hostCounts.get(host) ?? 0
+    });
+    const semantic = input.semanticScores?.get(source.url);
+    const hardReject = baseScore.reasons.some((reason) =>
+      reason.includes("直接淘汰")
+    );
+    const finalScore =
+      semantic && !hardReject
+        ? Math.round(baseScore.deterministicScore * 0.6 + semantic.score * 0.4)
+        : baseScore.deterministicScore;
+    const decision: "ACCEPT" | "HOLD" | "REJECT" =
+      !semantic || hardReject
+        ? baseScore.decision
+        : finalScore >= 55
+          ? "ACCEPT"
+          : finalScore >= 22
+            ? "HOLD"
+            : "REJECT";
+    const score = {
+      ...baseScore,
+      finalScore,
+      decision,
+      reasons:
+        semantic && !hardReject
+          ? [
+              ...baseScore.reasons,
+              "语义相关度 " + semantic.score + "：" + semantic.reason
+            ]
+          : baseScore.reasons
+    };
+    if (score.decision === "ACCEPT" && host) {
+      hostCounts.set(host, (hostCounts.get(host) ?? 0) + 1);
+    }
+    return { source, score };
+  });
+  const accepted = scored.filter((item) => item.score.decision === "ACCEPT");
+  const held = scored
+    .filter((item) => item.score.decision === "HOLD")
+    .sort((a, b) => b.score.finalScore - a.score.finalScore);
+  const selected = [...accepted];
+  const minFetch = 6;
+  for (const item of held) {
+    if (selected.length >= minFetch) break;
+    selected.push(item);
+  }
+  const selectedUrls = new Set(selected.map((item) => item.source.url));
+  return {
+    selected: selected.map((item) => item.source),
+    audit: {
+      round: input.round,
+      queries: [...input.queries],
+      candidateCount: scored.length,
+      acceptedCount: accepted.length,
+      heldCount: held.length,
+      rejectedCount: scored.filter(
+        (item) => item.score.decision === "REJECT"
+      ).length,
+      fetchedCount: selected.length,
+      candidates: scored.map(({ source, score }) => ({
+        url: source.url,
+        ...(source.resultTitle ? { title: source.resultTitle } : {}),
+        sourceType: source.sourceType,
+        ...(source.discoveryQuery ? { query: source.discoveryQuery } : {}),
+        ...(source.discoveryEngine
+          ? { engine: source.discoveryEngine }
+          : {}),
+        ...(source.discoveryRank ? { rank: source.discoveryRank } : {}),
+        deterministicScore: score.deterministicScore,
+        ...(input.semanticScores?.get(source.url)
+          ? { semanticScore: input.semanticScores.get(source.url)!.score }
+          : {}),
+        finalScore: score.finalScore,
+        decision: score.decision,
+        selectedForFetch: selectedUrls.has(source.url),
+        reasons: [...score.reasons]
+      }))
+    }
+  };
 }
 
 function confidenceForSource(
@@ -113,6 +234,30 @@ function automaticDeepQueries(input: {
     input.category ? `${input.category} 竞品 对比 使用场景` : "",
     input.goal
   ]).slice(0, 12);
+}
+
+function recoveryDeepQueries(input: {
+  goal: string;
+  productName?: string;
+  brand?: string;
+  category?: string;
+}): string[] {
+  const identity = [input.brand?.trim(), input.productName?.trim()]
+    .filter(Boolean)
+    .join(" ")
+    .trim();
+  const subject = identity || input.productName?.trim() || input.goal.trim();
+  if (!subject) return [];
+  return uniqueStrings([
+    subject + " 官方 产品详情",
+    subject + " 官方 说明书 PDF",
+    subject + " 售后 支持 使用说明",
+    subject + " 使用方法 注意事项",
+    subject + " 型号 参数 规格",
+    subject + " 商品详情",
+    input.category ? subject + " " + input.category : "",
+    input.goal
+  ]).slice(0, 8);
 }
 
 function productIdentityTerms(input: {
@@ -177,6 +322,79 @@ export class ResearchService {
     private readonly mediaAnalyzer?: ResearchMediaAnalyzer
   ) {}
 
+  private async semanticRerankScores(input: {
+    projectId: string;
+    sources: WebResearchSource[];
+    identity: ResearchIdentity;
+    goal: string;
+  }): Promise<Map<string, { score: number; reason: string }>> {
+    if (
+      input.sources.length < 2 ||
+      !input.sources.some(
+        (source) => source.resultTitle || source.resultSnippet
+      )
+    ) {
+      return new Map();
+    }
+    const candidates = input.sources.slice(0, 20).map((source, index) => ({
+      candidateId: "candidate-" + index,
+      url: source.url,
+      title: source.resultTitle ?? "",
+      snippet: source.resultSnippet ?? "",
+      sourceType: source.sourceType
+    }));
+    const byId = new Map(
+      candidates.map((candidate, index) => [
+        candidate.candidateId,
+        input.sources[index]!
+      ])
+    );
+    try {
+      const generation = await generateStructuredJson(this.runtime, {
+        task:
+          "Rank public-search candidates by relevance to the user's exact product research goal.",
+        instructions: [
+          "Score only relevance, not factual truth.",
+          "Do not invent product claims.",
+          "A platform homepage or generic category page without product identity should score low.",
+          "Exact brand, product name and model matches should score higher.",
+          "Only return candidateId values from the supplied candidates."
+        ].join(" "),
+        input: {
+          goal: input.goal,
+          productIdentity: input.identity,
+          candidates
+        },
+        outputContract: {
+          candidates: [
+            {
+              candidateId: "candidate-id",
+              relevanceScore: "0..100",
+              reason: "short reason"
+            }
+          ]
+        },
+        context: {
+          projectId: input.projectId,
+          step: "RESEARCH"
+        }
+      });
+      const parsed = researchRerankSchema.parse(generation.data);
+      const scores = new Map<string, { score: number; reason: string }>();
+      for (const item of parsed.candidates) {
+        const source = byId.get(item.candidateId);
+        if (!source) continue;
+        scores.set(source.url, {
+          score: Math.round(item.relevanceScore),
+          reason: item.reason
+        });
+      }
+      return scores;
+    } catch {
+      return new Map();
+    }
+  }
+
   async startRun(input: {
     projectId: string;
     mode: ResearchMode;
@@ -198,6 +416,11 @@ export class ResearchService {
     let sourceUrls = input.sourceUrls.map(validateSourceUrl);
     const goal = input.goal.trim();
     const workspace = await this.productFlow.getWorkspace(input.projectId);
+    const identity: ResearchIdentity = {
+      productName: workspace?.productTruth?.productName,
+      brand: workspace?.productTruth?.brand,
+      category: workspace?.productTruth?.category
+    };
     if (mode === "DEEP") {
       const known = new Map(sourceUrls.map((item) => [item.url, item]));
       const previousRuns = await this.repo.listRuns(input.projectId);
@@ -272,6 +495,7 @@ export class ResearchService {
     }
 
     const discovered: WebResearchSource[] = [...sourceUrls];
+    let discoveryRounds: DiscoveryRoundAudit[] = [];
     let browserBlocked:
       | {
           blockerCode: string;
@@ -288,15 +512,84 @@ export class ResearchService {
         queries
       });
       if (browser.status === "READY") {
-        discovered.push(...browser.sources);
-        if (browser.browserState) {
-          run = await this.repo.updateRun(run.id, {
-            browserState: {
-              ...browser.browserState,
-              lastCheckedAt: new Date().toISOString()
-            }
+        const semanticScores = await this.semanticRerankScores({
+          projectId: input.projectId,
+          sources: browser.sources,
+          identity,
+          goal
+        });
+        const selection = discoveredSourceSelection({
+          sources: browser.sources,
+          identity,
+          round: 1,
+          queries,
+          semanticScores
+        });
+        discoveryRounds = [selection.audit];
+        discovered.push(...selection.selected);
+        let effectiveBrowserState = browser.browserState;
+        if (selection.audit.acceptedCount === 0) {
+          const recoveryQueries = recoveryDeepQueries({
+            goal,
+            productName: identity.productName,
+            brand: identity.brand,
+            category: identity.category
           });
+          if (recoveryQueries.length) {
+            const retry = await this.browserProvider.discover({
+              projectId: input.projectId,
+              goal,
+              queries: recoveryQueries
+            });
+            if (retry.status === "READY") {
+              const retrySemanticScores = await this.semanticRerankScores({
+                projectId: input.projectId,
+                sources: retry.sources,
+                identity,
+                goal
+              });
+              const retrySelection = discoveredSourceSelection({
+                sources: retry.sources,
+                identity,
+                round: 2,
+                queries: recoveryQueries,
+                semanticScores: retrySemanticScores
+              });
+              discoveryRounds.push(retrySelection.audit);
+              discovered.push(...retrySelection.selected);
+              effectiveBrowserState =
+                retry.browserState ?? effectiveBrowserState;
+            } else if (selection.selected.length === 0) {
+              browserBlocked = {
+                blockerCode: retry.blockerCode,
+                message: retry.message,
+                requiredUserAction: retry.requiredUserAction,
+                browserState: {
+                  provider:
+                    retry.browserState?.provider ??
+                    browser.browserState?.provider ??
+                    this.browserProvider.id,
+                  ...(retry.browserState?.resumeToken
+                    ? { resumeToken: retry.browserState.resumeToken }
+                    : {}),
+                  lastCheckedAt: new Date().toISOString(),
+                  discoveryRounds
+                }
+              };
+            }
+          }
         }
+        run = await this.repo.updateRun(run.id, {
+          browserState: {
+            provider:
+              effectiveBrowserState?.provider ?? this.browserProvider.id,
+            ...(effectiveBrowserState?.resumeToken
+              ? { resumeToken: effectiveBrowserState.resumeToken }
+              : {}),
+            lastCheckedAt: new Date().toISOString(),
+            discoveryRounds
+          }
+        });
       } else {
         browserBlocked = {
           blockerCode: browser.blockerCode,
@@ -323,24 +616,47 @@ export class ResearchService {
     }
 
     for (const source of deduped.values()) {
+      const discoveryAudit = discoveryRounds
+        .flatMap((round) => round.candidates)
+        .find((candidate) => candidate.url === source.url);
       try {
         const doc = await this.webProvider.fetchSource(source);
+        const fetchedIdentity =
+          workspace?.productTruth && !trustedSourceUrls.has(source.url)
+            ? fetchedDocumentMatchesIdentity({
+                finalUrl: doc.finalUrl,
+                title: doc.title,
+                text: doc.text,
+                identity
+              })
+            : undefined;
         if (
           mode === "DEEP" &&
           !trustedSourceUrls.has(source.url) &&
           (source.sourceType === "OFFICIAL" ||
             source.sourceType === "PUBLIC_PRODUCT" ||
-            source.sourceType === "INDUSTRY") &&
+            source.sourceType === "INDUSTRY" ||
+            source.sourceType === "PLATFORM") &&
           workspace?.productTruth &&
-          !documentMatchesProduct(doc, {
-            productName: workspace.productTruth.productName,
-            brand: workspace.productTruth.brand
-          })
+          fetchedIdentity &&
+          !fetchedIdentity.matched
         ) {
+          if (discoveryAudit) {
+            discoveryAudit.fetchedIdentityScore = fetchedIdentity.score;
+            discoveryAudit.fetchedIdentityMatched = false;
+            discoveryAudit.fetchOutcome = "REJECTED";
+            discoveryAudit.reasons.push(
+              "抓取后正文仍未命中当前产品身份，未进入 Evidence"
+            );
+          }
           fetchFailures.push(
             source.url + "：来源正文与当前产品身份不匹配，已跳过"
           );
           continue;
+        }
+        if (discoveryAudit && fetchedIdentity) {
+          discoveryAudit.fetchedIdentityScore = fetchedIdentity.score;
+          discoveryAudit.fetchedIdentityMatched = fetchedIdentity.matched;
         }
         const createdAt = new Date().toISOString();
         const item = await this.repo.createEvidence({
@@ -360,6 +676,7 @@ export class ResearchService {
           createdAt
         });
         evidence.push(item);
+        if (discoveryAudit) discoveryAudit.fetchOutcome = "EVIDENCE";
 
         if (
           mode === "DEEP" &&
@@ -387,6 +704,17 @@ export class ResearchService {
             ...media.failures.map((message) => "媒体分析：" + message)
           );
           for (const analysis of media.analyses) {
+            if (
+              analysis.mediaContext.productIdentityMatch &&
+              analysis.mediaContext.productIdentityMatch !== "CONFIRMED"
+            ) {
+              fetchFailures.push(
+                "媒体分析：" +
+                  analysis.sourceUrl +
+                  " 产品身份未确认，未进入主 Evidence"
+              );
+              continue;
+            }
             const mediaEvidence = await this.repo.createEvidence({
               id: randomUUID(),
               projectId: input.projectId,
@@ -410,8 +738,19 @@ export class ResearchService {
       } catch (error) {
         const message =
           error instanceof Error ? error.message : String(error);
+        if (discoveryAudit) discoveryAudit.fetchOutcome = "FAILED";
         fetchFailures.push(source.url + "：" + message);
       }
+    }
+
+    if (discoveryRounds.length && run.browserState) {
+      run = await this.repo.updateRun(run.id, {
+        browserState: {
+          ...run.browserState,
+          lastCheckedAt: new Date().toISOString(),
+          discoveryRounds
+        }
+      });
     }
 
     let brief: ResearchBrief | undefined;
@@ -494,7 +833,10 @@ export class ResearchService {
             : run.browserState?.resumeToken
               ? { resumeToken: run.browserState.resumeToken }
               : {}),
-          lastCheckedAt: new Date().toISOString()
+          lastCheckedAt: new Date().toISOString(),
+          ...(run.browserState?.discoveryRounds
+            ? { discoveryRounds: run.browserState.discoveryRounds }
+            : {})
         }
       });
       return {
@@ -507,15 +849,76 @@ export class ResearchService {
     }
 
     const workspace = await this.productFlow.getWorkspace(run.projectId);
+    const identity: ResearchIdentity = {
+      productName: workspace?.productTruth?.productName,
+      brand: workspace?.productTruth?.brand,
+      category: workspace?.productTruth?.category
+    };
+    const semanticScores = await this.semanticRerankScores({
+      projectId: run.projectId,
+      sources: result.sources,
+      identity,
+      goal: run.goal
+    });
+    const previousRounds = run.browserState?.discoveryRounds ?? [];
+    const selection = discoveredSourceSelection({
+      sources: result.sources,
+      identity,
+      round: previousRounds.length + 1,
+      queries: run.queries,
+      semanticScores
+    });
+    const discoveryRounds = [...previousRounds, selection.audit];
+    const trustedSourceUrls = new Set(
+      run.sourceUrls.map((item) => item.url)
+    );
     const existing = await this.repo.listEvidence(run.id);
     const existingUrls = new Set(
       existing.map((item) => item.sourceUrl)
     );
     const fetchFailures: string[] = [];
-    for (const source of result.sources) {
+    for (const source of selection.selected) {
       if (existingUrls.has(source.url)) continue;
+      const discoveryAudit = selection.audit.candidates.find(
+        (candidate) => candidate.url === source.url
+      );
       try {
         const doc = await this.webProvider.fetchSource(source);
+        const fetchedIdentity =
+          workspace?.productTruth && !trustedSourceUrls.has(source.url)
+            ? fetchedDocumentMatchesIdentity({
+                finalUrl: doc.finalUrl,
+                title: doc.title,
+                text: doc.text,
+                identity
+              })
+            : undefined;
+        if (
+          !trustedSourceUrls.has(source.url) &&
+          (source.sourceType === "OFFICIAL" ||
+            source.sourceType === "PUBLIC_PRODUCT" ||
+            source.sourceType === "INDUSTRY" ||
+            source.sourceType === "PLATFORM") &&
+          fetchedIdentity &&
+          !fetchedIdentity.matched
+        ) {
+          if (discoveryAudit) {
+            discoveryAudit.fetchedIdentityScore = fetchedIdentity.score;
+            discoveryAudit.fetchedIdentityMatched = false;
+            discoveryAudit.fetchOutcome = "REJECTED";
+            discoveryAudit.reasons.push(
+              "恢复后抓取正文仍未命中当前产品身份，未进入 Evidence"
+            );
+          }
+          fetchFailures.push(
+            source.url + "：来源正文与当前产品身份不匹配，已跳过"
+          );
+          continue;
+        }
+        if (discoveryAudit && fetchedIdentity) {
+          discoveryAudit.fetchedIdentityScore = fetchedIdentity.score;
+          discoveryAudit.fetchedIdentityMatched = fetchedIdentity.matched;
+        }
         await this.repo.createEvidence({
           id: randomUUID(),
           projectId: run.projectId,
@@ -532,6 +935,7 @@ export class ResearchService {
           status: "ACTIVE",
           createdAt: new Date().toISOString()
         });
+        if (discoveryAudit) discoveryAudit.fetchOutcome = "EVIDENCE";
         if (this.mediaAnalyzer && doc.media?.length) {
           const media = await this.mediaAnalyzer.analyze({
             projectId: run.projectId,
@@ -554,6 +958,17 @@ export class ResearchService {
             ...media.failures.map((message) => "媒体分析：" + message)
           );
           for (const analysis of media.analyses) {
+            if (
+              analysis.mediaContext.productIdentityMatch &&
+              analysis.mediaContext.productIdentityMatch !== "CONFIRMED"
+            ) {
+              fetchFailures.push(
+                "媒体分析：" +
+                  analysis.sourceUrl +
+                  " 产品身份未确认，未进入主 Evidence"
+              );
+              continue;
+            }
             await this.repo.createEvidence({
               id: randomUUID(),
               projectId: run.projectId,
@@ -574,6 +989,7 @@ export class ResearchService {
           }
         }
       } catch (error) {
+        if (discoveryAudit) discoveryAudit.fetchOutcome = "FAILED";
         fetchFailures.push(
           source.url +
             "：" +
@@ -597,7 +1013,8 @@ export class ResearchService {
         ...(result.browserState?.resumeToken
           ? { resumeToken: result.browserState.resumeToken }
           : {}),
-        lastCheckedAt: new Date().toISOString()
+        lastCheckedAt: new Date().toISOString(),
+        discoveryRounds
       }
     });
     return {

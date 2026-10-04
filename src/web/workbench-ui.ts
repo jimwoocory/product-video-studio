@@ -589,6 +589,60 @@ export function renderResearchPage(input: {
           </section>`
       : "";
 
+  const discoveryRounds = latestRun?.browserState?.discoveryRounds ?? [];
+  const discoveryCandidates = discoveryRounds.flatMap(
+    (round) => round.candidates
+  );
+  const rejectedDiscoveryCandidates = discoveryCandidates.filter(
+    (candidate) =>
+      candidate.decision === "REJECT" ||
+      candidate.fetchOutcome === "REJECTED"
+  );
+  const failedDiscoveryCandidates = discoveryCandidates.filter(
+    (candidate) => candidate.fetchOutcome === "FAILED"
+  );
+  const evidenceDiscoveryCandidates = discoveryCandidates.filter(
+    (candidate) => candidate.fetchOutcome === "EVIDENCE"
+  );
+  const discoveryFetchedCount = discoveryRounds.reduce(
+    (sum, round) => sum + round.fetchedCount,
+    0
+  );
+  const discoveryQualityHtml = discoveryRounds.length
+    ? '<section class="card"><div class="head"><div><h3>搜索质量与淘汰记录</h3>' +
+      '<p class="muted">系统会先筛掉明显不相关候选，再抓取正文做第二次产品身份检查；证据不足时最多自动加强搜索一次。</p>' +
+      '</div><span class="status">' + discoveryRounds.length + ' 轮</span></div>' +
+      '<div class="grid">' +
+      '<div class="card"><b>搜索候选</b><p>' + discoveryCandidates.length + '</p></div>' +
+      '<div class="card"><b>进入抓取</b><p>' + discoveryFetchedCount + '</p></div>' +
+      '<div class="card"><b>形成证据</b><p>' + evidenceDiscoveryCandidates.length + '</p></div>' +
+      '<div class="card"><b>淘汰 / 失败</b><p>' +
+        (rejectedDiscoveryCandidates.length + failedDiscoveryCandidates.length) +
+      '</p></div></div>' +
+      (rejectedDiscoveryCandidates.length
+        ? '<h4>典型淘汰原因</h4>' +
+          rejectedDiscoveryCandidates.slice(0, 8).map((candidate) =>
+            '<p><b>' + esc(candidate.title || candidate.url) + '</b><br>' +
+            '<span class="muted">' +
+              esc(candidate.reasons[candidate.reasons.length - 1] ?? "与当前产品相关性不足") +
+            '</span><span class="technical"><br>score=' + candidate.finalScore +
+              (candidate.semanticScore !== undefined ? ' · semantic=' + candidate.semanticScore : '') +
+              ' · ' + esc(candidate.url) +
+            '</span></p>'
+          ).join("")
+        : '<p class="muted">本轮没有记录到被淘汰的候选。</p>') +
+      '<details class="technical"><summary>每轮搜索审计</summary>' +
+      discoveryRounds.map((round) =>
+        '<p>第 ' + round.round + ' 轮 · 候选 ' + round.candidateCount +
+        ' · ACCEPT ' + round.acceptedCount +
+        ' · HOLD ' + round.heldCount +
+        ' · REJECT ' + round.rejectedCount +
+        ' · 抓取 ' + round.fetchedCount +
+        '<br>' + esc(round.queries.join(" / ")) + '</p>'
+      ).join("") +
+      '</details></section>'
+    : "";
+
   const evidenceHtml = evidence.length
     ? evidence
         .map(
@@ -711,6 +765,7 @@ export function renderResearchPage(input: {
       </form>
     </section>
     ${blockerHtml}
+    ${discoveryQualityHtml}
     <section><h2>研究证据</h2><div class="grid">${evidenceHtml}</div></section>
     ${briefHtml}
     ${historyHtml}

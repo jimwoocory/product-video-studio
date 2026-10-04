@@ -38,6 +38,10 @@ test("PublicSearchResearchProvider discovers and classifies public search result
   assert.equal(result.sources.length, 2);
   assert.equal(result.sources[0]?.url, "https://tonemay.example.com/manual");
   assert.equal(result.sources[0]?.sourceType, "OFFICIAL");
+  assert.equal(result.sources[0]?.resultTitle, "Manual");
+  assert.equal(result.sources[0]?.discoveryEngine, "bing");
+  assert.equal(result.sources[0]?.discoveryRank, 1);
+  assert.equal(result.sources[0]?.discoveryQuery, "Tonemay Q8 官网 说明书");
 });
 
 class NotConfiguredProvider implements BrowserResearchProvider {

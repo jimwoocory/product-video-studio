@@ -257,6 +257,47 @@ class EvidenceBoundRuntime implements StructuredAiRuntime {
   }
 }
 
+class RerankAwareRuntime implements StructuredAiRuntime {
+  readonly id = "rerank-runtime";
+  readonly version = "1";
+
+  async generateJson(request: StructuredAiRequest): Promise<unknown> {
+    if (request.task.startsWith("Rank public-search candidates")) {
+      const candidates = (
+        request.input as {
+          candidates: Array<{ candidateId: string; url: string }>;
+        }
+      ).candidates;
+      return {
+        candidates: candidates.map((candidate) => ({
+          candidateId: candidate.candidateId,
+          relevanceScore: 100,
+          reason: "fixture semantic relevance"
+        }))
+      };
+    }
+    const evidence = (
+      request.input as { evidence: Array<{ id: string }> }
+    ).evidence;
+    return {
+      summary: "语义重排后的来源可用于研究。",
+      findings: evidence.length
+        ? [
+            {
+              statement: "相关来源已通过质量门禁。",
+              evidenceIds: [evidence[0]!.id],
+              confidence: "MEDIUM"
+            }
+          ]
+        : [],
+      candidateClaims: [],
+      usageRules: [],
+      contentOpportunities: [],
+      uncertainties: []
+    };
+  }
+}
+
 class UnsourcedRuntime implements StructuredAiRuntime {
   readonly id = "unsourced";
   readonly version = "1";
@@ -684,6 +725,221 @@ test("deep Research automatically expands product usage, wearing and precaution 
   assert.match(queries, /佩戴位置 佩戴方法 安装位置/);
   assert.match(queries, /注意事项 使用限制 防水 充电/);
   assert.match(queries, /功能 作用 使用场景/);
+});
+
+test("deep Research rejects unrelated platform homepage before fetch and persists discovery audit", async () => {
+  const projectId = "research-quality-gate";
+  const repo = new MemoryResearchRepository();
+  const { flow } = makeProductFlow(projectId);
+  const web = new MemoryWebResearchProvider({
+    "https://www.bilibili.com/":
+      "动画 游戏 音乐 热门视频，与 Test Product 无关。",
+    "https://support.example.com/test-product/manual":
+      "Test Product official manual. Feature one is documented for the current product."
+  });
+  const browser = new StaticBrowserProvider({
+    status: "READY",
+    sources: [
+      {
+        url: "https://www.bilibili.com/",
+        sourceType: "PLATFORM",
+        discoveryQuery: "Test Product 评测",
+        discoveryEngine: "bing",
+        discoveryRank: 1,
+        resultTitle: "哔哩哔哩首页",
+        resultSnippet: "动画 游戏 音乐 热门视频"
+      },
+      {
+        url: "https://support.example.com/test-product/manual",
+        sourceType: "OFFICIAL",
+        discoveryQuery: "Test Product 官网 说明书",
+        discoveryEngine: "bing",
+        discoveryRank: 1,
+        resultTitle: "Test Product Official Manual",
+        resultSnippet: "Official support and usage guide for Test Product"
+      }
+    ],
+    browserState: { provider: "browser-test" }
+  });
+  const service = new ResearchService(
+    repo,
+    web,
+    browser,
+    new EvidenceBoundRuntime(),
+    flow
+  );
+
+  const result = await service.startRun({
+    projectId,
+    mode: "DEEP",
+    goal: "核实 Test Product 的公开资料",
+    sourceUrls: [],
+    queries: ["Test Product 评测"]
+  });
+
+  assert.equal(
+    web.seen.some((item) => item.url === "https://www.bilibili.com/"),
+    false
+  );
+  assert.equal(
+    web.seen.some(
+      (item) =>
+        item.url === "https://support.example.com/test-product/manual"
+    ),
+    true
+  );
+  assert.equal(
+    result.evidence.some((item) => item.sourceUrl === "https://www.bilibili.com/"),
+    false
+  );
+  const round = result.run.browserState?.discoveryRounds?.[0];
+  assert.ok(round);
+  assert.equal(round!.candidateCount, 2);
+  assert.equal(round!.rejectedCount, 1);
+  const rejected = round!.candidates.find(
+    (item) => item.url === "https://www.bilibili.com/"
+  );
+  assert.equal(rejected?.decision, "REJECT");
+  assert.equal(rejected?.selectedForFetch, false);
+  assert.ok(rejected?.reasons.some((item) => item.includes("平台首页")));
+});
+
+test("deep Research automatically retries with stronger recovery queries when round one has no accepted candidate", async () => {
+  const projectId = "research-quality-recovery";
+  const repo = new MemoryResearchRepository();
+  const { flow } = makeProductFlow(projectId);
+  const web = new MemoryWebResearchProvider({
+    "https://support.example.com/test-product/manual":
+      "Test Product official manual and usage instructions."
+  });
+  const browser = new StaticBrowserProvider(
+    {
+      status: "READY",
+      sources: [
+        {
+          url: "https://www.bilibili.com/",
+          sourceType: "PLATFORM",
+          discoveryQuery: "Test Product 评测",
+          discoveryEngine: "bing",
+          discoveryRank: 1,
+          resultTitle: "哔哩哔哩首页",
+          resultSnippet: "动画 游戏 音乐 热门"
+        }
+      ],
+      browserState: { provider: "browser-test" }
+    },
+    {
+      status: "READY",
+      sources: [
+        {
+          url: "https://support.example.com/test-product/manual",
+          sourceType: "OFFICIAL",
+          discoveryQuery: "Test Product 官方 说明书 PDF",
+          discoveryEngine: "bing",
+          discoveryRank: 1,
+          resultTitle: "Test Product Official Manual",
+          resultSnippet: "Official manual for Test Product"
+        }
+      ],
+      browserState: { provider: "browser-test" }
+    }
+  );
+  const service = new ResearchService(
+    repo,
+    web,
+    browser,
+    new EvidenceBoundRuntime(),
+    flow
+  );
+
+  const result = await service.startRun({
+    projectId,
+    mode: "DEEP",
+    goal: "核实 Test Product 使用方法",
+    sourceUrls: [],
+    queries: ["Test Product 评测"]
+  });
+
+  assert.equal(browser.calls, 2);
+  assert.match(browser.inputs[1]?.queries.join("\n") ?? "", /官方 说明书 PDF/);
+  assert.equal(result.run.browserState?.discoveryRounds?.length, 2);
+  assert.equal(result.run.browserState?.discoveryRounds?.[0]?.acceptedCount, 0);
+  assert.equal(result.run.browserState?.discoveryRounds?.[1]?.acceptedCount, 1);
+  assert.ok(
+    result.evidence.some(
+      (item) =>
+        item.sourceUrl === "https://support.example.com/test-product/manual"
+    )
+  );
+});
+
+test("semantic rerank can promote a relevant HOLD candidate but never rescues a hard-rejected platform homepage", async () => {
+  const projectId = "research-semantic-rerank";
+  const repo = new MemoryResearchRepository();
+  const { flow } = makeProductFlow(projectId);
+  const web = new MemoryWebResearchProvider({
+    "https://example.com/test-product-review":
+      "Test Product review and usage notes for the current product."
+  });
+  const browser = new StaticBrowserProvider({
+    status: "READY",
+    sources: [
+      {
+        url: "https://www.bilibili.com/",
+        sourceType: "PLATFORM",
+        discoveryQuery: "Test Product 评测",
+        discoveryEngine: "bing",
+        discoveryRank: 1,
+        resultTitle: "哔哩哔哩首页",
+        resultSnippet: "动画 游戏 音乐 热门"
+      },
+      {
+        url: "https://example.com/test-product-review",
+        sourceType: "INDUSTRY",
+        discoveryQuery: "Test Product 评测",
+        discoveryEngine: "bing",
+        discoveryRank: 2,
+        resultTitle: "Test Product 使用评测",
+        resultSnippet: "Test Product 日常使用体验"
+      }
+    ],
+    browserState: { provider: "browser-test" }
+  });
+  const service = new ResearchService(
+    repo,
+    web,
+    browser,
+    new RerankAwareRuntime(),
+    flow
+  );
+
+  const result = await service.startRun({
+    projectId,
+    mode: "DEEP",
+    goal: "核实 Test Product 使用体验",
+    sourceUrls: [],
+    queries: ["Test Product 评测"]
+  });
+
+  const round = result.run.browserState?.discoveryRounds?.[0];
+  assert.ok(round);
+  const platform = round!.candidates.find(
+    (item) => item.url === "https://www.bilibili.com/"
+  );
+  const review = round!.candidates.find(
+    (item) => item.url === "https://example.com/test-product-review"
+  );
+  assert.equal(platform?.semanticScore, 100);
+  assert.equal(platform?.decision, "REJECT");
+  assert.equal(platform?.selectedForFetch, false);
+  assert.equal(review?.semanticScore, 100);
+  assert.equal(review?.decision, "ACCEPT");
+  assert.equal(review?.selectedForFetch, true);
+  assert.ok(
+    result.evidence.some(
+      (item) => item.sourceUrl === "https://example.com/test-product-review"
+    )
+  );
 });
 
 test("research usage rule enters Product Truth as UNVERIFIED and becomes a confirmed hard rule only after user confirmation", async () => {

@@ -16,6 +16,24 @@ function decodeHtml(value: string): string {
     .replaceAll("&gt;", ">");
 }
 
+function stripHtml(value: string): string {
+  return decodeHtml(
+    value
+      .replace(/<script[\s\S]*?<\/script>/gi, " ")
+      .replace(/<style[\s\S]*?<\/style>/gi, " ")
+      .replace(/<[^>]+>/g, " ")
+  )
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+type SearchResultCandidate = {
+  url: string;
+  title?: string;
+  snippet?: string;
+  rank: number;
+};
+
 function normalizeResultUrl(raw: string, engine: "bing" | "duck"): string | null {
   let value = decodeHtml(raw.trim());
   try {
@@ -120,20 +138,61 @@ function classifySource(query: string, url: string): WebResearchSource["sourceTy
   return "PUBLIC_PRODUCT";
 }
 
-function extractBing(html: string): string[] {
-  const scoped = [...html.matchAll(/<li[^>]*class=["'][^"']*\bb_algo\b[^"']*["'][^>]*>([\s\S]*?)<\/li>/gi)]
-    .map((item) => item[1] ?? "")
-    .join("\n");
-  const source = scoped || html;
-  return [...source.matchAll(/<a\b[^>]*href=["']([^"']+)["'][^>]*>/gi)]
-    .map((item) => normalizeResultUrl(item[1] ?? "", "bing"))
-    .filter((item): item is string => Boolean(item));
+function extractBing(html: string): SearchResultCandidate[] {
+  const blocks = [
+    ...html.matchAll(
+      /<li[^>]*class=["'][^"']*\bb_algo\b[^"']*["'][^>]*>([\s\S]*?)<\/li>/gi
+    )
+  ];
+  const sourceBlocks = blocks.length
+    ? blocks.map((item) => item[1] ?? "")
+    : [html];
+  const results: SearchResultCandidate[] = [];
+  for (const block of sourceBlocks) {
+    const anchor = block.match(
+      /<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/i
+    );
+    if (!anchor) continue;
+    const url = normalizeResultUrl(anchor[1] ?? "", "bing");
+    if (!url) continue;
+    const snippetMatch = block.match(/<p\b[^>]*>([\s\S]*?)<\/p>/i);
+    results.push({
+      url,
+      title: stripHtml(anchor[2] ?? ""),
+      ...(snippetMatch
+        ? { snippet: stripHtml(snippetMatch[1] ?? "") }
+        : {}),
+      rank: results.length + 1
+    });
+  }
+  return results;
 }
 
-function extractDuck(html: string): string[] {
-  return [...html.matchAll(/<a\b[^>]*class=["'][^"']*result__a[^"']*["'][^>]*href=["']([^"']+)["'][^>]*>/gi)]
-    .map((item) => normalizeResultUrl(item[1] ?? "", "duck"))
-    .filter((item): item is string => Boolean(item));
+function extractDuck(html: string): SearchResultCandidate[] {
+  const matches = [
+    ...html.matchAll(
+      /<a\b[^>]*class=["'][^"']*result__a[^"']*["'][^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi
+    )
+  ];
+  const results: SearchResultCandidate[] = [];
+  for (const item of matches) {
+    const url = normalizeResultUrl(item[1] ?? "", "duck");
+    if (!url) continue;
+    const start = item.index ?? 0;
+    const tail = html.slice(start, start + 2500);
+    const snippetMatch = tail.match(
+      /<a\b[^>]*class=["'][^"']*result__snippet[^"']*["'][^>]*>([\s\S]*?)<\/a>|<div\b[^>]*class=["'][^"']*result__snippet[^"']*["'][^>]*>([\s\S]*?)<\/div>/i
+    );
+    results.push({
+      url,
+      title: stripHtml(item[2] ?? ""),
+      ...(snippetMatch
+        ? { snippet: stripHtml(snippetMatch[1] ?? snippetMatch[2] ?? "") }
+        : {}),
+      rank: results.length + 1
+    });
+  }
+  return results;
 }
 
 export class PublicSearchResearchProvider implements BrowserResearchProvider {
@@ -154,7 +213,7 @@ export class PublicSearchResearchProvider implements BrowserResearchProvider {
   private async search(
     query: string,
     engine: "bing" | "duck"
-  ): Promise<string[]> {
+  ): Promise<SearchResultCandidate[]> {
     const fetcher = this.options.fetcher ?? fetch;
     const base =
       engine === "bing"
@@ -204,13 +263,17 @@ export class PublicSearchResearchProvider implements BrowserResearchProvider {
     const sources: WebResearchSource[] = [];
 
     for (const query of queries) {
-      let urls = await this.search(query, "duck");
-      if (!urls.length) urls = await this.search(query, "bing");
-      for (const candidate of urls.slice(0, maxEach)) {
+      let engine: "duck" | "bing" = "duck";
+      let candidates = await this.search(query, engine);
+      if (!candidates.length) {
+        engine = "bing";
+        candidates = await this.search(query, engine);
+      }
+      for (const candidate of candidates.slice(0, maxEach)) {
         if (sources.length >= maxTotal) break;
         let parsed: URL;
         try {
-          parsed = new URL(candidate);
+          parsed = new URL(candidate.url);
         } catch {
           continue;
         }
@@ -225,7 +288,12 @@ export class PublicSearchResearchProvider implements BrowserResearchProvider {
         seen.add(key);
         sources.push({
           url: key,
-          sourceType: classifySource(query, key)
+          sourceType: classifySource(query, key),
+          discoveryQuery: query,
+          discoveryEngine: engine,
+          discoveryRank: candidate.rank,
+          ...(candidate.title ? { resultTitle: candidate.title } : {}),
+          ...(candidate.snippet ? { resultSnippet: candidate.snippet } : {})
         });
       }
       if (sources.length >= maxTotal) break;

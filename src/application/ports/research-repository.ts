@@ -107,6 +107,32 @@ export type ResearchBrowserState = {
   provider: string;
   resumeToken?: string;
   lastCheckedAt: string;
+  discoveryRounds?: Array<{
+    round: number;
+    queries: string[];
+    candidateCount: number;
+    acceptedCount: number;
+    heldCount: number;
+    rejectedCount: number;
+    fetchedCount: number;
+    candidates: Array<{
+      url: string;
+      title?: string;
+      sourceType: ResearchEvidenceSourceType;
+      query?: string;
+      engine?: "bing" | "duck" | "external";
+      rank?: number;
+      deterministicScore: number;
+      semanticScore?: number;
+      finalScore: number;
+      decision: "ACCEPT" | "HOLD" | "REJECT";
+      selectedForFetch: boolean;
+      reasons: string[];
+      fetchedIdentityScore?: number;
+      fetchedIdentityMatched?: boolean;
+      fetchOutcome?: "EVIDENCE" | "REJECTED" | "FAILED";
+    }>;
+  }>;
 };
 
 export type ResearchRun = {

@@ -5,6 +5,11 @@ import type {
 export type WebResearchSource = {
   url: string;
   sourceType: ResearchEvidenceSourceType;
+  discoveryQuery?: string;
+  discoveryEngine?: "bing" | "duck" | "external";
+  discoveryRank?: number;
+  resultTitle?: string;
+  resultSnippet?: string;
 };
 
 export type WebResearchMedia = {
