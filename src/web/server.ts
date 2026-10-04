@@ -67,6 +67,7 @@ import { GenerationExecutionService } from "../application/services/generation-e
 import { ReviewService } from "../application/services/review-service.js";
 import { ProjectSnapshotService } from "../application/services/project-snapshot.js";
 import { RecoveryService } from "../application/services/recovery-service.js";
+import { resolveWorkflowNavigation } from "../application/services/workflow-navigation.js";
 import { FinalAssemblyService } from "../application/services/final-assembly-service.js";
 import {
   TimelineService,
@@ -3405,13 +3406,21 @@ export function createAppServer(
         if (!workspace) {
           return json(res, 404, { error: "PROJECT_NOT_FOUND" });
         }
-        const researchData = await deps.research.pageData(projectId);
+        const [researchData, blockers] = await Promise.all([
+          deps.research.pageData(projectId),
+          deps.workflow.listOpenBlockers(projectId)
+        ]);
         return html(
           res,
           200,
           renderResearchPage({
             workspace,
-            ...researchData
+            ...researchData,
+            navigation: resolveWorkflowNavigation({
+              project: workspace.project,
+              currentPage: "research",
+              blockers
+            })
           })
         );
       }
@@ -3572,6 +3581,13 @@ export function createAppServer(
             receipts: publishAudit.receipts
           };
         }
+        const navigation = resolveWorkflowNavigation({
+          project: workspace.project,
+          currentPage: kind,
+          blockers,
+          ...(timeline ? { timeline } : {}),
+          ...(finalAssembly ? { finalAssemblyStatus: finalAssembly.status } : {})
+        });
 
         return html(
           res,
@@ -3579,6 +3595,7 @@ export function createAppServer(
           renderProjectPage({
             kind,
             workspace,
+            navigation,
             ...(productInput ? { productInput } : {}),
             blockers,
             attempts,

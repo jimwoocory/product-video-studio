@@ -47,6 +47,12 @@ import type {
 } from "../application/ports/research-repository.js";
 import { renderTimelineEditor } from "./timeline-ui.js";
 import { renderPublishCenter } from "./publish-ui.js";
+import {
+  resolveWorkflowNavigation,
+  workflowPageTaskText,
+  type WorkflowNavigationState,
+  type WorkflowPageKind
+} from "../application/services/workflow-navigation.js";
 
 type PageKind =
   | "product"
@@ -281,23 +287,24 @@ function currentActionText(project: Project): string {
   return labels[project.status];
 }
 
+function pageKindForHeader(pageTitle: string): WorkflowPageKind | undefined {
+  const byTitle: Record<string, WorkflowPageKind> = {
+    "产品输入": "product",
+    "联网研究 / 证据": "research",
+    "产品事实确认": "truth",
+    "创意方案": "creative",
+    "脚本确认": "script",
+    "导演分镜": "director",
+    "视频生成": "generate",
+    "视频剪辑": "timeline",
+    "成片与发布": "final"
+  };
+  return byTitle[pageTitle];
+}
+
 function currentActionForPage(project: Project, pageTitle: string): string {
-  if (pageTitle === "视频剪辑") {
-    return "调整并确认视频剪辑方案";
-  }
-  if (pageTitle === "成片与发布") {
-    if (project.status === "FINAL_REVIEW") return "播放并确认最终成片";
-    if (
-      project.status === "READY_TO_PUBLISH" ||
-      project.status === "PUBLISHING" ||
-      project.status === "PUBLISHED" ||
-      project.status === "COMPLETED"
-    ) {
-      return "选择可用发布方式并核对发布状态";
-    }
-    return "渲染并确认最终成片";
-  }
-  return currentActionText(project);
+  const page = pageKindForHeader(pageTitle);
+  return page ? workflowPageTaskText(page, project) : currentActionText(project);
 }
 
 function staleImpact(project?: Project): string {
@@ -317,60 +324,13 @@ function staleImpact(project?: Project): string {
   return "修改任何上游当前版本都会使绑定的下游结果失效；历史记录仍会保留为只读。";
 }
 
-function workflowProgressIndex(project: Project): number {
-  const indexByStatus: Record<Project["status"], number> = {
-    DRAFT: 1,
-    PRODUCT_TRUTH_REVIEW: 3,
-    CREATIVE_REVIEW: 4,
-    SCRIPT_REVIEW: 5,
-    DIRECTOR_REVIEW: 6,
-    READY_TO_GENERATE: 7,
-    GENERATING: 7,
-    GENERATION_REVIEW: 7,
-    READY_TO_ASSEMBLE: 8,
-    FINAL_REVIEW: 9,
-    READY_TO_PUBLISH: 9,
-    PUBLISHING: 9,
-    PUBLISHED: 9,
-    COMPLETED: 9,
-    FAILED: 1
-  };
-  return indexByStatus[project.status];
-}
-
-function recommendedNextStep(project: Project, pageTitle?: string): string {
-  if (pageTitle === "视频剪辑") {
-    return "确认剪辑方案后进入成片与发布";
-  }
-  if (pageTitle === "成片与发布") {
-    if (project.status === "FINAL_REVIEW") return "播放并确认当前最终成片";
-    if (project.status === "READY_TO_PUBLISH") return "下载成片或选择当前可用发布方式";
-    if (project.status === "PUBLISHING") return "完成发布交接，并等待可信平台回执";
-    if (project.status === "PUBLISHED") return "平台可信回执已确认发布";
-    if (project.status === "COMPLETED") return "项目已完成，可继续下载归档";
-    return "先完成最终渲染与成片确认";
-  }
-  const labels: Record<Project["status"], string> = {
-    DRAFT: "联网研究（可选），然后确认产品事实",
-    PRODUCT_TRUTH_REVIEW: "确认产品事实后进入创意方案",
-    CREATIVE_REVIEW: "选择创意方案后进入脚本",
-    SCRIPT_REVIEW: "确认脚本后进入导演分镜",
-    DIRECTOR_REVIEW: "确认导演分镜后进入视频生成",
-    READY_TO_GENERATE: "完成生成前检查并开始视频生成",
-    GENERATING: "等待生成完成并审片",
-    GENERATION_REVIEW: "完成采用/跳过后进入视频剪辑",
-    READY_TO_ASSEMBLE: "进入视频剪辑",
-    FINAL_REVIEW: "确认最终成片",
-    READY_TO_PUBLISH: "选择发布方式",
-    PUBLISHING: "完成发布交接",
-    PUBLISHED: "核对发布结果",
-    COMPLETED: "项目已完成",
-    FAILED: "处理失败原因后恢复流程"
-  };
-  return labels[project.status];
-}
-
-function layout(title: string, body: string, project?: Project, blockers: WorkflowBlocker[] = []): string {
+function layout(
+  title: string,
+  body: string,
+  project?: Project,
+  blockers: WorkflowBlocker[] = [],
+  navigation?: WorkflowNavigationState
+): string {
   const blockerHtml = blockers.length
     ? `<section class="blocker"><strong>需要你处理</strong><div>${blockers
         .map(
@@ -379,37 +339,39 @@ function layout(title: string, body: string, project?: Project, blockers: Workfl
         )
         .join("")}</div></section>`
     : "";
-  const nav = project
+  const navigationState = project
+    ? navigation ??
+      resolveWorkflowNavigation({
+        project,
+        currentPage: null,
+        blockers
+      })
+    : undefined;
+  const nav = project && navigationState
     ? (() => {
-        const progressIndex = workflowProgressIndex(project);
-        const mainSteps = [
-          { index: 1, title: "产品输入", href: `/projects/${project.id}/product` },
-          { index: 2, title: "联网研究", href: `/projects/${project.id}/research`, optional: true },
-          { index: 3, title: "产品事实", href: `/projects/${project.id}/truth` },
-          { index: 4, title: "创意方案", href: `/projects/${project.id}/creative` },
-          { index: 5, title: "脚本", href: `/projects/${project.id}/script` },
-          { index: 6, title: "导演分镜", href: `/projects/${project.id}/director` },
-          { index: 7, title: "视频生成", href: `/projects/${project.id}/generate` },
-          { index: 8, title: "视频剪辑", href: `/projects/${project.id}/timeline` },
-          { index: 9, title: "成片与发布", href: `/projects/${project.id}/final` }
-        ];
-        const pageIndex = mainSteps.find((step) => step.title === title)?.index ?? -1;
-        const nextIndex = pageIndex !== progressIndex ? progressIndex : -1;
-        const mainHtml = mainSteps.map((step) => {
-          const current = title === step.title;
-          const done = !step.optional && !current && step.index < progressIndex;
-          const next = !current && step.index === nextIndex;
-          const stateClass = current ? "step-current" : done ? "step-done" : next ? "step-next" : step.optional ? "step-optional" : "";
-          const badge = current ? "当前" : done ? "完成" : next ? "下一步" : step.optional ? "可选" : "";
-          return `<a class="step ${stateClass}" href="${step.href}"><span>${step.index} ${step.title}</span>${badge ? `<small>${badge}</small>` : ""}</a>`;
+        const mainHtml = navigationState.steps.map((step) => {
+          const stateClass =
+            step.state === "CURRENT"
+              ? "step-current"
+              : step.state === "COMPLETE"
+                ? "step-done"
+                : step.state === "RESUME"
+                  ? "step-next"
+                  : step.state === "OPTIONAL"
+                    ? "step-optional"
+                    : "";
+          return `<a class="step ${stateClass}" href="${esc(step.href)}"><span>${step.index} ${esc(step.title)}</span>${step.badge ? `<small>${esc(step.badge)}</small>` : ""}</a>`;
         }).join("");
         const tools = [
           { title: "参考视频", href: `/projects/${project.id}/reference-video` },
           { title: "智能生成", href: `/projects/${project.id}/agent` },
           { title: "模型设置", href: `/projects/${project.id}/models` }
         ].map((tool) => `<a class="tool-link ${title === tool.title ? "tool-current" : ""}" href="${tool.href}">${tool.title}</a>`).join("");
+        const resumeStep = navigationState.steps.find(
+          (step) => step.key === navigationState.globalResumeStep
+        );
         return `<section class="workflow-nav">
-          <div class="workflow-nav-head"><b>主流程</b><span class="muted">当前位置：${esc(title)} · 推荐下一步：${esc(recommendedNextStep(project, title))}</span></div>
+          <div class="workflow-nav-head"><b>主流程</b><div class="muted"><div>当前位置：${esc(title)} · 本页任务：${esc(navigationState.pageTaskText)}</div><div>继续主流程：<a href="${esc(navigationState.globalResumeHref)}">${esc(resumeStep?.title ?? "当前步骤")}</a> · ${esc(navigationState.globalResumeText)}</div></div></div>
           <nav class="steps main-steps">${mainHtml}</nav>
           <div class="workflow-tools"><span class="muted">辅助工具</span><nav class="tool-steps">${tools}</nav></div>
         </section>`;
@@ -596,6 +558,7 @@ export function renderResearchPage(input: {
   latestRun?: ResearchRun;
   evidence: ResearchEvidence[];
   brief?: ResearchBrief;
+  navigation?: WorkflowNavigationState;
 }): string {
   const { workspace, runs, latestRun, evidence, brief } = input;
   const mode = latestRun?.mode ?? "OFF";
@@ -789,7 +752,13 @@ document.querySelector('#research-claims-form')?.addEventListener('submit',async
   }catch(err){error.textContent=err.message||String(err);}
 });
 </script>`,
-    workspace.project
+    workspace.project,
+    [],
+    input.navigation ??
+      resolveWorkflowNavigation({
+        project: workspace.project,
+        currentPage: "research"
+      })
   );
 }
 
@@ -3176,6 +3145,7 @@ if(acceptFinal) acceptFinal.addEventListener('click',async()=>{
 export function renderProjectPage(input: {
   kind: PageKind;
   workspace: ProjectWorkspace;
+  navigation?: WorkflowNavigationState;
   productInput?: ProductInputSnapshot;
   blockers: WorkflowBlocker[];
   attempts: GenerationAttempt[];
@@ -3270,5 +3240,22 @@ export function renderProjectPage(input: {
             )
         )
       : blockers;
-  return layout(pageKindLabel[kind], body, workspace.project, pageBlockers);
+  const navigation =
+    input.navigation ??
+    resolveWorkflowNavigation({
+      project: workspace.project,
+      currentPage: kind,
+      blockers: pageBlockers,
+      ...(input.timeline ? { timeline: input.timeline } : {}),
+      ...(input.finalAssembly
+        ? { finalAssemblyStatus: input.finalAssembly.status }
+        : {})
+    });
+  return layout(
+    pageKindLabel[kind],
+    body,
+    workspace.project,
+    pageBlockers,
+    navigation
+  );
 }

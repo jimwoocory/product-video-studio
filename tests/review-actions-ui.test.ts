@@ -702,9 +702,10 @@ test("P1F-01 generation page exposes ordered workflow navigation and video-edit 
   assert.match(html, />参考视频<\/a>/);
   assert.match(html, />智能生成<\/a>/);
   assert.match(html, />模型设置<\/a>/);
-  assert.match(html, /当前位置：视频生成/);
-  assert.match(html, /8 视频剪辑<\/span><small>下一步<\/small>/);
-  assert.doesNotMatch(html, /9 成片与发布<\/span><small>下一步<\/small>/);
+  assert.match(html, /当前位置：视频生成 · 本页任务：查看已采用镜头与生成记录/);
+  assert.match(html, /继续主流程：<a href="\/projects\/project-1\/timeline">视频剪辑<\/a> · 调整并确认视频剪辑方案/);
+  assert.match(html, /8 视频剪辑<\/span><small>继续<\/small>/);
+  assert.doesNotMatch(html, /9 成片与发布<\/span><small>继续<\/small>/);
   assert.match(html, /id="enter-timeline" href="\/projects\/project-1\/timeline">进入视频剪辑/);
   assert.match(html, /id="standard-generation-config"/);
   assert.match(html, /id="standard-model"/);
