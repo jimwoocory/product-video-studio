@@ -41,6 +41,29 @@ export type TimelineTextInput = {
   fontScale?: number;
 };
 
+export type TimelineReadiness =
+  | {
+      allowed: true;
+      acceptedCount: number;
+      skippedCount: number;
+      unresolvedCount: number;
+      existingTimeline: boolean;
+    }
+  | {
+      allowed: false;
+      reasonCode:
+        | "TIMELINE_PLAN_MISSING"
+        | "TIMELINE_NO_ACCEPTED_VIDEO"
+        | "TIMELINE_DECISION_INCOMPLETE";
+      message: string;
+      requiredAction: string;
+      actionHref: string;
+      acceptedCount: number;
+      skippedCount: number;
+      unresolvedCount: number;
+      existingTimeline: false;
+    };
+
 export function timelineDecisionHash(input: {
   productionPlanHash: string;
   tracks: Timeline["tracks"];
@@ -108,6 +131,126 @@ export class TimelineService {
             item.status === "RECONCILED_SUCCEEDED")
       )
       .sort((a, b) => b.attemptNumber - a.attemptNumber)[0];
+  }
+
+
+  async readiness(projectId: string): Promise<TimelineReadiness> {
+    const workspace = await this.productFlow.getWorkspace(projectId);
+    if (!workspace?.productionPlan) {
+      return {
+        allowed: false,
+        reasonCode: "TIMELINE_PLAN_MISSING",
+        message: "还没有可用于剪辑的当前导演分镜。",
+        requiredAction: "先完成并确认导演分镜，再生成并审片。",
+        actionHref: `/projects/${projectId}/director`,
+        acceptedCount: 0,
+        skippedCount: 0,
+        unresolvedCount: 0,
+        existingTimeline: false
+      };
+    }
+
+    const latest = await this.timelines.latestTimeline(projectId);
+    if (
+      latest &&
+      latest.status !== "STALE" &&
+      latest.productionPlanHash === workspace.productionPlan.contentHash
+    ) {
+      return {
+        allowed: true,
+        acceptedCount: latest.clips.filter((clip) => !clip.deleted).length,
+        skippedCount: 0,
+        unresolvedCount: 0,
+        existingTimeline: true
+      };
+    }
+
+    const [attempts, decisions] = await Promise.all([
+      this.workflow.listGenerationAttempts(projectId),
+      this.review.listDecisions(projectId)
+    ]);
+    const clips = workspace.productionPlan.scenes.flatMap((scene) => scene.clips);
+    let acceptedCount = 0;
+    let skippedCount = 0;
+    let unresolvedCount = 0;
+
+    for (const clip of clips) {
+      const latestUsage = decisions
+        .filter(
+          (item) =>
+            item.clipId === clip.id &&
+            item.clipHash === clip.contentHash &&
+            (item.decision === "SKIP" || item.decision === "USE")
+        )
+        .sort((a, b) => b.decidedAt.localeCompare(a.decidedAt))[0];
+      if (latestUsage?.decision === "SKIP") {
+        skippedCount += 1;
+        continue;
+      }
+
+      const attempt = this.latestSuccessfulAttemptForClip(
+        attempts,
+        projectId,
+        clip.id
+      );
+      if (!attempt?.outputArtifactId) {
+        unresolvedCount += 1;
+        continue;
+      }
+      const artifact = await this.artifacts.findById(attempt.outputArtifactId);
+      if (
+        !artifact ||
+        artifact.projectId !== projectId ||
+        artifact.kind !== "GENERATED_VIDEO" ||
+        artifact.integrityStatus !== "READY" ||
+        !artifact.sha256
+      ) {
+        unresolvedCount += 1;
+        continue;
+      }
+      const review = decisions
+        .filter(
+          (item) =>
+            item.clipId === clip.id &&
+            item.clipHash === clip.contentHash &&
+            item.generationAttemptId === attempt.id &&
+            item.outputArtifactId === artifact.id &&
+            item.outputArtifactHash === artifact.sha256 &&
+            (item.decision === "ACCEPT" || item.decision === "REDO")
+        )
+        .sort((a, b) => b.decidedAt.localeCompare(a.decidedAt))[0];
+      if (review?.decision === "ACCEPT") acceptedCount += 1;
+      else unresolvedCount += 1;
+    }
+
+    if (acceptedCount > 0) {
+      return {
+        allowed: true,
+        acceptedCount,
+        skippedCount,
+        unresolvedCount,
+        existingTimeline: false
+      };
+    }
+
+    const incomplete = unresolvedCount > 0;
+    return {
+      allowed: false,
+      reasonCode: incomplete
+        ? "TIMELINE_DECISION_INCOMPLETE"
+        : "TIMELINE_NO_ACCEPTED_VIDEO",
+      message: incomplete
+        ? "当前还没有已采用的视频可进入剪辑。"
+        : "当前镜头都没有被采用，暂时不能建立视频剪辑。",
+      requiredAction: incomplete
+        ? "回到视频生成页，至少采用 1 个生成结果；不需要的镜头可以明确跳过。"
+        : "回到视频生成页，至少采用 1 个镜头后再进入视频剪辑。",
+      actionHref: `/projects/${projectId}/generate`,
+      acceptedCount,
+      skippedCount,
+      unresolvedCount,
+      existingTimeline: false
+    };
   }
 
   private async acceptedSources(projectId: string): Promise<
@@ -275,18 +418,12 @@ export class TimelineService {
   }
 
   async getOrCreate(projectId: string): Promise<Timeline> {
-    const workspace = await this.productFlow.getWorkspace(projectId);
-    if (!workspace?.productionPlan) {
-      throw new DomainValidationError("Current ProductionPlan is required");
+    const readiness = await this.readiness(projectId);
+    if (!readiness.allowed) {
+      throw new DomainValidationError(readiness.message);
     }
     const latest = await this.timelines.latestTimeline(projectId);
-    if (
-      latest &&
-      latest.status !== "STALE" &&
-      latest.productionPlanHash === workspace.productionPlan.contentHash
-    ) {
-      return latest;
-    }
+    if (readiness.existingTimeline && latest) return latest;
     return this.createFromAccepted(projectId);
   }
 

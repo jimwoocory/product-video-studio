@@ -68,6 +68,7 @@ import { ReviewService } from "../application/services/review-service.js";
 import { ProjectSnapshotService } from "../application/services/project-snapshot.js";
 import { RecoveryService } from "../application/services/recovery-service.js";
 import { resolveWorkflowNavigation } from "../application/services/workflow-navigation.js";
+import { inspectFinalAccess, inspectTimelineAccess } from "../application/services/workflow-step-access.js";
 import { FinalAssemblyService } from "../application/services/final-assembly-service.js";
 import {
   TimelineService,
@@ -108,6 +109,7 @@ import { sha256Bytes } from "../domain/hashing.js";
 import { publishProviderTypeSchema } from "../domain/publish.js";
 import { qrCodeSvg } from "./qr-code.js";
 import { canServeArtifactContent } from "./artifact-media-policy.js";
+import { renderBlockedStepPage, renderSafeRequestErrorPage } from "./blocked-step-ui.js";
 import {
   renderMobilePublishPage,
   renderPublishSettingsPage
@@ -3561,10 +3563,46 @@ export function createAppServer(
           }
         }
         if (kind === "timeline") {
+          const access = await inspectTimelineAccess(deps.timeline, projectId);
+          if (!access.allowed) {
+            const navigation = resolveWorkflowNavigation({
+              project: workspace.project,
+              currentPage: "timeline",
+              blockers
+            });
+            return html(
+              res,
+              200,
+              renderBlockedStepPage({
+                pageTitle: "视频剪辑",
+                project: workspace.project,
+                navigation,
+                access
+              })
+            );
+          }
           timeline = await deps.timeline.getOrCreate(projectId);
           renderJob = (await deps.timeline.latestRenderJob(projectId)) ?? undefined;
         }
         if (kind === "final") {
+          const access = await inspectFinalAccess(deps.timeline, projectId);
+          if (!access.allowed) {
+            const navigation = resolveWorkflowNavigation({
+              project: workspace.project,
+              currentPage: "final",
+              blockers
+            });
+            return html(
+              res,
+              200,
+              renderBlockedStepPage({
+                pageTitle: "成片与发布",
+                project: workspace.project,
+                navigation,
+                access
+              })
+            );
+          }
           timeline = (await deps.timeline.latestTimeline(projectId)) ?? undefined;
           renderJob = (await deps.timeline.latestRenderJob(projectId)) ?? undefined;
           finalAssembly =
@@ -3619,11 +3657,44 @@ export function createAppServer(
 
       return json(res, 404, { error: "NOT_FOUND" });
     } catch (error) {
+      const requestUrl = new URL(req.url ?? "/", "http://localhost");
+      const browserPageRequest =
+        req.method === "GET" && !requestUrl.pathname.startsWith("/api/");
+      const projectPageMatch = requestUrl.pathname.match(/^\/projects\/([^/]+)/);
+      const backHref = projectPageMatch
+        ? `/projects/${projectPageMatch[1]!}/product`
+        : "/projects";
       if (error instanceof DomainValidationError || error instanceof ZodError) {
+        if (browserPageRequest) {
+          return html(
+            res,
+            400,
+            renderSafeRequestErrorPage({
+              status: 400,
+              message:
+                "当前步骤条件未满足，或页面数据已经发生变化。请返回项目后继续操作。",
+              technicalDetail: error.message,
+              backHref
+            })
+          );
+        }
         return json(res, 400, {
           error: "VALIDATION_ERROR",
           message: error.message
         });
+      }
+      if (browserPageRequest) {
+        return html(
+          res,
+          500,
+          renderSafeRequestErrorPage({
+            status: 500,
+            title: "页面处理失败",
+            message: "页面处理时遇到问题。请返回项目后重试；如果问题持续存在，再查看高级信息。",
+            technicalDetail: error instanceof Error ? error.message : String(error),
+            backHref
+          })
+        );
       }
       return json(res, 500, {
         error: "INTERNAL_ERROR",

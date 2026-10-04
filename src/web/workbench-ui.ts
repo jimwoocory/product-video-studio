@@ -324,7 +324,7 @@ function staleImpact(project?: Project): string {
   return "修改任何上游当前版本都会使绑定的下游结果失效；历史记录仍会保留为只读。";
 }
 
-function layout(
+export function layout(
   title: string,
   body: string,
   project?: Project,
