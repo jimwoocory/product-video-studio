@@ -53,13 +53,81 @@ function stripJsonFence(text: string): string {
   return fenced ? fenced[1]!.trim() : trimmed;
 }
 
+function stripAnsi(text: string): string {
+  return text.replace(/\x1B\[[0-?]*[ -/]*[@-~]/g, "");
+}
+
+function embeddedJsonCandidates(text: string): unknown[] {
+  const values: unknown[] = [];
+  let start = -1;
+  let stack: string[] = [];
+  let inString = false;
+  let escaped = false;
+
+  const reset = () => {
+    start = -1;
+    stack = [];
+    inString = false;
+    escaped = false;
+  };
+
+  for (let index = 0; index < text.length; index += 1) {
+    const ch = text[index]!;
+    if (start < 0) {
+      if (ch === "{" || ch === "[") {
+        start = index;
+        stack = [ch === "{" ? "}" : "]"];
+      }
+      continue;
+    }
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (ch === "\\") {
+        escaped = true;
+      } else if (ch === '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+      continue;
+    }
+    if (ch === "{" || ch === "[") {
+      stack.push(ch === "{" ? "}" : "]");
+      continue;
+    }
+    if (ch !== "}" && ch !== "]") continue;
+    if (stack.at(-1) !== ch) {
+      reset();
+      continue;
+    }
+    stack.pop();
+    if (stack.length) continue;
+    const candidate = text.slice(start, index + 1);
+    reset();
+    try {
+      values.push(JSON.parse(candidate));
+    } catch {
+      // A balanced log fragment is not necessarily JSON. Keep scanning for
+      // one complete structured value later in stdout.
+    }
+  }
+  return values;
+}
+
 export function parseStrictJsonResponse(text: string): unknown {
-  const cleaned = stripJsonFence(text);
+  const cleaned = stripJsonFence(stripAnsi(text));
   try {
     return JSON.parse(cleaned);
   } catch {
+    const candidates = embeddedJsonCandidates(cleaned);
+    if (candidates.length === 1) return candidates[0];
     throw new StructuredAiRuntimeError(
-      "Hermes structured output was not valid standalone JSON"
+      candidates.length > 1
+        ? "Hermes 结构化输出包含多个 JSON，无法确定唯一结果，请重试"
+        : "Hermes 结构化输出不是唯一且完整的 JSON，请重试"
     );
   }
 }
@@ -76,10 +144,15 @@ export class HermesStructuredAiRuntime implements StructuredAiRuntime {
 
   async generateJson(request: StructuredAiRequest): Promise<unknown> {
     const prompt = [
-      "你是 Product Video Studio P0 的结构化生成器。",
+      "你是 Product Video Studio 的结构化生成器。",
       "只返回一个合法 JSON 值，不要 Markdown，不要解释，不要代码围栏。",
       "不得修改任何文件，不得执行有副作用操作。",
       "禁止把推测当事实；无法确认的信息必须按任务约定放入不确定字段。",
+      ...(request.media?.length
+        ? [
+            "此任务包含视觉采样帧。INPUT_JSON 中会提供本机只读采样帧路径；如果当前 Hermes 环境支持图像查看，请读取这些帧进行分析，但不得修改文件。"
+          ]
+        : []),
       "",
       "TASK:",
       request.task,

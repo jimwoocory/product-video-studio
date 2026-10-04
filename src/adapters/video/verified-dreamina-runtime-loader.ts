@@ -11,6 +11,7 @@ import {
   type ResolvedGenerationAsset,
   type VerifiedDreaminaRuntime
 } from "./domestic-jimeng-cli-provider.js";
+import type { GenerationRequest } from "../../domain/schemas.js";
 
 const sha256Schema = z.string().regex(/^[a-f0-9]{64}$/i);
 const nonEmpty = z.string().trim().min(1);
@@ -75,7 +76,8 @@ const configSchema = z.object({
   account: z.object({
     args: argsSchema,
     authenticatedRegex: regexSchema("authenticatedRegex"),
-    notAuthenticatedRegex: regexSchema("notAuthenticatedRegex")
+    notAuthenticatedRegex: regexSchema("notAuthenticatedRegex"),
+    creditsRegex: regexSchema("account.creditsRegex").optional()
   }),
   estimate: z.object({
     argsTemplate: argsSchema,
@@ -220,6 +222,167 @@ function handleValues(handle: {
   };
 }
 
+function buildAgentSubmitArgs(
+  request: GenerationRequest,
+  assets: readonly ResolvedGenerationAsset[],
+  legacyModelVersion: string
+): string[] {
+  const operation = request.dreaminaOperation;
+  if (!operation) {
+    throw new ProviderNotReadyError("Agent request is missing dreaminaOperation");
+  }
+  const profile = request.generationProfile;
+  if (profile && profile.operation !== operation) {
+    throw new ProviderNotReadyError(
+      "GenerationProfile operation does not match request operation"
+    );
+  }
+  const durationSeconds = String(request.durationMs / 1000);
+  const resolution =
+    profile?.videoResolution ?? request.videoResolution ?? "720p";
+  const effectiveModelVersion =
+    profile?.modelVersion ?? legacyModelVersion;
+  const passModelVersion = profile
+    ? profile.modelMode === "EXPLICIT"
+    : Boolean(effectiveModelVersion);
+  const passRatio = profile
+    ? profile.aspectRatioMode === "EXPLICIT"
+    : request.aspectRatio !== "AUTO";
+  if (
+    profile?.modelMode === "EXPLICIT" &&
+    profile.requestedModelVersion !== profile.modelVersion
+  ) {
+    throw new ProviderNotReadyError(
+      "GenerationProfile requested model does not match effective CLI model_version"
+    );
+  }
+  const sorted = [...assets].sort(
+    (a, b) => a.priority - b.priority || a.assetId.localeCompare(b.assetId)
+  );
+  const images = sorted.filter(
+    (asset) => !asset.inputType || asset.inputType === "image"
+  );
+  const videos = sorted.filter((asset) => asset.inputType === "video");
+  const audios = sorted.filter((asset) => asset.inputType === "audio");
+  const appendGenerationParams = (
+    args: string[],
+    options: { ratio?: boolean; model?: boolean } = {}
+  ): void => {
+    if (options.ratio !== false && passRatio) {
+      args.push("--ratio", request.aspectRatio);
+    }
+    args.push("--video_resolution", resolution);
+    if (options.model !== false && passModelVersion) {
+      if (!effectiveModelVersion) {
+        throw new ProviderNotReadyError(
+          "Explicit GenerationProfile is missing modelVersion"
+        );
+      }
+      args.push("--model_version", effectiveModelVersion);
+    }
+    args.push("--poll", "0");
+  };
+
+  if (operation === "text2video") {
+    const args = [
+      operation,
+      "--prompt",
+      request.promptText,
+      "--duration",
+      durationSeconds
+    ];
+    appendGenerationParams(args);
+    return args;
+  }
+
+  if (operation === "image2video") {
+    if (!images.length) {
+      throw new ProviderNotReadyError("image2video requires one image");
+    }
+    const args = [
+      operation,
+      "--image",
+      images[0]!.absolutePath,
+      "--prompt",
+      request.promptText,
+      "--duration",
+      durationSeconds
+    ];
+    appendGenerationParams(args);
+    return args;
+  }
+
+  if (operation === "frames2video") {
+    if (images.length < 2) {
+      throw new ProviderNotReadyError("frames2video requires first and last images");
+    }
+    const args = [
+      operation,
+      "--first",
+      images[0]!.absolutePath,
+      "--last",
+      images[1]!.absolutePath,
+      "--prompt",
+      request.promptText,
+      "--duration",
+      durationSeconds
+    ];
+    appendGenerationParams(args);
+    return args;
+  }
+
+  if (operation === "multiframe2video") {
+    if (images.length < 2) {
+      throw new ProviderNotReadyError("multiframe2video requires at least two images");
+    }
+    if (profile && profile.modelMode !== "FIXED") {
+      throw new ProviderNotReadyError(
+        "multiframe2video requires a FIXED GenerationProfile"
+      );
+    }
+    const args = [
+      operation,
+      "--images",
+      images.map((item) => item.absolutePath).join(","),
+      "--video_resolution",
+      resolution
+    ];
+    if (images.length === 2) {
+      args.push(
+        "--prompt",
+        request.promptText,
+        "--duration",
+        durationSeconds
+      );
+    } else {
+      const transitions = images.length - 1;
+      const secondsPerTransition = request.durationMs / 1000 / transitions;
+      const transitionDuration = String(
+        Math.round(secondsPerTransition * 100) / 100
+      );
+      for (let index = 0; index < transitions; index += 1) {
+        args.push("--transition-prompt", request.promptText);
+        args.push("--transition-duration", transitionDuration);
+      }
+    }
+    args.push("--poll", "0");
+    return args;
+  }
+
+  const args = [
+    operation,
+    "--prompt",
+    request.promptText,
+    "--duration",
+    durationSeconds
+  ];
+  appendGenerationParams(args);
+  for (const image of images) args.push("--image", image.absolutePath);
+  for (const video of videos) args.push("--video", video.absolutePath);
+  for (const audio of audios) args.push("--audio", audio.absolutePath);
+  return args;
+}
+
 export function buildVerifiedDreaminaRuntime(
   input: unknown
 ): VerifiedDreaminaRuntime {
@@ -263,7 +426,17 @@ export function buildVerifiedDreaminaRuntime(
       parse(result) {
         const text = combined(result);
         if (regex(config.account.authenticatedRegex).test(text)) {
-          return { status: "AUTHENTICATED" as const };
+          const creditsText = capture(config.account.creditsRegex, text);
+          const availableCredits =
+            creditsText !== undefined ? Number(creditsText) : undefined;
+          return {
+            status: "AUTHENTICATED" as const,
+            ...(availableCredits !== undefined &&
+            Number.isFinite(availableCredits) &&
+            availableCredits >= 0
+              ? { availableCredits }
+              : {})
+          };
         }
         if (regex(config.account.notAuthenticatedRegex).test(text)) {
           return { status: "NOT_AUTHENTICATED" as const };
@@ -304,6 +477,9 @@ export function buildVerifiedDreaminaRuntime(
       buildArgs(request, assets) {
         const modelVersion =
           config.submit.modelVersionMap?.[request.model] ?? request.model;
+        if (request.dreaminaOperation) {
+          return buildAgentSubmitArgs(request, assets, modelVersion);
+        }
         const args = expandArgs(
           config.submit.argsTemplate,
           requestValues(request, modelVersion)

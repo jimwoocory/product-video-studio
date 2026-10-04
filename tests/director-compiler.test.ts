@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import type {
   CreativeBatch,
   ProductionPlan,
+  ReferenceVideoProfile,
   ScriptDraft
 } from "../src/domain/schemas.js";
 import { ProductDirectorService } from "../src/application/services/product-director.js";
@@ -150,6 +151,53 @@ class FakeDirector implements ProductDirectorGenerator {
   }
 }
 
+function makeReferenceProfile(): ReferenceVideoProfile {
+  return {
+    id: "reference-director",
+    projectId: truth.projectId,
+    version: 1,
+    status: "ACTIVE",
+    sourceType: "UPLOAD",
+    videoArtifactId: "reference-artifact",
+    videoArtifactHash: H.a,
+    media: {
+      durationMs: 30000,
+      hasAudio: true,
+      sampledFrameCount: 10,
+      sceneCutTimestampsMs: []
+    },
+    analysisConfidence: "HIGH",
+    hook: {
+      firstThreeSecondsPattern: "result first",
+      structuralPurpose: "hook"
+    },
+    pacing: {
+      overall: "fast",
+      estimatedShotCount: 6,
+      averageShotDurationMs: 5000
+    },
+    shotLanguage: {
+      shotSizes: ["close"],
+      cameraPositions: ["front"],
+      cameraMovements: ["push"],
+      compositionPatterns: ["center"]
+    },
+    productAppearance: {
+      firstAppearanceMs: 500,
+      visibilityPattern: "frequent",
+      showcasePattern: "result then feature"
+    },
+    sellingPointPattern: ["problem-feature-result"],
+    dialogueNarrationStructure: "short narration",
+    audioBgMusicStructure: "rhythmic",
+    ctaPattern: "single CTA",
+    reusableStylePrinciples: ["show result early"],
+    copyGuard: "STRUCTURE_AND_METHOD_ONLY",
+    contentHash: H.d,
+    createdAt: ISO
+  };
+}
+
 test("Product Director validates generated plan before accepting it", async () => {
   const batch = makeBatch();
   const script = makeScript(batch);
@@ -183,6 +231,51 @@ test("Product Director rejects output that drops HARD product constraint", async
     (error: unknown) =>
       error instanceof DomainValidationError &&
       /HARD ForbiddenChange/.test(error.message)
+  );
+});
+
+test("Product Director binds the active ReferenceVideoProfile into the plan", async () => {
+  const batch = makeBatch();
+  const script = makeScript(batch);
+  const profile = makeReferenceProfile();
+  const plan = makePlan(script);
+  plan.referenceVideoProfileRef = {
+    entityType: "ReferenceVideoProfile",
+    entityId: profile.id,
+    version: profile.version,
+    hash: profile.contentHash
+  };
+  const service = new ProductDirectorService(new FakeDirector(plan));
+  const result = await service.generate({
+    productTruth: truth,
+    creativeBatch: batch,
+    selectedCreativeId: "creative-1",
+    script,
+    referenceVideoProfile: profile,
+    projectTargetDurationMs: 60000
+  });
+  assert.equal(
+    result.referenceVideoProfileRef?.entityId,
+    profile.id
+  );
+});
+
+test("Product Director rejects output that drops the active ReferenceVideoProfile", async () => {
+  const batch = makeBatch();
+  const script = makeScript(batch);
+  const profile = makeReferenceProfile();
+  const plan = makePlan(script);
+  const service = new ProductDirectorService(new FakeDirector(plan));
+  await assert.rejects(
+    service.generate({
+      productTruth: truth,
+      creativeBatch: batch,
+      selectedCreativeId: "creative-1",
+      script,
+      referenceVideoProfile: profile,
+      projectTargetDurationMs: 60000
+    }),
+    /ReferenceVideoProfile/
   );
 });
 

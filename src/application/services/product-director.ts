@@ -3,6 +3,7 @@ import {
   productTruthSchema,
   productionPlanSchema,
   scriptDraftSchema,
+  type ProductTruth,
   type ProductionPlan
 } from "../../domain/schemas.js";
 import {
@@ -13,6 +14,10 @@ import type {
   ProductDirectorGenerator,
   ProductDirectorInput
 } from "../ports/product-director-generator.js";
+import type { StructuredAiRuntime } from "../ports/structured-ai-runtime.js";
+import { UsageComplianceService } from "./usage-compliance.js";
+import { assertDirectorPlanTarget } from "./director-generation-target.js";
+import {assertReferenceBinding, referenceSetRef, type CreativeReferenceGuard} from "./creative-reference-binding.js";
 
 function assertSameRef(
   actual: { entityType: string; entityId: string; version: number; hash: string },
@@ -52,27 +57,50 @@ function assertHardForbiddenChangesPreserved(
 }
 
 export class ProductDirectorService {
-  constructor(private readonly generator: ProductDirectorGenerator) {}
+  private readonly usageCompliance?: UsageComplianceService;
+
+  constructor(
+    private readonly generator: ProductDirectorGenerator,
+    usageComplianceRuntime?: StructuredAiRuntime,
+    private readonly references?: CreativeReferenceGuard
+  ) {
+    this.usageCompliance = usageComplianceRuntime
+      ? new UsageComplianceService(usageComplianceRuntime)
+      : undefined;
+  }
+
+  async assertPlanUsageCompliance(
+    truth: ProductTruth,
+    plan: ProductionPlan
+  ): Promise<void> {
+    if (!this.usageCompliance) return;
+    await this.usageCompliance.assertPlan(truth, plan);
+  }
 
   async generate(inputRaw: ProductDirectorInput): Promise<ProductionPlan> {
     const productTruth = productTruthSchema.parse(inputRaw.productTruth);
     const creativeBatch = creativeBatchSchema.parse(inputRaw.creativeBatch);
     const script = scriptDraftSchema.parse(inputRaw.script);
+    const references=this.references ? await this.references.assertExpected(productTruth.projectId,script.creativeReferenceSetRef) : inputRaw.creativeContext?.references;
+    assertReferenceBinding(script.creativeReferenceSetRef,references,productTruth);
+    assertReferenceBinding(creativeBatch.creativeReferenceSetRef,references,productTruth);
+    if(inputRaw.creativeContext?.references)assertReferenceBinding(referenceSetRef(inputRaw.creativeContext.references),references,productTruth);
+    if(references)inputRaw={...inputRaw,creativeContext:{requestText:"依据确认参考集合导演",...inputRaw.creativeContext,references}};
 
     if (productTruth.status !== "CONFIRMED") {
-      throw new DomainValidationError("Product Director requires CONFIRMED ProductTruth");
+      throw new DomainValidationError("生成导演分镜前需要先确认产品事实");
     }
     if (creativeBatch.status !== "ACTIVE") {
-      throw new DomainValidationError("Product Director requires ACTIVE CreativeBatch");
+      throw new DomainValidationError("生成导演分镜前需要当前创意方案处于可用状态");
     }
     if (script.status !== "CONFIRMED") {
-      throw new DomainValidationError("Product Director requires CONFIRMED ScriptDraft");
+      throw new DomainValidationError("生成导演分镜前需要先确认脚本");
     }
     if (!creativeBatch.concepts.some((item) => item.id === inputRaw.selectedCreativeId)) {
-      throw new DomainValidationError("selectedCreativeId is not in CreativeBatch");
+      throw new DomainValidationError("当前选择的创意不属于创意方案");
     }
     if (script.selectedCreativeId !== inputRaw.selectedCreativeId) {
-      throw new DomainValidationError("Script selectedCreativeId mismatch");
+      throw new DomainValidationError("脚本绑定的创意与当前选择不一致");
     }
     assertSameRef(creativeBatch.productTruthRef, script.productTruthRef, "ProductTruth");
     assertSameRef(
@@ -96,7 +124,7 @@ export class ProductDirectorService {
     );
 
     if (generated.projectId !== productTruth.projectId) {
-      throw new DomainValidationError("Generated ProductionPlan projectId mismatch");
+      throw new DomainValidationError("生成的导演方案与当前项目不匹配");
     }
     assertSameRef(generated.productTruthRef, script.productTruthRef, "ProductionPlan ProductTruth");
     assertSameRef(
@@ -110,21 +138,42 @@ export class ProductDirectorService {
       "ProductionPlan Script"
     );
     if (generated.selectedCreativeId !== inputRaw.selectedCreativeId) {
-      throw new DomainValidationError("Generated ProductionPlan selectedCreativeId mismatch");
+      throw new DomainValidationError("生成的导演方案与当前选择的创意不匹配");
+    }
+    if (inputRaw.referenceVideoProfile?.status === "ACTIVE") {
+      if (!generated.referenceVideoProfileRef) {
+        throw new DomainValidationError(
+          "Generated ProductionPlan dropped active ReferenceVideoProfile"
+        );
+      }
+      assertSameRef(
+        generated.referenceVideoProfileRef,
+        {
+          entityType: "ReferenceVideoProfile",
+          entityId: inputRaw.referenceVideoProfile.id,
+          version: inputRaw.referenceVideoProfile.version,
+          hash: inputRaw.referenceVideoProfile.contentHash
+        },
+        "ReferenceVideoProfile"
+      );
     }
 
+    assertReferenceBinding(generated.creativeReferenceSetRef,references,productTruth);
     assertPlanTraceability(productTruth, script, generated);
+    assertDirectorPlanTarget(generated, inputRaw.generationTarget);
     assertHardForbiddenChangesPreserved(productTruth, generated);
 
     const totalClipMs = generated.scenes
       .flatMap((scene) => scene.clips)
       .reduce((sum, clip) => sum + clip.durationMs, 0);
-    const toleranceMs = Math.max(5000, Math.round(inputRaw.projectTargetDurationMs * 0.1));
+    const toleranceMs = Math.max(2000, Math.round(inputRaw.projectTargetDurationMs * 0.1));
     if (Math.abs(totalClipMs - inputRaw.projectTargetDurationMs) > toleranceMs) {
       throw new DomainValidationError(
         `ProductionPlan clip duration ${totalClipMs}ms is outside target tolerance`
       );
     }
+
+    await this.assertPlanUsageCompliance(productTruth, generated);
 
     return generated;
   }

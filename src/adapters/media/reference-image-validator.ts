@@ -4,6 +4,7 @@ import { imageSize } from "image-size";
 import type { ArtifactRepository } from "../../application/ports/artifact-repository.js";
 import type { ProductInputSnapshot } from "../../application/ports/product-input-store.js";
 import { sha256Bytes } from "../../domain/hashing.js";
+import type {AssetRef} from "../../domain/schemas.js";
 
 export const P0_MIN_REFERENCE_IMAGE_EDGE_PX = 64;
 
@@ -22,6 +23,7 @@ export async function validateReferenceImagesForPreflight(input: {
   snapshot: ProductInputSnapshot;
   artifacts: ArtifactRepository;
   requiredAssetIds: readonly string[];
+  confirmedReferenceAssets?: AssetRef[];
 }): Promise<{
   blockers: string[];
   validations: ReferenceImageValidation[];
@@ -31,7 +33,7 @@ export async function validateReferenceImagesForPreflight(input: {
   const blockers: string[] = [];
 
   for (const assetId of [...new Set(input.requiredAssetIds)]) {
-    const asset = input.snapshot.assets.find((item) => item.id === assetId);
+    const asset = [...input.snapshot.assets,...(input.confirmedReferenceAssets??[])].find((item) => item.id === assetId);
     if (!asset) {
       const blocker = `REFERENCE_ASSET_MISSING:${assetId}`;
       blockers.push(blocker);

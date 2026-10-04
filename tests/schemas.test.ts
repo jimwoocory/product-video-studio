@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   clipSchema,
   preflightReportSchema,
+  projectSchema,
   productTruthSchema
 } from "../src/domain/schemas.js";
 import { assertFactReferences, DomainValidationError } from "../src/domain/validation.js";
@@ -10,6 +11,22 @@ import { makeProductTruth, makeValidClip } from "./fixtures.js";
 
 test("valid Clip/Segment timeline passes", () => {
   assert.equal(clipSchema.safeParse(makeValidClip()).success, true);
+});
+
+test("Project target duration accepts 10-120 seconds and rejects outside range", () => {
+  const base = {
+    id: "project-duration",
+    name: "Duration",
+    status: "DRAFT",
+    targetPlatform: "douyin",
+    aspectRatio: "9:16",
+    createdAt: "2026-09-28T00:00:00.000Z",
+    updatedAt: "2026-09-28T00:00:00.000Z"
+  };
+  assert.equal(projectSchema.safeParse({ ...base, targetDurationMs: 10000 }).success, true);
+  assert.equal(projectSchema.safeParse({ ...base, targetDurationMs: 120000 }).success, true);
+  assert.equal(projectSchema.safeParse({ ...base, targetDurationMs: 9999 }).success, false);
+  assert.equal(projectSchema.safeParse({ ...base, targetDurationMs: 120001 }).success, false);
 });
 
 test("Clip duration outside 4-15 seconds is rejected", () => {

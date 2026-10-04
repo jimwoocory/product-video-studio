@@ -7,12 +7,24 @@ export const nonEmptyStringSchema = z.string().trim().min(1);
 export const versionStatusSchema = z.enum(["DRAFT", "CONFIRMED", "STALE"]);
 export const gateStatusSchema = z.enum(["PASS", "BLOCKED", "STALE"]);
 export const riskLevelSchema = z.enum(["LOW", "MEDIUM", "HIGH"]);
+export const videoAspectRatioSchema = z
+  .string()
+  .trim()
+  .regex(/^(?:AUTO|\d+:\d+)$/, "expected AUTO or width:height ratio");
+export const videoResolutionSchema = z.string().trim().min(1);
 
 export const versionRefSchema = z.object({
   entityType: nonEmptyStringSchema,
   entityId: entityIdSchema,
   version: z.number().int().positive(),
   hash: sha256Schema
+});
+
+export const aiExecutionRefSchema = z.object({
+  executionId: entityIdSchema,
+  providerId: nonEmptyStringSchema,
+  modelId: nonEmptyStringSchema,
+  configVersion: z.number().int().positive()
 });
 
 export const projectStatusSchema = z.enum([
@@ -38,8 +50,8 @@ export const projectSchema = z.object({
   name: nonEmptyStringSchema,
   status: projectStatusSchema,
   targetPlatform: z.literal("douyin"),
-  targetDurationMs: z.number().int().min(60000).max(120000),
-  aspectRatio: z.literal("9:16"),
+  targetDurationMs: z.number().int().min(10000).max(120000),
+  aspectRatio: videoAspectRatioSchema,
   currentProductTruthRef: versionRefSchema.optional(),
   currentCreativeBatchRef: versionRefSchema.optional(),
   selectedCreativeId: entityIdSchema.optional(),
@@ -98,6 +110,57 @@ export const assetRefSchema = z.object({
   createdAt: isoDateTimeSchema
 });
 
+export const referenceVideoProfileSchema = z.object({
+  id: entityIdSchema,
+  projectId: entityIdSchema,
+  version: z.number().int().positive(),
+  status: z.enum(["ACTIVE", "STALE"]),
+  sourceType: z.enum(["UPLOAD", "URL"]),
+  sourceUrl: z.string().url().optional(),
+  videoArtifactId: entityIdSchema,
+  videoArtifactHash: sha256Schema,
+  originalFilename: nonEmptyStringSchema.optional(),
+  media: z.object({
+    durationMs: z.number().int().positive(),
+    width: z.number().int().positive().optional(),
+    height: z.number().int().positive().optional(),
+    frameRate: z.number().positive().optional(),
+    hasAudio: z.boolean(),
+    sampledFrameCount: z.number().int().nonnegative(),
+    sceneCutTimestampsMs: z.array(z.number().int().nonnegative())
+  }),
+  analysisConfidence: z.enum(["LOW", "MEDIUM", "HIGH"]),
+  hook: z.object({
+    firstThreeSecondsPattern: nonEmptyStringSchema,
+    structuralPurpose: nonEmptyStringSchema
+  }),
+  pacing: z.object({
+    overall: nonEmptyStringSchema,
+    estimatedShotCount: z.number().int().positive(),
+    averageShotDurationMs: z.number().int().positive()
+  }),
+  shotLanguage: z.object({
+    shotSizes: z.array(nonEmptyStringSchema),
+    cameraPositions: z.array(nonEmptyStringSchema),
+    cameraMovements: z.array(nonEmptyStringSchema),
+    compositionPatterns: z.array(nonEmptyStringSchema)
+  }),
+  productAppearance: z.object({
+    firstAppearanceMs: z.number().int().nonnegative().nullable(),
+    visibilityPattern: nonEmptyStringSchema,
+    showcasePattern: nonEmptyStringSchema
+  }),
+  sellingPointPattern: z.array(nonEmptyStringSchema),
+  dialogueNarrationStructure: nonEmptyStringSchema,
+  audioBgMusicStructure: nonEmptyStringSchema,
+  ctaPattern: nonEmptyStringSchema,
+  reusableStylePrinciples: z.array(nonEmptyStringSchema),
+  copyGuard: z.literal("STRUCTURE_AND_METHOD_ONLY"),
+  aiExecution: aiExecutionRefSchema.optional(),
+  contentHash: sha256Schema,
+  createdAt: isoDateTimeSchema
+});
+
 export const productFactSchema = z.object({
   id: entityIdSchema,
   statement: nonEmptyStringSchema,
@@ -117,6 +180,8 @@ export const uncertainClaimSchema = z.object({
   id: entityIdSchema,
   statement: nonEmptyStringSchema,
   reason: nonEmptyStringSchema,
+  sourceType: z.enum(["user", "research"]).optional(),
+  evidenceRefs: z.array(nonEmptyStringSchema).optional(),
   status: z.enum(["UNVERIFIED", "REJECTED", "PROMOTED"]),
   dispositionConfirmedByUser: z.boolean(),
   promotedFactId: entityIdSchema.optional()
@@ -127,6 +192,26 @@ export const uncertainClaimSchema = z.object({
   if (claim.status !== "PROMOTED" && claim.promotedFactId) {
     ctx.addIssue({ code: "custom", path: ["promotedFactId"], message: "Only PROMOTED claim may have promotedFactId" });
   }
+});
+
+export const productUsageRuleSchema = z.object({
+  id: entityIdSchema,
+  category: z.enum([
+    "USAGE_METHOD",
+    "WEARING_POSITION",
+    "PRECAUTION",
+    "FUNCTION_EFFECT",
+    "USAGE_SCENARIO",
+    "PRODUCT_STATE",
+    "LIMITATION"
+  ]),
+  polarity: z.enum(["MUST", "MUST_NOT", "CONTEXT"]),
+  statement: nonEmptyStringSchema,
+  sourceType: z.enum(["user", "research"]),
+  evidenceRefs: z.array(nonEmptyStringSchema).optional(),
+  confidence: z.enum(["LOW", "MEDIUM", "HIGH"]),
+  status: z.enum(["UNVERIFIED", "REJECTED", "CONFIRMED"]),
+  dispositionConfirmedByUser: z.boolean()
 });
 
 export const productTruthSchema = z.object({
@@ -144,9 +229,11 @@ export const productTruthSchema = z.object({
   confirmedFeatures: z.array(productFactSchema),
   sellingPoints: z.array(productFactSchema),
   forbiddenChanges: z.array(forbiddenChangeSchema),
+  usageRules: z.array(productUsageRuleSchema).optional(),
   uncertainClaims: z.array(uncertainClaimSchema),
   evidenceRefs: z.array(nonEmptyStringSchema),
   inputRefs: z.array(versionRefSchema),
+  aiExecution: aiExecutionRefSchema.optional(),
   contentHash: sha256Schema,
   confirmedAt: isoDateTimeSchema.optional()
 }).superRefine((truth, ctx) => {
@@ -164,6 +251,11 @@ export const productTruthSchema = z.object({
         ctx.addIssue({ code: "custom", path: ["uncertainClaims", index, "dispositionConfirmedByUser"], message: "Confirmed ProductTruth requires user-confirmed claim disposition" });
       }
     });
+    (truth.usageRules ?? []).forEach((rule, index) => {
+      if (!rule.dispositionConfirmedByUser) {
+        ctx.addIssue({ code: "custom", path: ["usageRules", index, "dispositionConfirmedByUser"], message: "Confirmed ProductTruth requires user-confirmed usage-rule disposition" });
+      }
+    });
   }
 });
 
@@ -175,7 +267,7 @@ export const creativeConceptSchema = z.object({
   hook: nonEmptyStringSchema,
   coreSellingPoint: nonEmptyStringSchema,
   narrativePattern: nonEmptyStringSchema,
-  expectedDurationMs: z.number().int().min(60000).max(120000),
+  expectedDurationMs: z.number().int().min(10000).max(120000),
   productShowcaseStrategy: nonEmptyStringSchema,
   generationRisk: riskLevelSchema,
   requiredFactIds: z.array(entityIdSchema)
@@ -187,7 +279,10 @@ export const creativeBatchSchema = z.object({
   version: z.number().int().positive(),
   status: z.enum(["ACTIVE", "STALE"]),
   productTruthRef: versionRefSchema,
+  referenceVideoProfileRef: versionRefSchema.optional(),
+  creativeReferenceSetRef: versionRefSchema.optional(),
   generatorVersion: nonEmptyStringSchema,
+  aiExecution: aiExecutionRefSchema.optional(),
   concepts: z.array(creativeConceptSchema).min(4).max(6),
   selectedCreativeId: entityIdSchema.optional(),
   contentHash: sha256Schema,
@@ -216,8 +311,11 @@ export const scriptDraftSchema = z.object({
   status: versionStatusSchema,
   productTruthRef: versionRefSchema,
   creativeBatchRef: versionRefSchema,
+  referenceVideoProfileRef: versionRefSchema.optional(),
+  creativeReferenceSetRef: versionRefSchema.optional(),
   selectedCreativeId: entityIdSchema,
-  targetDurationMs: z.number().int().min(60000).max(120000),
+  targetDurationMs: z.number().int().min(10000).max(120000),
+  aiExecution: aiExecutionRefSchema.optional(),
   beats: z.array(scriptBeatSchema).min(1),
   contentHash: sha256Schema,
   confirmedAt: isoDateTimeSchema.optional()
@@ -256,9 +354,28 @@ export const ambientSoundSchema = z.union([
   z.object({ kind: z.literal("AMBIENT"), description: nonEmptyStringSchema }).strict()
 ]);
 
+export const postProductionTextCueSchema = z.object({
+  kind: z.enum(["CAPTION", "CTA", "LEGAL", "LABEL"]),
+  text: nonEmptyStringSchema,
+  startMs: z.number().int().nonnegative(),
+  endMs: z.number().int().positive(),
+  position: z.enum(["TOP", "CENTER", "BOTTOM"]),
+  fontScale: z.number().min(0.5).max(3).default(1),
+  sourceBeatIds: z.array(entityIdSchema).default([]),
+  requiredFactIds: z.array(entityIdSchema).default([])
+}).strict().superRefine((cue, ctx) => {
+  if (cue.endMs <= cue.startMs) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["endMs"],
+      message: "Post-production text cue endMs must be greater than startMs"
+    });
+  }
+});
+
 export const referenceAssetUseSchema = z.object({
   assetId: entityIdSchema,
-  role: z.enum(["PRIMARY_PRODUCT", "LOGO", "STYLE", "ENVIRONMENT", "CHARACTER", "OTHER"]),
+  role: z.enum(["PRIMARY_PRODUCT", "LOGO", "STYLE", "ENVIRONMENT", "CHARACTER", "OTHER", "PRODUCT_ANGLE", "WEARING_REFERENCE", "USAGE_ACTION_REFERENCE", "SCENE_REFERENCE", "LOGO_REFERENCE"]),
   priority: z.number().int().nonnegative(),
   required: z.boolean()
 });
@@ -284,6 +401,7 @@ export const segmentSchema = z.object({
   productState: nonEmptyStringSchema,
   dialogueOrNarration: dialogueOrNarrationSchema,
   ambientSound: ambientSoundSchema,
+  postProductionText: z.array(postProductionTextCueSchema).max(12).default([]),
   lighting: nonEmptyStringSchema,
   continuityIn: continuityStateSchema,
   continuityOut: continuityStateSchema,
@@ -334,6 +452,16 @@ export const clipSchema = z.object({
     if (current.dialogueOrNarration.kind !== "NONE" && current.dialogueOrNarration.estimatedDurationMs > current.endMs - current.startMs) {
       ctx.addIssue({ code: "custom", path: ["segments", i, "dialogueOrNarration", "estimatedDurationMs"], message: "Speech duration exceeds segment duration" });
     }
+    for (let cueIndex = 0; cueIndex < current.postProductionText.length; cueIndex += 1) {
+      const cue = current.postProductionText[cueIndex]!;
+      if (cue.startMs < current.startMs || cue.endMs > current.endMs) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["segments", i, "postProductionText", cueIndex],
+          message: "Post-production text cue must stay inside its Segment"
+        });
+      }
+    }
     if (i > 0) {
       const previous = segments[i - 1]!;
       if (previous.endMs !== current.startMs) {
@@ -377,6 +505,41 @@ export const continuityLockSchema = z.object({
   }))
 });
 
+export const directorGenerationTargetSchema = z.object({
+  source: z.literal("DREAMINA_CAPABILITY_REGISTRY"),
+  requestedModelVersion: nonEmptyStringSchema,
+  aspectRatio: videoAspectRatioSchema,
+  videoResolution: videoResolutionSchema,
+  nativeAudioOutputRequested: z.boolean(),
+  registryFingerprint: sha256Schema,
+  capabilityCheckedAt: isoDateTimeSchema,
+  operationConstraints: z.array(
+    z.object({
+      operation: z.enum([
+        "text2video",
+        "image2video",
+        "frames2video",
+        "multiframe2video",
+        "multimodal2video"
+      ]),
+      operationLabel: nonEmptyStringSchema,
+      modelMode: z.enum(["EXPLICIT", "COMMAND_DEFAULT", "FIXED"]),
+      modelVersion: nonEmptyStringSchema.optional(),
+      fixedModelLabel: nonEmptyStringSchema.optional(),
+      durationMinSeconds: z.number().positive().optional(),
+      durationMaxSeconds: z.number().positive().optional(),
+      maxImages: z.number().int().positive().optional(),
+      maxVideos: z.number().int().positive().optional(),
+      maxAudio: z.number().int().positive().optional(),
+      maxTotalInputs: z.number().int().positive().optional(),
+      supportsReferenceAudio: z.boolean(),
+      supportsNativeAudioOutput: z.boolean(),
+      explicitRatioAllowed: z.boolean(),
+      supportedResolutions: z.array(videoResolutionSchema)
+    })
+  ).min(1)
+});
+
 export const productionPlanSchema = z.object({
   id: entityIdSchema,
   projectId: entityIdSchema,
@@ -384,11 +547,15 @@ export const productionPlanSchema = z.object({
   status: versionStatusSchema,
   productTruthRef: versionRefSchema,
   scriptRef: versionRefSchema,
+  referenceVideoProfileRef: versionRefSchema.optional(),
+  creativeReferenceSetRef: versionRefSchema.optional(),
+  generationTarget: directorGenerationTargetSchema.optional(),
   selectedCreativeId: entityIdSchema,
   visualDirection: nonEmptyStringSchema,
   soundDirection: nonEmptyStringSchema,
   productShowcaseRules: z.array(nonEmptyStringSchema),
   continuityLock: continuityLockSchema,
+  aiExecution: aiExecutionRefSchema.optional(),
   scenes: z.array(sceneSchema).min(1),
   contentHash: sha256Schema,
   confirmedAt: isoDateTimeSchema.optional()
@@ -412,13 +579,103 @@ export const inputAssetManifestEntrySchema = z.object({
   artifactHash: sha256Schema,
   role: referenceAssetUseSchema.shape.role,
   priority: z.number().int().nonnegative(),
-  required: z.boolean()
+  required: z.boolean(),
+  inputType: z.enum(["image", "video", "audio"]).optional(),
+  researchReference: z.object({setId:entityIdSchema,setHash:sha256Schema,candidateId:entityIdSchema,sourceUrl:z.string().url().refine(s=>/^https?:\/\//i.test(s)),timestampMs:z.number().int().nonnegative().optional()}).optional(),
+  agentReferenceAdaptation: z.object({
+    sourceArtifactId: entityIdSchema,
+    sourceArtifactHash: sha256Schema,
+    strategy: z.literal("KEYFRAME"),
+    adapterVersion: nonEmptyStringSchema,
+    sourceDurationMs: z.number().int().positive(),
+    timestampMs: z.number().int().nonnegative(),
+    frameIndex: z.number().int().nonnegative()
+  }).optional()
 });
 
-export const videoModelSchema = z.enum([
-  "seedance-2.0",
-  "seedance-2.0-mini"
+export const dreaminaVideoOperationSchema = z.enum([
+  "text2video",
+  "image2video",
+  "frames2video",
+  "multiframe2video",
+  "multimodal2video"
 ]);
+
+// The live Dreamina CLI help is the authority for model availability.
+// Keep this schema open so future CLI model values remain readable; each new
+// GenerationProfile is validated against the dynamic capability registry.
+export const videoModelSchema = nonEmptyStringSchema;
+
+export const generationProfileSchema = z
+  .object({
+    source: z.literal("DREAMINA_CAPABILITY_REGISTRY"),
+    operation: dreaminaVideoOperationSchema,
+    modelMode: z.enum(["EXPLICIT", "COMMAND_DEFAULT", "FIXED"]),
+    requestedModelVersion: nonEmptyStringSchema.optional(),
+    modelVersion: nonEmptyStringSchema.optional(),
+    fixedModelLabel: nonEmptyStringSchema.optional(),
+    aspectRatioMode: z.enum([
+      "EXPLICIT",
+      "INFER_FROM_FIRST_FRAME",
+      "COMMAND_DEFAULT"
+    ]),
+    aspectRatio: videoAspectRatioSchema.optional(),
+    videoResolution: videoResolutionSchema,
+    durationMs: z.number().int().min(1000).max(120000),
+    referenceAudioInputCount: z.number().int().nonnegative(),
+    nativeAudioOutputRequested: z.boolean(),
+    nativeAudioOutputSupported: z.boolean(),
+    commandHelpSha256: sha256Schema,
+    registryFingerprint: sha256Schema,
+    capabilityCheckedAt: isoDateTimeSchema
+  })
+  .superRefine((profile, ctx) => {
+    if (profile.modelMode === "EXPLICIT") {
+      if (!profile.requestedModelVersion || !profile.modelVersion) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["modelVersion"],
+          message: "EXPLICIT profile requires requested/effective modelVersion"
+        });
+      } else if (
+        profile.requestedModelVersion.toLowerCase() !==
+        profile.modelVersion.toLowerCase()
+      ) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["modelVersion"],
+          message: "requested model must equal effective CLI model_version"
+        });
+      }
+    }
+    if (profile.modelMode === "FIXED" && !profile.fixedModelLabel) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["fixedModelLabel"],
+        message: "FIXED profile requires fixedModelLabel"
+      });
+    }
+    if (
+      profile.aspectRatioMode === "EXPLICIT" &&
+      (!profile.aspectRatio || profile.aspectRatio === "AUTO")
+    ) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["aspectRatio"],
+        message: "EXPLICIT aspect ratio requires a concrete ratio"
+      });
+    }
+    if (
+      profile.nativeAudioOutputRequested &&
+      !profile.nativeAudioOutputSupported
+    ) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["nativeAudioOutputRequested"],
+        message: "native audio output was requested but is not supported"
+      });
+    }
+  });
 
 export const compiledPromptSchema = z.object({
   id: entityIdSchema,
@@ -436,15 +693,18 @@ export const compiledPromptSchema = z.object({
   clipHash: sha256Schema,
   segmentHashes: z.record(z.string(), sha256Schema),
   compilerTemplateVersion: nonEmptyStringSchema,
+  creativeReferenceSetRef: versionRefSchema.optional(),
+  generationProfile: generationProfileSchema.optional(),
   promptText: nonEmptyStringSchema,
   inputAssetManifest: z.array(inputAssetManifestEntrySchema),
   factMapping: z.array(promptFactMappingSchema),
   segmentMapping: z.array(z.object({ segmentId: entityIdSchema, promptSection: nonEmptyStringSchema })),
   constraintMapping: z.array(z.object({ forbiddenChangeId: entityIdSchema, promptSection: nonEmptyStringSchema })),
   generationParams: z.object({
-    durationMs: z.number().int().min(4000).max(15000),
-    aspectRatio: z.literal("9:16"),
-    generateAudio: z.boolean()
+    durationMs: z.number().int().min(1000).max(120000),
+    aspectRatio: videoAspectRatioSchema,
+    generateAudio: z.boolean(),
+    videoResolution: videoResolutionSchema.optional()
   }),
   compiledPromptHash: sha256Schema,
   createdAt: isoDateTimeSchema
@@ -500,9 +760,14 @@ export const generationRequestSchema = z.object({
   model: videoModelSchema,
   promptText: nonEmptyStringSchema,
   assetManifest: z.array(inputAssetManifestEntrySchema),
-  durationMs: z.number().int().min(4000).max(15000),
-  aspectRatio: z.literal("9:16"),
+  durationMs: z.number().int().min(1000).max(120000),
+  aspectRatio: videoAspectRatioSchema,
+  videoResolution: videoResolutionSchema.optional(),
   generateAudio: z.boolean(),
+  generationProfile: generationProfileSchema.optional(),
+  dreaminaOperation: dreaminaVideoOperationSchema.optional(),
+  agentTaskId: entityIdSchema.optional(),
+  agentCapabilityHelpHash: sha256Schema.optional(),
   inputVersionRefs: z.array(versionRefSchema),
   createdAt: isoDateTimeSchema,
   requestHash: sha256Schema
@@ -670,6 +935,13 @@ export const reviewDecisionSchema = z.object({
   outputArtifactId: entityIdSchema.optional(),
   outputArtifactHash: sha256Schema.optional(),
   decision: z.enum(["ACCEPT", "REDO", "SKIP", "USE"]),
+  source: z.enum(["USER", "AI_VISUAL_GATE"]).optional(),
+  visualAssessment: z.object({
+    artifactId: entityIdSchema,
+    artifactHash: sha256Schema,
+    assessmentContentHash: sha256Schema,
+    evaluatorVersion: nonEmptyStringSchema
+  }).strict().optional(),
   note: nonEmptyStringSchema.optional(),
   decidedAt: isoDateTimeSchema
 }).superRefine((value, ctx) => {
@@ -683,6 +955,323 @@ export const reviewDecisionSchema = z.object({
       message: `${value.decision} ReviewDecision requires generationAttemptId, outputArtifactId and outputArtifactHash`
     });
   }
+  if (value.source === "AI_VISUAL_GATE") {
+    if (value.decision !== "ACCEPT" || !value.visualAssessment) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "AI_VISUAL_GATE may only create an ACCEPT decision bound to a visual assessment"
+      });
+    }
+  } else if (value.visualAssessment) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "User review cannot claim AI visual-assessment provenance"
+    });
+  }
+});
+
+export const timelineTrackSchema = z.object({
+  id: entityIdSchema,
+  kind: z.enum(["VIDEO", "AUDIO", "TEXT"]),
+  order: z.number().int().nonnegative(),
+  label: nonEmptyStringSchema,
+  locked: z.boolean().default(false),
+  muted: z.boolean().default(false)
+});
+
+export const timelineTransitionSchema = z
+  .object({
+    type: z.enum(["CUT", "CROSSFADE", "FADE"]),
+    durationMs: z.number().int().nonnegative().max(2000)
+  })
+  .superRefine((value, ctx) => {
+    if (value.type === "CUT" && value.durationMs !== 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["durationMs"],
+        message: "CUT transition duration must be 0"
+      });
+    }
+    if (value.type !== "CUT" && value.durationMs < 100) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["durationMs"],
+        message: "Non-cut transition duration must be at least 100ms"
+      });
+    }
+  });
+
+export const timelineAudioKeyframeSchema = z.object({
+  atMs: z.number().int().nonnegative(),
+  volume: z.number().min(0).max(2)
+});
+
+export const timelineAudioSettingsSchema = z.object({
+  muted: z.boolean().default(false),
+  volume: z.number().min(0).max(2).default(1),
+  keyframes: z.array(timelineAudioKeyframeSchema).default([])
+});
+
+export const timelineCaptionSchema = z
+  .object({
+    id: entityIdSchema,
+    text: nonEmptyStringSchema,
+    startMs: z.number().int().nonnegative(),
+    endMs: z.number().int().positive(),
+    position: z.enum(["TOP", "CENTER", "BOTTOM"]).default("BOTTOM")
+  })
+  .superRefine((value, ctx) => {
+    if (value.endMs <= value.startMs) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["endMs"],
+        message: "Caption endMs must be greater than startMs"
+      });
+    }
+  });
+
+export const timelineClipEditSchema = z
+  .object({
+    id: entityIdSchema,
+    sourceClipId: entityIdSchema,
+    sourceArtifactId: entityIdSchema,
+    sourceArtifactHash: sha256Schema,
+    sourceDurationMs: z.number().int().positive(),
+    inMs: z.number().int().nonnegative(),
+    outMs: z.number().int().positive(),
+    trackId: entityIdSchema,
+    order: z.number().int().nonnegative(),
+    deleted: z.boolean().default(false),
+    transition: timelineTransitionSchema.default({ type: "CUT", durationMs: 0 }),
+    audio: timelineAudioSettingsSchema.default({
+      muted: false,
+      volume: 1,
+      keyframes: []
+    }),
+    captions: z.array(timelineCaptionSchema).default([])
+  })
+  .superRefine((value, ctx) => {
+    if (value.outMs <= value.inMs) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["outMs"],
+        message: "Timeline clip outMs must be greater than inMs"
+      });
+    }
+    if (value.outMs > value.sourceDurationMs) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["outMs"],
+        message: "Timeline clip outMs exceeds source duration"
+      });
+    }
+    const editedDurationMs = value.outMs - value.inMs;
+    if (
+      value.transition.type !== "CUT" &&
+      value.transition.durationMs >= editedDurationMs
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["transition", "durationMs"],
+        message: "Transition must be shorter than edited clip duration"
+      });
+    }
+    for (let index = 0; index < value.audio.keyframes.length; index += 1) {
+      const keyframe = value.audio.keyframes[index]!;
+      if (keyframe.atMs > editedDurationMs) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["audio", "keyframes", index, "atMs"],
+          message: "Audio keyframe exceeds edited clip duration"
+        });
+      }
+      if (
+        index > 0 &&
+        value.audio.keyframes[index - 1]!.atMs >= keyframe.atMs
+      ) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["audio", "keyframes", index, "atMs"],
+          message: "Audio keyframes must be strictly increasing"
+        });
+      }
+    }
+  });
+
+export const timelineAudioItemSchema = z
+  .object({
+    id: entityIdSchema,
+    role: z.enum(["BGM", "NARRATION", "SFX"]).optional(),
+    sourceArtifactId: entityIdSchema,
+    sourceArtifactHash: sha256Schema,
+    sourceDurationMs: z.number().int().positive(),
+    inMs: z.number().int().nonnegative(),
+    outMs: z.number().int().positive(),
+    startMs: z.number().int().nonnegative(),
+    trackId: entityIdSchema,
+    order: z.number().int().nonnegative(),
+    deleted: z.boolean().default(false),
+    audio: timelineAudioSettingsSchema.default({
+      muted: false,
+      volume: 0.35,
+      keyframes: []
+    })
+  })
+  .superRefine((value, ctx) => {
+    if (value.outMs <= value.inMs || value.outMs > value.sourceDurationMs) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["outMs"],
+        message: "Timeline audio trim must be within source duration"
+      });
+    }
+  });
+
+export const timelineTextItemSchema = z
+  .object({
+    id: entityIdSchema,
+    kind: z.enum(["CAPTION", "CTA"]),
+    text: nonEmptyStringSchema,
+    startMs: z.number().int().nonnegative(),
+    endMs: z.number().int().positive(),
+    trackId: entityIdSchema,
+    order: z.number().int().nonnegative(),
+    position: z.enum(["TOP", "CENTER", "BOTTOM"]).default("BOTTOM"),
+    fontScale: z.number().min(0.5).max(3).default(1),
+    deleted: z.boolean().default(false)
+  })
+  .superRefine((value, ctx) => {
+    if (value.endMs <= value.startMs) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["endMs"],
+        message: "Timeline text endMs must be greater than startMs"
+      });
+    }
+  });
+
+export const timelineRepairMaskSchema = z
+  .object({
+    id: entityIdSchema,
+    sourceArtifactId: entityIdSchema,
+    sourceArtifactHash: sha256Schema,
+    startMs: z.number().int().nonnegative(),
+    endMs: z.number().int().positive(),
+    xRatio: z.number().min(0).max(1),
+    yRatio: z.number().min(0).max(1),
+    widthRatio: z.number().positive().max(1),
+    heightRatio: z.number().positive().max(1),
+    color: z.enum(["WHITE", "BLACK"]).default("WHITE"),
+    opacity: z.number().min(0.1).max(1).default(1),
+    reason: nonEmptyStringSchema,
+    deleted: z.boolean().default(false)
+  })
+  .superRefine((value, ctx) => {
+    if (value.endMs <= value.startMs) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["endMs"],
+        message: "Timeline repair mask endMs must be greater than startMs"
+      });
+    }
+    if (value.xRatio + value.widthRatio > 1.000001) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["widthRatio"],
+        message: "Timeline repair mask exceeds horizontal canvas bounds"
+      });
+    }
+    if (value.yRatio + value.heightRatio > 1.000001) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["heightRatio"],
+        message: "Timeline repair mask exceeds vertical canvas bounds"
+      });
+    }
+  });
+
+export const timelineSchema = z
+  .object({
+    id: entityIdSchema,
+    projectId: entityIdSchema,
+    version: z.number().int().positive(),
+    status: z.enum(["DRAFT", "CONFIRMED", "STALE"]),
+    productionPlanHash: sha256Schema,
+    tracks: z.array(timelineTrackSchema).min(1),
+    clips: z.array(timelineClipEditSchema),
+    audioItems: z.array(timelineAudioItemSchema).default([]),
+    textItems: z.array(timelineTextItemSchema).default([]),
+    repairMasks: z.array(timelineRepairMaskSchema).max(40).default([]),
+    renderConfig: z.lazy(() => renderConfigSchema).optional(),
+    autoEditOrigin: z.object({
+      operationKey: sha256Schema,
+      planArtifactId: entityIdSchema,
+      planHash: sha256Schema,
+      initialContentHash: sha256Schema
+    }).optional(),
+    contentHash: sha256Schema,
+    createdAt: isoDateTimeSchema,
+    updatedAt: isoDateTimeSchema,
+    confirmedAt: isoDateTimeSchema.optional()
+  })
+  .superRefine((value, ctx) => {
+    const trackIds = new Set(value.tracks.map((track) => track.id));
+    const ordersByTrack = new Map<string, Set<number>>();
+    for (let index = 0; index < value.clips.length; index += 1) {
+      const clip = value.clips[index]!;
+      if (!trackIds.has(clip.trackId)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["clips", index, "trackId"],
+          message: "Timeline clip references unknown track"
+        });
+      }
+      if (clip.deleted) continue;
+      const orders = ordersByTrack.get(clip.trackId) ?? new Set<number>();
+      if (orders.has(clip.order)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["clips", index, "order"],
+          message: "Timeline clip order must be unique within a track"
+        });
+      }
+      orders.add(clip.order);
+      ordersByTrack.set(clip.trackId, orders);
+    }
+    if (value.status === "CONFIRMED" && !value.confirmedAt) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["confirmedAt"],
+        message: "CONFIRMED Timeline requires confirmedAt"
+      });
+    }
+  });
+
+export const renderConfigSchema = z.object({
+  width: z.number().int().positive().default(720),
+  height: z.number().int().positive().default(1280),
+  fps: z.number().int().min(1).max(120).default(30),
+  videoCodec: z.literal("libx264").default("libx264"),
+  audioCodec: z.literal("aac").default("aac"),
+  format: z.literal("mp4").default("mp4")
+});
+
+export const renderJobSchema = z.object({
+  id: entityIdSchema,
+  projectId: entityIdSchema,
+  timelineId: entityIdSchema,
+  timelineHash: sha256Schema,
+  status: z.enum(["QUEUED", "RENDERING", "SUCCEEDED", "FAILED"]),
+  inputArtifactIds: z.array(entityIdSchema),
+  inputArtifactHashes: z.array(sha256Schema),
+  renderConfig: renderConfigSchema,
+  outputArtifactId: entityIdSchema.optional(),
+  outputArtifactHash: sha256Schema.optional(),
+  errorCode: nonEmptyStringSchema.optional(),
+  errorMessage: nonEmptyStringSchema.optional(),
+  createdAt: isoDateTimeSchema,
+  startedAt: isoDateTimeSchema.optional(),
+  completedAt: isoDateTimeSchema.optional()
 });
 
 export type Project = z.infer<typeof projectSchema>;
@@ -690,12 +1279,21 @@ export type ArtifactRecord = z.infer<typeof artifactRecordSchema>;
 export type AssetRef = z.infer<typeof assetRefSchema>;
 export type ProductFact = z.infer<typeof productFactSchema>;
 export type ForbiddenChange = z.infer<typeof forbiddenChangeSchema>;
+export type ProductUsageRule = z.infer<typeof productUsageRuleSchema>;
 export type ProductTruth = z.infer<typeof productTruthSchema>;
 export type CreativeBatch = z.infer<typeof creativeBatchSchema>;
 export type ScriptDraft = z.infer<typeof scriptDraftSchema>;
 export type Clip = z.infer<typeof clipSchema>;
 export type ProductionPlan = z.infer<typeof productionPlanSchema>;
+export type DirectorGenerationTarget = z.infer<typeof directorGenerationTargetSchema>;
 export type VideoModel = z.infer<typeof videoModelSchema>;
+export type GenerationProfile = z.infer<typeof generationProfileSchema>;
+export type ReferenceVideoProfile = z.infer<
+  typeof referenceVideoProfileSchema
+>;
+export type DreaminaVideoOperation = z.infer<
+  typeof dreaminaVideoOperationSchema
+>;
 export type CompiledPrompt = z.infer<typeof compiledPromptSchema>;
 export type ProviderIdentity = z.infer<typeof providerIdentitySchema>;
 export type ProviderCapability = z.infer<typeof providerCapabilitySchema>;
@@ -706,3 +1304,14 @@ export type CommandAttemptRecord = z.infer<typeof commandAttemptRecordSchema>;
 export type GenerationAttempt = z.infer<typeof generationAttemptSchema>;
 export type WorkflowBlocker = z.infer<typeof workflowBlockerSchema>;
 export type ReviewDecision = z.infer<typeof reviewDecisionSchema>;
+export type TimelineTrack = z.infer<typeof timelineTrackSchema>;
+export type TimelineTransition = z.infer<typeof timelineTransitionSchema>;
+export type TimelineAudioSettings = z.infer<typeof timelineAudioSettingsSchema>;
+export type TimelineCaption = z.infer<typeof timelineCaptionSchema>;
+export type TimelineClipEdit = z.infer<typeof timelineClipEditSchema>;
+export type TimelineAudioItem = z.infer<typeof timelineAudioItemSchema>;
+export type TimelineTextItem = z.infer<typeof timelineTextItemSchema>;
+export type TimelineRepairMask = z.infer<typeof timelineRepairMaskSchema>;
+export type Timeline = z.infer<typeof timelineSchema>;
+export type RenderConfig = z.infer<typeof renderConfigSchema>;
+export type RenderJob = z.infer<typeof renderJobSchema>;

@@ -1,3 +1,5 @@
+import type { RenderConfig } from "../../domain/schemas.js";
+
 export type FinalAssemblyStatus = "READY" | "ACCEPTED" | "STALE";
 
 export type FinalAssembly = {
@@ -9,6 +11,10 @@ export type FinalAssembly = {
   inputArtifactHashes: string[];
   outputArtifactId: string;
   outputArtifactHash: string;
+  timelineId?: string;
+  timelineHash?: string;
+  renderJobId?: string;
+  renderConfig?: RenderConfig;
   status: FinalAssemblyStatus;
   createdAt: string;
   acceptedAt?: string;

@@ -65,8 +65,9 @@
     "args": [
       "user_credit"
     ],
-    "authenticatedRegex": "\"total_credit\"\\s*:\\s*\\d+",
-    "notAuthenticatedRegex": "(?:未登录|not logged|login required|unauthorized|authentication required)"
+    "authenticatedRegex": "\"user_id\"\\s*:\\s*[1-9]\\d*",
+    "notAuthenticatedRegex": "(?:未登录|not logged|login required|unauthorized|authentication required|\"user_id\"\\s*:\\s*0|\"user_name\"\\s*:\\s*\"\")",
+    "creditsRegex": "\"total_credit\"\\s*:\\s*(\\d+)"
   },
   "estimate": {
     "argsTemplate": [
@@ -97,7 +98,7 @@
     "minAssets": 1,
     "taskIdRegex": "\"submit_id\"\\s*:\\s*\"([^\"]+)\"",
     "submitIdRegex": "\"submit_id\"\\s*:\\s*\"([^\"]+)\"",
-    "failedRegex": "(?:\"gen_status\"\\s*:\\s*\"fail\"|AigcComplianceConfirmationRequired)",
+    "failedRegex": "(?:\"gen_status\"\\s*:\\s*\"fail\"|AigcComplianceConfirmationRequired|当前账号没有\\s*dreamina_cli\\s*使用权限|current account is not allowed to use dreamina_cli)",
     "outcomeUnknownRegex": "(?:timeout|timed out|connection reset|connection aborted|EOF|unexpected end)"
   },
   "status": {

@@ -1,6 +1,8 @@
 import type { GenerationAttempt, WorkflowBlocker } from "../../domain/schemas.js";
 
 export interface WorkflowRepository {
+  /** Durable compare-and-set; real database adapters implement this. Test adapters may use the process queue. */
+  claimCreatedAttempt?(id: string): Promise<GenerationAttempt | null>;
   createBlocker(blocker: WorkflowBlocker): Promise<WorkflowBlocker>;
   listOpenBlockers(projectId: string): Promise<WorkflowBlocker[]>;
   resolveBlocker(id: string, resolvedAt: string): Promise<WorkflowBlocker>;

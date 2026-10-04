@@ -20,6 +20,10 @@ function hashWithoutRuntimeFields(value: Record<string, unknown>): string {
 }
 
 export type ClaimDisposition = "KEEP_UNVERIFIED" | "REJECT" | "PROMOTE";
+export type UsageRuleDisposition =
+  | "KEEP_UNVERIFIED"
+  | "REJECT"
+  | "CONFIRM";
 
 export function assertCanonicalProductArtifactReady(
   truthInput: ProductTruth,
@@ -115,6 +119,11 @@ export type ProductionPlanSegmentRevision = {
   };
 };
 
+export type ProductionPlanClipRevision = {
+  id: string;
+  durationMs?: number;
+};
+
 function stateWithHash(input: {
   description: string;
   productState: string;
@@ -132,6 +141,7 @@ export function reviseProductionPlanDraft(
     visualDirection?: string;
     soundDirection?: string;
     productShowcaseRules?: string[];
+    clips?: ProductionPlanClipRevision[];
     segments: ProductionPlanSegmentRevision[];
   }
 ): ProductionPlan {
@@ -152,8 +162,13 @@ export function reviseProductionPlanDraft(
   }
 
   const patchById = new Map(input.segments.map((item) => [item.id, item]));
+  const clipPatchById = new Map((input.clips ?? []).map((item) => [item.id, item]));
   for (const scene of next.scenes) {
     for (const clip of scene.clips) {
+      const clipPatch = clipPatchById.get(clip.id);
+      if (clipPatch?.durationMs !== undefined) {
+        clip.durationMs = clipPatch.durationMs;
+      }
       for (const segment of clip.segments) {
         const patch = patchById.get(segment.id);
         if (!patch) continue;
@@ -180,6 +195,12 @@ export function reviseProductionPlanDraft(
           segment.continuityOut = stateWithHash(patch.continuityOut);
         }
       }
+      if (clipPatch?.durationMs !== undefined && clip.segments.length) {
+        const last = clip.segments[clip.segments.length - 1]!;
+        if (!patchById.get(last.id)?.endMs) {
+          last.endMs = clip.durationMs;
+        }
+      }
       if (clip.segments.length) {
         clip.openingState = structuredClone(clip.segments[0]!.continuityIn);
         clip.closingState = structuredClone(
@@ -203,7 +224,8 @@ export function reviseProductionPlanDraft(
 export function confirmProductTruthDraft(
   draftInput: ProductTruth,
   dispositions: Record<string, ClaimDisposition>,
-  now = new Date()
+  now = new Date(),
+  usageRuleDispositions: Record<string, UsageRuleDisposition> = {}
 ): ProductTruth {
   const draft = productTruthSchema.parse(draftInput);
   if (draft.status !== "DRAFT") {
@@ -212,6 +234,14 @@ export function confirmProductTruthDraft(
   const createdAt = now.toISOString();
   const promotedFacts: ProductTruth["confirmedFeatures"] = [];
   const uncertainClaims = draft.uncertainClaims.map((claim) => {
+    // A new Product Truth DRAFT can be created from an already-confirmed
+    // version when Research candidates are appended. Claims that were
+    // disposed in an earlier review are immutable history and must not be
+    // re-disposed; in particular, a PROMOTED claim must retain its
+    // promotedFactId and matching ProductFact relationship.
+    if (claim.dispositionConfirmedByUser) {
+      return claim;
+    }
     const disposition = dispositions[claim.id];
     if (!disposition) {
       throw new DomainValidationError(
@@ -233,11 +263,18 @@ export function confirmProductTruthDraft(
       };
     }
     const factId = randomUUID();
+    const evidenceRef =
+      claim.sourceType === "research" && claim.evidenceRefs?.length
+        ? claim.evidenceRefs[0]
+        : `user-confirmed-promotion:${claim.id}`;
     promotedFacts.push({
       id: factId,
       statement: claim.statement,
-      sourceType: "user" as const,
-      evidenceRef: `user-confirmed-promotion:${claim.id}`,
+      sourceType:
+        claim.sourceType === "research"
+          ? ("external" as const)
+          : ("user" as const),
+      evidenceRef,
       createdAt
     });
     return {
@@ -248,6 +285,35 @@ export function confirmProductTruthDraft(
     };
   });
 
+  const usageRules = (draft.usageRules ?? []).map((rule) => {
+    if (rule.dispositionConfirmedByUser) return rule;
+    const disposition = usageRuleDispositions[rule.id];
+    if (!disposition) {
+      throw new DomainValidationError(
+        `Missing user disposition for ProductUsageRule: ${rule.id}`
+      );
+    }
+    if (disposition === "CONFIRM") {
+      return {
+        ...rule,
+        status: "CONFIRMED" as const,
+        dispositionConfirmedByUser: true
+      };
+    }
+    if (disposition === "REJECT") {
+      return {
+        ...rule,
+        status: "REJECTED" as const,
+        dispositionConfirmedByUser: true
+      };
+    }
+    return {
+      ...rule,
+      status: "UNVERIFIED" as const,
+      dispositionConfirmedByUser: true
+    };
+  });
+
   const base = {
     ...draft,
     id: randomUUID(),
@@ -255,6 +321,7 @@ export function confirmProductTruthDraft(
     status: "CONFIRMED" as const,
     confirmedFeatures: [...draft.confirmedFeatures, ...promotedFacts],
     uncertainClaims,
+    usageRules,
     confirmedAt: createdAt
   };
   return productTruthSchema.parse({

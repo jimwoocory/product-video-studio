@@ -13,16 +13,53 @@ import { PrismaGenerationRepository } from "../adapters/db/prisma-generation-rep
 import { PrismaReviewRepository } from "../adapters/db/prisma-review-repository.js";
 import { PrismaProviderAuditRepository } from "../adapters/db/prisma-provider-audit-repository.js";
 import { PrismaFinalOutputRepository } from "../adapters/db/prisma-final-output-repository.js";
+import { PrismaAiSettingsRepository } from "../adapters/db/prisma-ai-settings-repository.js";
+import { PrismaAgentTaskRepository } from "../adapters/db/prisma-agent-task-repository.js";
+import { PrismaReferenceVideoRepository } from "../adapters/db/prisma-reference-video-repository.js";
+import { PrismaResearchRepository } from "../adapters/db/prisma-research-repository.js";
+import { PrismaTimelineRepository } from "../adapters/db/prisma-timeline-repository.js";
+import { PrismaPublishRepository } from "../adapters/db/prisma-publish-repository.js";
 import { prisma } from "../adapters/db/prisma-client.js";
 import { LocalArtifactStore } from "../adapters/store/local-artifact-store.js";
 import { LocalProductInputStore } from "../adapters/store/local-product-input-store.js";
 import { HermesStructuredAiRuntime } from "../adapters/ai/hermes-structured-ai-runtime.js";
+import { AiRuntimeRouter } from "../adapters/ai/ai-runtime-router.js";
+import { WindowsDpapiSecretStore } from "../adapters/store/windows-dpapi-secret-store.js";
 import { validateReferenceImagesForPreflight } from "../adapters/media/reference-image-validator.js";
+import { probeMediaDurationMs } from "../adapters/media/probe-media-duration.js";
 import { HermesProductDirectorGenerator } from "../adapters/ai/hermes-product-director-generator.js";
 import { OfficialDouyinOpenApiProvider } from "../adapters/publish/official-douyin-openapi-provider.js";
+import { DouyinOpenApiDirectProviderAdapter } from "../adapters/publish/douyin-openapi-direct-provider.js";
+import { DouyinSdkHandoffProvider } from "../adapters/publish/douyin-sdk-handoff-provider.js";
+import { DouyinH5HandoffProvider } from "../adapters/publish/douyin-h5-handoff-provider.js";
+import { ManualExportProvider } from "../adapters/publish/manual-export-provider.js";
+import { HttpWebResearchProvider } from "../adapters/research/http-web-research-provider.js";
+import { ExternalBrowserResearchProvider } from "../adapters/research/external-browser-research-provider.js";
+import { HybridBrowserResearchProvider } from "../adapters/research/public-search-research-provider.js";
+import { DefaultResearchMediaAnalyzer } from "../adapters/research/research-media-analyzer.js";
 import { ProductFlowService } from "../application/services/product-flow.js";
 import { loadGenerationConfig } from "../application/config/generation-config.js";
 import { AiGenerationService } from "../application/services/ai-generation.js";
+import { AiSettingsService, p1AiSteps } from "../application/services/ai-settings-service.js";
+import { DreaminaAgentCapabilityService } from "../application/services/dreamina-agent-capability.js";
+import { directorGenerationSettingsSchema, resolveDirectorGenerationTarget } from "../application/services/director-generation-target.js";
+import { AgentModeService } from "../application/services/agent-mode-service.js";
+import {CreativeReferenceService} from "../application/services/creative-reference-service.js";
+import {PrismaCreativeReferenceRepository} from "../adapters/db/prisma-creative-reference-repository.js";
+import {collectResearchReferences} from "../application/services/collect-research-references.js";
+import {handleCreativeReferenceHttp} from "./creative-reference-http.js";
+import { BatchGenerationService } from "../application/services/batch-generation-service.js";
+import { SmartGenerationService } from "../application/services/smart-generation-service.js";
+import { ApplicationSmartProduction } from "../application/services/smart-production-adapter.js";
+import { PrismaSmartRunRepository } from "../adapters/db/prisma-smart-run-repository.js";
+import { startSmartGenerationWorker } from "../application/services/smart-generation-worker.js";
+import { handleSmartGenerationHttp } from "./smart-generation-http.js";
+import { handleAutoEditHttp } from "./auto-edit-http.js";
+import { AutoEditService } from "../application/services/auto-edit-service.js";
+import { VisualEditAssessmentService } from "../application/services/visual-edit-assessment.js";
+import { WindowsSpeechSynthesis } from "../adapters/media/windows-speech-synthesis.js";
+import { ReferenceVideoAnalysisService } from "../application/services/reference-video-analysis.js";
+import { ResearchService } from "../application/services/research-service.js";
 import { ProductDirectorService } from "../application/services/product-director.js";
 import { GenerationPreflightService } from "../application/services/generation-preflight.js";
 import { ApprovalService } from "../application/services/approval-service.js";
@@ -31,6 +68,13 @@ import { ReviewService } from "../application/services/review-service.js";
 import { ProjectSnapshotService } from "../application/services/project-snapshot.js";
 import { RecoveryService } from "../application/services/recovery-service.js";
 import { FinalAssemblyService } from "../application/services/final-assembly-service.js";
+import {
+  TimelineService,
+  timelineDurationMs
+} from "../application/services/timeline-service.js";
+import { RenderEngine } from "../application/services/render-engine.js";
+import { PublishProviderRegistry } from "../application/services/publish-provider-registry.js";
+import { PublishBridgeService } from "../application/services/publish-bridge-service.js";
 import { DouyinPublishService } from "../application/services/douyin-publish-service.js";
 import {
   assertCanonicalProductArtifactReady,
@@ -40,6 +84,8 @@ import {
   reviseProductionPlanDraft,
   reviseScriptDraft,
   type ClaimDisposition,
+  type UsageRuleDisposition,
+  type ProductionPlanClipRevision,
   type ProductionPlanSegmentRevision,
   type ScriptBeatRevision
 } from "../application/services/review-actions.js";
@@ -54,10 +100,18 @@ import type { ProviderCommandEvidence } from "../application/ports/video-provide
 import { DomainValidationError } from "../domain/validation.js";
 import {
   commandAttemptRecordSchema,
-  providerIdentitySchema
+  providerIdentitySchema,
+  projectSchema
 } from "../domain/schemas.js";
 import { sha256Bytes } from "../domain/hashing.js";
-import { renderProjectPage, renderProjectsPage } from "./workbench-ui.js";
+import { publishProviderTypeSchema } from "../domain/publish.js";
+import { qrCodeSvg } from "./qr-code.js";
+import { canServeArtifactContent } from "./artifact-media-policy.js";
+import {
+  renderMobilePublishPage,
+  renderPublishSettingsPage
+} from "./publish-ui.js";
+import { renderAgentHome, renderAgentProjectPage, renderAiSettingsPage, renderProjectPage, renderProjectModelSettingsPage, renderProjectsPage, renderReferenceVideoPage, renderResearchPage } from "./workbench-ui.js";
 import type {
   AssetRef,
   CreativeBatch,
@@ -76,6 +130,17 @@ export type WebDependencies = {
   review: ReviewRepository;
   providerAudit: ProviderAuditRepository;
   finalOutput: FinalOutputRepository;
+  aiSettings: AiSettingsService;
+  dreaminaCapability: DreaminaAgentCapabilityService;
+  agentMode: AgentModeService;
+  smartGeneration?: SmartGenerationService;
+  batchGeneration?: BatchGenerationService;
+  creativeReferences?: CreativeReferenceService;
+  collectCreativeReferences?: (projectId:string)=>Promise<{mediaCount:number;failures:string[]}>;
+  autoEdit?: AutoEditService;
+  visualEditAssessment?: VisualEditAssessmentService;
+  referenceVideo: ReferenceVideoAnalysisService;
+  research: ResearchService;
   productInput: ProductInputStore;
   aiGeneration: AiGenerationService;
   productDirector: ProductDirectorService;
@@ -83,6 +148,9 @@ export type WebDependencies = {
   approval: ApprovalService;
   execution: GenerationExecutionService;
   reviewService: ReviewService;
+  timeline: TimelineService;
+  renderEngine: RenderEngine;
+  publishBridge: PublishBridgeService;
   finalAssembly: FinalAssemblyService;
   douyinPublish: DouyinPublishService;
   snapshots: ProjectSnapshotService;
@@ -98,19 +166,26 @@ export function createDefaultDependencies(): WebDependencies {
   const review = new PrismaReviewRepository(prisma);
   const providerAudit = new PrismaProviderAuditRepository(prisma);
   const finalOutput = new PrismaFinalOutputRepository(prisma);
+  const aiSettingsRepo = new PrismaAiSettingsRepository(prisma);
+  const agentTasks = new PrismaAgentTaskRepository(prisma);
+  const referenceVideos = new PrismaReferenceVideoRepository(prisma);
+  const researchRepo = new PrismaResearchRepository(prisma);
+  const timelineRepo = new PrismaTimelineRepository(prisma);
+  const publishRepo = new PrismaPublishRepository(prisma);
+  const secretStore = new WindowsDpapiSecretStore();
+  const aiSettings = new AiSettingsService(aiSettingsRepo, secretStore);
+  let creativeReferences: CreativeReferenceService;
   const productFlow = new ProductFlowService(
-    new PrismaProductFlowRepository(prisma)
+    new PrismaProductFlowRepository(prisma),
+    {assertExpected:(projectId,expected)=>creativeReferences.assertExpected(projectId,expected)}
   );
   const projectsRoot = path.resolve(process.env.PROJECTS_ROOT ?? "projects");
   const productInput = new LocalProductInputStore(projectsRoot, artifacts);
   const provider = createConfiguredDomesticJimengProvider({
     resolveGenerationAssets: async (request) => {
       const snapshot = await productInput.latest(request.projectId);
-      if (!snapshot) {
-        throw new DomainValidationError(
-          "Saved Product Input is required to resolve dreamina reference assets"
-        );
-      }
+      const referenceSet=request.agentTaskId?null:await creativeReferences.assertExpected(request.projectId,request.inputVersionRefs.find(r=>r.entityType==="CreativeReferenceSet"));
+      const availableAssets=[...(snapshot?.assets??[]),...CreativeReferenceService.assets(referenceSet)];
       const projectRoot = path.resolve(projectsRoot, request.projectId);
       const resolved = [];
       for (const manifest of [...request.assetManifest].sort(
@@ -118,24 +193,21 @@ export function createDefaultDependencies(): WebDependencies {
           a.priority - b.priority ||
           a.assetId.localeCompare(b.assetId)
       )) {
-        const asset = snapshot.assets.find(
+        const asset = availableAssets.find(
           (item) => item.id === manifest.assetId
         );
-        if (!asset) {
-          if (manifest.required) {
-            throw new DomainValidationError(
-              `Required Product Input asset is missing: ${manifest.assetId}`
-            );
-          }
+        const artifact = asset
+          ? await artifacts.findById(asset.artifactId)
+          : await artifacts.findById(manifest.assetId);
+        if (!artifact && !manifest.required) {
           continue;
         }
-        const artifact = await artifacts.findById(asset.artifactId);
         if (
           !artifact ||
           artifact.projectId !== request.projectId ||
           artifact.integrityStatus !== "READY" ||
           !artifact.sha256 ||
-          artifact.sha256 !== asset.sha256 ||
+          (asset ? artifact.sha256 !== asset.sha256 : false) ||
           artifact.sha256 !== manifest.artifactHash
         ) {
           throw new DomainValidationError(
@@ -169,21 +241,54 @@ export function createDefaultDependencies(): WebDependencies {
           artifactHash: manifest.artifactHash,
           role: manifest.role,
           priority: manifest.priority,
-          required: manifest.required
+          required: manifest.required,
+          ...(manifest.inputType ? { inputType: manifest.inputType } : {})
         });
       }
       return resolved;
     }
   });
-  const aiRuntime = new HermesStructuredAiRuntime(process.cwd());
+  const hermesRuntime = new HermesStructuredAiRuntime(process.cwd());
+  const aiRuntime = new AiRuntimeRouter(aiSettings, aiSettingsRepo, hermesRuntime);
+  const visualEditAssessment = new VisualEditAssessmentService({
+    artifacts,
+    productInput,
+    runtime: aiRuntime,
+    projectsRoot
+  });
+  creativeReferences=new CreativeReferenceService({repo:new PrismaCreativeReferenceRepository(prisma),artifacts,productInput,productFlow,runtime:aiRuntime,projectsRoot});
+  const researchMediaAnalyzer=new DefaultResearchMediaAnalyzer(aiRuntime,{allowPrivateNetwork:process.env.PVS_RESEARCH_ALLOW_PRIVATE==="1"},creativeReferences);
+  const referenceVideo = new ReferenceVideoAnalysisService(
+    referenceVideos,
+    artifacts,
+    aiRuntime,
+    projectsRoot
+  );
+  const research = new ResearchService(
+    researchRepo,
+    new HttpWebResearchProvider({
+      allowPrivateNetwork:
+        process.env.PVS_RESEARCH_ALLOW_PRIVATE === "1"
+    }),
+    new HybridBrowserResearchProvider(
+      new ExternalBrowserResearchProvider()
+    ),
+    aiRuntime,
+    productFlow,
+    researchMediaAnalyzer
+  );
   const generationConfig = loadGenerationConfig();
+  const dreaminaCapability = new DreaminaAgentCapabilityService(provider);
   const preflight = new GenerationPreflightService(
     generation,
     workflow,
     provider,
     (projectId, entityKey) =>
       productFlow.nextVersion(projectId, "CompiledPrompt", entityKey),
-    generationConfig.model
+    generationConfig.model,
+    aiRuntime,
+    dreaminaCapability,
+    creativeReferences
   );
   const approval = new ApprovalService(generation, workflow);
   const execution = new GenerationExecutionService(
@@ -192,6 +297,21 @@ export function createDefaultDependencies(): WebDependencies {
     artifacts,
     providerAudit,
     provider,
+    projectsRoot,
+    review,
+    creativeReferences
+  );
+  const agentMode = new AgentModeService(
+    agentTasks,
+    generation,
+    workflow,
+    artifacts,
+    provider,
+    approval,
+    execution,
+    dreaminaCapability,
+    finalOutput,
+    productFlow,
     projectsRoot
   );
   const reviewService = new ReviewService(
@@ -200,6 +320,21 @@ export function createDefaultDependencies(): WebDependencies {
     workflow,
     artifacts,
     review
+  );
+  const timeline = new TimelineService(
+    productFlow,
+    workflow,
+    artifacts,
+    review,
+    timelineRepo,
+    projectsRoot
+  );
+  const renderEngine = new RenderEngine(
+    productFlow,
+    artifacts,
+    timelineRepo,
+    finalOutput,
+    projectsRoot
   );
   const finalAssembly = new FinalAssemblyService(
     productFlow,
@@ -210,6 +345,20 @@ export function createDefaultDependencies(): WebDependencies {
     projectsRoot
   );
   const douyinProvider = new OfficialDouyinOpenApiProvider();
+  const publishProviders = new PublishProviderRegistry([
+    new DouyinSdkHandoffProvider(),
+    new DouyinH5HandoffProvider(),
+    new DouyinOpenApiDirectProviderAdapter(douyinProvider),
+    new ManualExportProvider()
+  ]);
+  const publishBridge = new PublishBridgeService(
+    productFlow,
+    artifacts,
+    finalOutput,
+    publishRepo,
+    publishProviders,
+    projectsRoot
+  );
   const douyinPublish = new DouyinPublishService(
     productFlow,
     workflow,
@@ -226,7 +375,11 @@ export function createDefaultDependencies(): WebDependencies {
     generation,
     workflow,
     review,
-    providerAudit
+    providerAudit,
+    referenceVideos,
+    researchRepo,
+    timelineRepo,
+    publishBridge
   );
   const recovery = new RecoveryService(
     projectsRoot,
@@ -235,7 +388,27 @@ export function createDefaultDependencies(): WebDependencies {
     workflow,
     snapshots
   );
-  return {
+  const aiGeneration = new AiGenerationService(aiRuntime,creativeReferences);
+  const productDirector = new ProductDirectorService(new HermesProductDirectorGenerator(aiRuntime), aiRuntime,creativeReferences);
+  const batchGeneration = new BatchGenerationService(productFlow, generation, workflow, review, execution);
+  const autoEdit = new AutoEditService({ productFlow, workflow, review, artifacts, timelines: timelineRepo, projectsRoot, speech: new WindowsSpeechSynthesis(), visualReview: visualEditAssessment });
+  const smartGeneration = new SmartGenerationService(new PrismaSmartRunRepository(prisma), new ApplicationSmartProduction({
+    productFlow, productInput, artifacts, aiGeneration, productDirector, referenceVideo, research,
+    generation, workflow, review, dreaminaCapability, preflight, approval, execution, batchGeneration,
+    finalOutput, renderEngine, timeline, projectsRoot, creativeReferences,
+    reviewService, visualReview: visualEditAssessment,
+    autoEdit: async run => {
+      const result = await autoEdit.create({ projectId: run.projectId, attemptIds: run.attemptIds, expectedPlanHash: run.productionPlan!.contentHash,
+        settings: run.postProduction ?? run.options.postProduction ?? { bgmArtifactId: run.options.bgmArtifactId, allowSilentOutput: run.options.allowSilentOutput } });
+      const confirmed = await timeline.confirm(run.projectId, { id: result.timeline.id, hash: result.timeline.contentHash });
+      return { timelineRef: { id: confirmed.id, hash: confirmed.contentHash }, autoEditArtifactId: result.planArtifactId };
+    },
+    preflightAudit: async (projectId, result) => { await persistPreflightProviderAudit(dependencies, projectId, result.probe); }
+  }));
+  const dependencies: WebDependencies = {
+    creativeReferences,
+    visualEditAssessment,
+    collectCreativeReferences:(projectId)=>collectResearchReferences(projectId,research,productFlow,researchMediaAnalyzer),
     productFlow,
     workflow,
     artifacts,
@@ -243,15 +416,24 @@ export function createDefaultDependencies(): WebDependencies {
     review,
     providerAudit,
     finalOutput,
+    aiSettings,
+    dreaminaCapability,
+    agentMode,
+    referenceVideo,
+    research,
     productInput,
-    aiGeneration: new AiGenerationService(aiRuntime),
-    productDirector: new ProductDirectorService(
-      new HermesProductDirectorGenerator(aiRuntime)
-    ),
+    aiGeneration,
+    productDirector,
+    smartGeneration,
+    batchGeneration,
+    autoEdit,
     preflight,
     approval,
     execution,
     reviewService,
+    timeline,
+    renderEngine,
+    publishBridge,
     finalAssembly,
     douyinPublish,
     snapshots,
@@ -259,6 +441,7 @@ export function createDefaultDependencies(): WebDependencies {
     projectsRoot,
     provider
   };
+  return dependencies;
 }
 
 function json(res: http.ServerResponse, status: number, body: unknown): void {
@@ -267,7 +450,10 @@ function json(res: http.ServerResponse, status: number, body: unknown): void {
 }
 
 function html(res: http.ServerResponse, status: number, body: string): void {
-  res.writeHead(status, { "content-type": "text/html; charset=utf-8" });
+  res.writeHead(status, {
+    "content-type": "text/html; charset=utf-8",
+    "cache-control": "no-store, max-age=0"
+  });
   res.end(body);
 }
 
@@ -299,12 +485,17 @@ function safeFileName(name: string): string {
   return base || "upload.bin";
 }
 
-function decodeBase64(value: string): Buffer {
+function decodeBase64(
+  value: string,
+  maxBytes = 10 * 1024 * 1024
+): Buffer {
   const raw = value.includes(",") ? value.slice(value.indexOf(",") + 1) : value;
   const bytes = Buffer.from(raw, "base64");
   if (!bytes.length) throw new DomainValidationError("Uploaded file is empty");
-  if (bytes.byteLength > 10 * 1024 * 1024) {
-    throw new DomainValidationError("Each uploaded file must be <= 10MB");
+  if (bytes.byteLength > maxBytes) {
+    throw new DomainValidationError(
+      "Uploaded file exceeds the allowed size"
+    );
   }
   return bytes;
 }
@@ -314,6 +505,58 @@ function requireString(value: unknown, label: string): string {
     throw new DomainValidationError(`${label} is required`);
   }
   return value.trim();
+}
+
+function optionalNumber(value: unknown, label: string): number | undefined {
+  if (value === undefined || value === null || value === "") return undefined;
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new DomainValidationError(label + " must be a finite number");
+  }
+  return value;
+}
+
+function requestPublicBaseUrl(req: http.IncomingMessage): string {
+  const configured = process.env.PVS_PUBLIC_BASE_URL?.trim();
+  if (configured) {
+    const url = new URL(configured);
+    if (url.protocol !== "http:" && url.protocol !== "https:") {
+      throw new DomainValidationError(
+        "PVS_PUBLIC_BASE_URL must use http/https"
+      );
+    }
+    return url.toString().replace(/\/$/, "");
+  }
+  const forwardedProto = String(
+    req.headers["x-forwarded-proto"] ?? ""
+  )
+    .split(",")[0]
+    ?.trim();
+  const proto = forwardedProto === "https" ? "https" : "http";
+  const forwardedHost = String(
+    req.headers["x-forwarded-host"] ?? ""
+  )
+    .split(",")[0]
+    ?.trim();
+  const host = forwardedHost || req.headers.host;
+  if (!host || /[\r\n]/.test(host)) {
+    throw new DomainValidationError("Request host is required");
+  }
+  return new URL(proto + "://" + host).toString().replace(/\/$/, "");
+}
+
+function bearerToken(req: http.IncomingMessage): string | undefined {
+  const value = req.headers.authorization?.trim();
+  if (!value) return undefined;
+  const match = value.match(/^Bearer\s+(.+)$/i);
+  return match?.[1]?.trim() || undefined;
+}
+
+function requireBearerToken(req: http.IncomingMessage): string {
+  const token = bearerToken(req);
+  if (!token) {
+    throw new DomainValidationError("Bearer publish session is required");
+  }
+  return token;
 }
 
 async function refreshProjectSnapshot(
@@ -473,15 +716,18 @@ export async function persistPreflightProviderAudit(
 export function createAppServer(
   deps: WebDependencies = createDefaultDependencies()
 ): http.Server {
-  return http.createServer(async (req, res) => {
+  const server = http.createServer(async (req, res) => {
     try {
       const url = new URL(req.url ?? "/", "http://localhost");
+      if (await handleCreativeReferenceHttp(req,res,url,deps)) return;
+      if (await handleSmartGenerationHttp(req, res, url, deps)) return;
+      if (await handleAutoEditHttp(req, res, url, deps)) return;
 
       if (req.method === "GET" && url.pathname === "/health") {
         return json(res, 200, {
           status: "ok",
           service: "product-video-studio",
-          specVersion: "P0-V0.2"
+          specVersion: "P1-0.3.0-p1-final"
         });
       }
 
@@ -492,6 +738,151 @@ export function createAppServer(
           probe
         );
         return json(res, 200, { probe, blocker, waitingForUser: Boolean(blocker) });
+      }
+
+      if (
+        req.method === "GET" &&
+        url.pathname === "/api/dreamina/capabilities"
+      ) {
+        return json(res, 200, {
+          registry: await deps.dreaminaCapability.registry()
+        });
+      }
+
+      if (req.method === "POST" && url.pathname === "/api/ai/providers") {
+        const body = await readJson(req);
+        const provider = await deps.aiSettings.saveProvider(body);
+        return json(res, 200, { provider });
+      }
+
+      const aiProviderTestMatch = url.pathname.match(
+        /^\/api\/ai\/providers\/([^/]+)\/test$/
+      );
+      if (req.method === "POST" && aiProviderTestMatch) {
+        const result = await deps.aiSettings.testProvider(
+          decodeURIComponent(aiProviderTestMatch[1]!)
+        );
+        return json(res, 200, result);
+      }
+
+      const aiProviderRefreshMatch = url.pathname.match(
+        /^\/api\/ai\/providers\/([^/]+)\/models\/refresh$/
+      );
+      if (req.method === "POST" && aiProviderRefreshMatch) {
+        const models = await deps.aiSettings.refreshModels(
+          decodeURIComponent(aiProviderRefreshMatch[1]!)
+        );
+        return json(res, 200, { models });
+      }
+
+      const aiProviderManualModelMatch = url.pathname.match(
+        /^\/api\/ai\/providers\/([^/]+)\/models\/manual$/
+      );
+      if (req.method === "POST" && aiProviderManualModelMatch) {
+        const body = (await readJson(req)) as {
+          modelId?: unknown;
+          displayName?: unknown;
+          capabilities?: unknown;
+        };
+        const models = await deps.aiSettings.addManualModel(
+          decodeURIComponent(aiProviderManualModelMatch[1]!),
+          body.modelId,
+          body.displayName,
+          body.capabilities
+        );
+        return json(res, 200, { models });
+      }
+
+      const aiModelCapabilitiesMatch = url.pathname.match(
+        /^\/api\/ai\/providers\/([^/]+)\/models\/capabilities$/
+      );
+      if (req.method === "POST" && aiModelCapabilitiesMatch) {
+        const body = (await readJson(req)) as {
+          modelId?: unknown;
+          capabilities?: unknown;
+        };
+        const model = await deps.aiSettings.setModelCapabilities(
+          decodeURIComponent(aiModelCapabilitiesMatch[1]!),
+          body.modelId,
+          body.capabilities
+        );
+        return json(res, 200, { model });
+      }
+
+      if (req.method === "POST" && url.pathname === "/api/ai/default") {
+        const body = (await readJson(req)) as {
+          providerId?: unknown;
+          modelId?: unknown;
+        };
+        const preference = await deps.aiSettings.setSystemPreference({
+          ...(typeof body.providerId === "string" && body.providerId
+            ? { defaultProviderId: body.providerId }
+            : {}),
+          ...(typeof body.modelId === "string" && body.modelId
+            ? { defaultModelId: body.modelId }
+            : {})
+        });
+        return json(res, 200, { preference });
+      }
+
+      const projectAiDefaultMatch = url.pathname.match(
+        /^\/api\/projects\/([^/]+)\/ai\/default$/
+      );
+      if (req.method === "POST" && projectAiDefaultMatch) {
+        const projectId = projectAiDefaultMatch[1]!;
+        if (!(await deps.productFlow.getProject(projectId))) {
+          return json(res, 404, { error: "PROJECT_NOT_FOUND" });
+        }
+        const body = (await readJson(req)) as {
+          providerId?: unknown;
+          modelId?: unknown;
+        };
+        const preference = await deps.aiSettings.setProjectPreference(
+          projectId,
+          {
+            ...(typeof body.providerId === "string" && body.providerId
+              ? { defaultProviderId: body.providerId }
+              : {}),
+            ...(typeof body.modelId === "string" && body.modelId
+              ? { defaultModelId: body.modelId }
+              : {})
+          }
+        );
+        return json(res, 200, { preference });
+      }
+
+      const projectAiStepMatch = url.pathname.match(
+        /^\/api\/projects\/([^/]+)\/ai\/step$/
+      );
+      if (req.method === "POST" && projectAiStepMatch) {
+        const projectId = projectAiStepMatch[1]!;
+        if (!(await deps.productFlow.getProject(projectId))) {
+          return json(res, 404, { error: "PROJECT_NOT_FOUND" });
+        }
+        const body = (await readJson(req)) as {
+          step?: unknown;
+          providerId?: unknown;
+          modelId?: unknown;
+        };
+        if (
+          typeof body.step !== "string" ||
+          !p1AiSteps.some((item) => item.step === body.step)
+        ) {
+          throw new DomainValidationError("无效的 AI 生产步骤");
+        }
+        const selection =
+          typeof body.providerId === "string" &&
+          body.providerId &&
+          typeof body.modelId === "string" &&
+          body.modelId
+            ? { providerId: body.providerId, modelId: body.modelId }
+            : null;
+        const override = await deps.aiSettings.setStepOverride(
+          projectId,
+          body.step as (typeof p1AiSteps)[number]["step"],
+          selection
+        );
+        return json(res, 200, { override });
       }
 
       if (req.method === "GET" && url.pathname === "/api/projects") {
@@ -509,7 +900,7 @@ export function createAppServer(
         const targetDurationMs =
           typeof body.targetDurationMs === "number" ? body.targetDurationMs : 60000;
         const now = new Date().toISOString();
-        const project: Project = {
+        const project = projectSchema.parse({
           id: randomUUID(),
           name: body.name.trim(),
           status: "DRAFT",
@@ -518,7 +909,7 @@ export function createAppServer(
           aspectRatio: "9:16",
           createdAt: now,
           updatedAt: now
-        };
+        });
         return json(res, 201, { project: await deps.productFlow.createProject(project) });
       }
 
@@ -528,6 +919,739 @@ export function createAppServer(
         return project
           ? json(res, 200, { project })
           : json(res, 404, { error: "PROJECT_NOT_FOUND" });
+      }
+
+      const agentCreateMatch = url.pathname.match(
+        /^\/api\/projects\/([^/]+)\/agent\/tasks$/
+      );
+      if (req.method === "POST" && agentCreateMatch) {
+        const projectId = agentCreateMatch[1]!;
+        if (!(await deps.productFlow.getProject(projectId))) {
+          return json(res, 404, { error: "PROJECT_NOT_FOUND" });
+        }
+        const body = (await readJson(req, 160_000_000)) as {
+          skillId?: unknown;
+          requestText?: unknown;
+          requestedMethod?: unknown;
+          model?: unknown;
+          durationMs?: unknown;
+          aspectRatio?: unknown;
+          videoResolution?: unknown;
+          nativeAudioOutputRequested?: unknown;
+          materials?: unknown;
+          existingArtifactIds?: unknown;
+          logo?: unknown;
+        };
+        const requestText = requireString(
+          body.requestText,
+          "requestText"
+        );
+        const requestedMethod =
+          typeof body.requestedMethod === "string"
+            ? body.requestedMethod
+            : "AUTO";
+        const allowedMethods = new Set([
+          "AUTO",
+          "text2video",
+          "image2video",
+          "frames2video",
+          "multiframe2video",
+          "multimodal2video"
+        ]);
+        if (!allowedMethods.has(requestedMethod)) {
+          throw new DomainValidationError("无效的智能生成方式");
+        }
+        const model =
+          typeof body.model === "string" && body.model
+            ? body.model
+            : "seedance-2.0-mini";
+        const durationMs =
+          typeof body.durationMs === "number"
+            ? body.durationMs
+            : 10_000;
+        const artifactStore = new LocalArtifactStore(
+          path.join(deps.projectsRoot, projectId),
+          deps.artifacts
+        );
+        const storedMaterials: Array<{
+          artifactId: string;
+          type: "image" | "video" | "audio" | "logo";
+          originalFilename: string;
+          mimeType: string;
+          sizeBytes: number;
+          sha256: string;
+          priority: number;
+        }> = [];
+
+        const storeAgentUpload = async (
+          raw: unknown,
+          forcedType?: "logo"
+        ): Promise<void> => {
+          if (!raw || typeof raw !== "object") {
+            throw new DomainValidationError("智能生成素材格式无效");
+          }
+          const upload = raw as {
+            name?: unknown;
+            mimeType?: unknown;
+            base64?: unknown;
+          };
+          const name = requireString(upload.name, "upload.name");
+          const mimeType = requireString(
+            upload.mimeType,
+            "upload.mimeType"
+          );
+          const type =
+            forcedType ??
+            (mimeType.startsWith("image/")
+              ? "image"
+              : mimeType.startsWith("video/")
+                ? "video"
+                : mimeType.startsWith("audio/")
+                  ? "audio"
+                  : null);
+          if (!type) {
+            throw new DomainValidationError(
+              `文件“${name}”：只支持图片、视频和音频素材`
+            );
+          }
+          if (forcedType && !mimeType.startsWith("image/")) {
+            throw new DomainValidationError(`Logo“${name}”：必须是图片文件`);
+          }
+          const maxBytes =
+            type === "image" || type === "logo"
+              ? 10 * 1024 * 1024
+              : 80 * 1024 * 1024;
+          let bytes: Buffer;
+          try {
+            bytes = decodeBase64(
+              requireString(upload.base64, "upload.base64"),
+              maxBytes
+            );
+          } catch (error) {
+            throw new DomainValidationError(
+              `文件“${name}”：内容无效或超过当前大小限制（${Math.round(maxBytes / 1024 / 1024)} MB）`
+            );
+          }
+          const artifact = await artifactStore.writeImmutable({
+            id: randomUUID(),
+            projectId,
+            kind: "USER_INPUT",
+            relativePath:
+              "agent/input/" +
+              randomUUID() +
+              "-" +
+              safeFileName(name),
+            immutable: true,
+            bytes,
+            mimeType
+          });
+          if (
+            !artifact.sha256 ||
+            artifact.sizeBytes === undefined
+          ) {
+            throw new DomainValidationError(
+              `文件“${name}”：上传写入失败`
+            );
+          }
+          let durationMs: number | undefined;
+          if (type === "video" || type === "audio") {
+            try {
+              durationMs = await probeMediaDurationMs(
+                artifactStore.resolveArtifactPath(artifact.relativePath)
+              );
+            } catch (error) {
+              throw new DomainValidationError(
+                `文件“${name}”：无法读取媒体时长，请检查文件是否损坏或格式不受支持`
+              );
+            }
+          }
+          storedMaterials.push({
+            artifactId: artifact.id,
+            type,
+            originalFilename: name,
+            mimeType,
+            sizeBytes: artifact.sizeBytes,
+            sha256: artifact.sha256,
+            priority: storedMaterials.length,
+            ...(durationMs !== undefined ? { durationMs } : {})
+          });
+        };
+
+        const existingIds = Array.isArray(body.existingArtifactIds)
+          ? [
+              ...new Set(
+                body.existingArtifactIds.map((value) =>
+                  requireString(value, "existingArtifactId")
+                )
+              )
+            ]
+          : [];
+        for (const artifactId of existingIds) {
+          const artifact = await deps.artifacts.findById(artifactId);
+          if (
+            !artifact ||
+            artifact.projectId !== projectId ||
+            artifact.integrityStatus !== "READY" ||
+            !artifact.sha256 ||
+            !artifact.mimeType
+          ) {
+            throw new DomainValidationError(
+              "带入 Agent 的已有素材不可用"
+            );
+          }
+          const type = artifact.mimeType.startsWith("video/")
+            ? "video"
+            : artifact.mimeType.startsWith("audio/")
+              ? "audio"
+              : artifact.mimeType.startsWith("image/")
+                ? "image"
+                : null;
+          if (!type) {
+            throw new DomainValidationError(
+              "Agent 已有素材只支持图片、视频和音频"
+            );
+          }
+          const durationMs =
+            type === "video" || type === "audio"
+              ? await probeMediaDurationMs(
+                  artifactStore.resolveArtifactPath(
+                    artifact.relativePath
+                  )
+                )
+              : undefined;
+          storedMaterials.push({
+            artifactId: artifact.id,
+            type,
+            originalFilename: path.basename(artifact.relativePath),
+            mimeType: artifact.mimeType,
+            sizeBytes: artifact.sizeBytes ?? 0,
+            sha256: artifact.sha256,
+            priority: storedMaterials.length,
+            ...(durationMs !== undefined ? { durationMs } : {})
+          });
+        }
+
+        for (const item of Array.isArray(body.materials)
+          ? body.materials
+          : []) {
+          await storeAgentUpload(item);
+        }
+        if (body.logo && typeof body.logo === "object") {
+          await storeAgentUpload(body.logo, "logo");
+        }
+
+        let task = await deps.agentMode.createTask({
+          projectId,
+          skillId:
+            typeof body.skillId === "string"
+              ? body.skillId
+              : "dreamina-cli",
+          requestText,
+          requestedMethod:
+            requestedMethod as
+              | "AUTO"
+              | "text2video"
+              | "image2video"
+              | "frames2video"
+              | "multiframe2video"
+              | "multimodal2video",
+          model,
+          durationMs,
+          materials: storedMaterials,
+          aspectRatio:
+            typeof body.aspectRatio === "string"
+              ? body.aspectRatio
+              : "AUTO",
+          videoResolution:
+            typeof body.videoResolution === "string"
+              ? body.videoResolution
+              : "720p",
+          nativeAudioOutputRequested:
+            body.nativeAudioOutputRequested === true
+        });
+        task = await deps.agentMode.planTask(task.id);
+        return json(res, 201, { task });
+      }
+
+      const agentMaterialsMatch = url.pathname.match(
+        /^\/api\/projects\/([^/]+)\/agent\/tasks\/([^/]+)\/materials$/
+      );
+      if (req.method === "POST" && agentMaterialsMatch) {
+        const projectId = agentMaterialsMatch[1]!;
+        const taskId = agentMaterialsMatch[2]!;
+        const task = await deps.agentMode.getTask(taskId);
+        if (!task || task.projectId !== projectId) {
+          return json(res, 404, { error: "AGENT_TASK_NOT_FOUND" });
+        }
+        if (
+          task.status !== "DRAFT" &&
+          task.status !== "NEEDS_MATERIAL" &&
+          task.status !== "READY_TO_CONFIRM"
+        ) {
+          throw new DomainValidationError(
+            "当前任务已经进入生成确认或提交阶段，不能再修改素材"
+          );
+        }
+        const body = (await readJson(req, 160_000_000)) as {
+          orderedMaterials?: unknown;
+          existingLogoArtifactId?: unknown;
+          keepArtifactIds?: unknown;
+          materials?: unknown;
+          logo?: unknown;
+        };
+        const materialByArtifactId = new Map(
+          task.materials.map((item) => [item.artifactId, item] as const)
+        );
+        const seenKeep = new Set<string>();
+        const nextMaterials: typeof task.materials = [];
+        const retainExisting = (artifactId: string) => {
+          if (seenKeep.has(artifactId)) {
+            throw new DomainValidationError(
+              "任务素材列表包含重复项：" + artifactId
+            );
+          }
+          seenKeep.add(artifactId);
+          const material = materialByArtifactId.get(artifactId);
+          if (!material) {
+            throw new DomainValidationError(
+              "不能保留不属于当前任务的素材：" + artifactId
+            );
+          }
+          return material;
+        };
+        const artifactStore = new LocalArtifactStore(
+          path.join(deps.projectsRoot, projectId),
+          deps.artifacts
+        );
+        const storeEditedUpload = async (
+          raw: unknown,
+          forcedType?: "logo"
+        ): Promise<(typeof task.materials)[number]> => {
+          if (!raw || typeof raw !== "object") {
+            throw new DomainValidationError("智能生成素材格式无效");
+          }
+          const upload = raw as {
+            name?: unknown;
+            mimeType?: unknown;
+            base64?: unknown;
+          };
+          const name = requireString(upload.name, "upload.name");
+          const mimeType = requireString(
+            upload.mimeType,
+            "upload.mimeType"
+          );
+          const type =
+            forcedType ??
+            (mimeType.startsWith("image/")
+              ? "image"
+              : mimeType.startsWith("video/")
+                ? "video"
+                : mimeType.startsWith("audio/")
+                  ? "audio"
+                  : null);
+          if (!type) {
+            throw new DomainValidationError(
+              `文件“${name}”：只支持图片、视频和音频素材`
+            );
+          }
+          if (forcedType && !mimeType.startsWith("image/")) {
+            throw new DomainValidationError(
+              `Logo“${name}”：必须是图片文件`
+            );
+          }
+          const maxBytes =
+            type === "image" || type === "logo"
+              ? 10 * 1024 * 1024
+              : 80 * 1024 * 1024;
+          let bytes: Buffer;
+          try {
+            bytes = decodeBase64(
+              requireString(upload.base64, "upload.base64"),
+              maxBytes
+            );
+          } catch {
+            throw new DomainValidationError(
+              `文件“${name}”：内容无效或超过当前大小限制（${Math.round(maxBytes / 1024 / 1024)} MB）`
+            );
+          }
+          const artifact = await artifactStore.writeImmutable({
+            id: randomUUID(),
+            projectId,
+            kind: "USER_INPUT",
+            relativePath:
+              "agent/input/" +
+              randomUUID() +
+              "-" +
+              safeFileName(name),
+            immutable: true,
+            bytes,
+            mimeType
+          });
+          if (!artifact.sha256 || artifact.sizeBytes === undefined) {
+            throw new DomainValidationError(
+              `文件“${name}”：上传写入失败`
+            );
+          }
+          let mediaDurationMs: number | undefined;
+          if (type === "video" || type === "audio") {
+            try {
+              mediaDurationMs = await probeMediaDurationMs(
+                artifactStore.resolveArtifactPath(artifact.relativePath)
+              );
+            } catch {
+              throw new DomainValidationError(
+                `文件“${name}”：无法读取媒体时长，请检查文件是否损坏或格式不受支持`
+              );
+            }
+          }
+          return {
+            artifactId: artifact.id,
+            type,
+            originalFilename: name,
+            mimeType,
+            sizeBytes: artifact.sizeBytes,
+            sha256: artifact.sha256,
+            priority: 0,
+            ...(mediaDurationMs !== undefined
+              ? { durationMs: mediaDurationMs }
+              : {})
+          };
+        };
+        if (Array.isArray(body.orderedMaterials)) {
+          for (const [index, rawSlot] of body.orderedMaterials.entries()) {
+            if (!rawSlot || typeof rawSlot !== "object") {
+              throw new DomainValidationError(
+                "任务素材顺序项格式无效"
+              );
+            }
+            const slot = rawSlot as {
+              existingArtifactId?: unknown;
+              upload?: unknown;
+            };
+            if (
+              typeof slot.existingArtifactId === "string" &&
+              slot.existingArtifactId
+            ) {
+              const existing = retainExisting(slot.existingArtifactId);
+              if (existing.type === "logo") {
+                throw new DomainValidationError(
+                  "Logo 必须通过独立 Logo 字段管理"
+                );
+              }
+              nextMaterials.push({ ...existing, priority: index });
+              continue;
+            }
+            if (slot.upload && typeof slot.upload === "object") {
+              const uploaded = await storeEditedUpload(slot.upload);
+              if (uploaded.type === "logo") {
+                throw new DomainValidationError(
+                  "Logo 必须通过独立 Logo 字段管理"
+                );
+              }
+              nextMaterials.push({ ...uploaded, priority: index });
+              continue;
+            }
+            throw new DomainValidationError(
+              "任务素材顺序项缺少已有素材或新上传文件"
+            );
+          }
+        } else {
+          const requestedKeepIds = Array.isArray(body.keepArtifactIds)
+            ? body.keepArtifactIds.map((value) =>
+                requireString(value, "keepArtifactId")
+              )
+            : [];
+          for (const artifactId of requestedKeepIds) {
+            const existing = retainExisting(artifactId);
+            nextMaterials.push({
+              ...existing,
+              priority: nextMaterials.length
+            });
+          }
+          for (const item of Array.isArray(body.materials)
+            ? body.materials
+            : []) {
+            const uploaded = await storeEditedUpload(item);
+            nextMaterials.push({
+              ...uploaded,
+              priority: nextMaterials.length
+            });
+          }
+        }
+        if (
+          typeof body.existingLogoArtifactId === "string" &&
+          body.existingLogoArtifactId
+        ) {
+          const existingLogo = retainExisting(
+            body.existingLogoArtifactId
+          );
+          if (existingLogo.type !== "logo") {
+            throw new DomainValidationError(
+              "指定的已有 Logo 不是 Logo 素材"
+            );
+          }
+          nextMaterials.push({
+            ...existingLogo,
+            priority: nextMaterials.length
+          });
+        }
+        if (body.logo && typeof body.logo === "object") {
+          const uploadedLogo = await storeEditedUpload(body.logo, "logo");
+          nextMaterials.push({
+            ...uploadedLogo,
+            priority: nextMaterials.length
+          });
+        }
+        const updated = await deps.agentMode.replaceTaskMaterials({
+          taskId,
+          materials: nextMaterials
+        });
+        await refreshProjectSnapshot(deps, projectId);
+        return json(res, 200, { task: updated });
+      }
+
+      const agentActionMatch = url.pathname.match(
+        /^\/api\/projects\/([^/]+)\/agent\/tasks\/([^/]+)\/(plan|confirm|advance|reconcile|accept|redo)$/
+      );
+      if (req.method === "POST" && agentActionMatch) {
+        const projectId = agentActionMatch[1]!;
+        const taskId = agentActionMatch[2]!;
+        const action = agentActionMatch[3]!;
+        const task = await deps.agentMode.getTask(taskId);
+        if (!task || task.projectId !== projectId) {
+          return json(res, 404, { error: "AGENT_TASK_NOT_FOUND" });
+        }
+        if (action === "plan") {
+          return json(res, 200, {
+            task: await deps.agentMode.planTask(taskId)
+          });
+        }
+        if (action === "confirm") {
+          const body = (await readJson(req)) as {
+            acceptedUnknownCostRisk?: unknown;
+          };
+          return json(res, 200, {
+            task: await deps.agentMode.confirmAndSubmit({
+              taskId,
+              acceptedUnknownCostRisk:
+                body.acceptedUnknownCostRisk === true
+            })
+          });
+        }
+        if (action === "advance") {
+          return json(res, 200, {
+            task: await deps.agentMode.advance(taskId)
+          });
+        }
+        if (action === "reconcile") {
+          return json(res, 200, {
+            task: await deps.agentMode.reconcile(taskId)
+          });
+        }
+        if (action === "accept") {
+          return json(res, 200, {
+            task: await deps.agentMode.accept(taskId)
+          });
+        }
+        const clone = await deps.agentMode.cloneForRedo(taskId);
+        return json(res, 201, {
+          task: await deps.agentMode.planTask(clone.id)
+        });
+      }
+
+      const referenceVideoAnalyzeMatch = url.pathname.match(
+        /^\/api\/projects\/([^/]+)\/reference-video\/analyze$/
+      );
+      if (req.method === "POST" && referenceVideoAnalyzeMatch) {
+        const projectId = referenceVideoAnalyzeMatch[1]!;
+        if (!(await deps.productFlow.getProject(projectId))) {
+          return json(res, 404, { error: "PROJECT_NOT_FOUND" });
+        }
+        const body = (await readJson(req, 170_000_000)) as {
+          video?: unknown;
+        };
+        if (!body.video || typeof body.video !== "object") {
+          throw new DomainValidationError("请上传 MP4 / MOV 参考视频");
+        }
+        const upload = body.video as {
+          name?: unknown;
+          mimeType?: unknown;
+          base64?: unknown;
+        };
+        const name = requireString(upload.name, "video.name");
+        const mimeType = requireString(upload.mimeType, "video.mimeType");
+        if (
+          mimeType !== "video/mp4" &&
+          mimeType !== "video/quicktime"
+        ) {
+          throw new DomainValidationError("参考视频当前只支持 MP4 / MOV");
+        }
+        if (!/\.(mp4|mov)$/i.test(name)) {
+          throw new DomainValidationError("参考视频文件扩展名必须是 .mp4 或 .mov");
+        }
+        const bytes = decodeBase64(
+          requireString(upload.base64, "video.base64"),
+          120 * 1024 * 1024
+        );
+        const artifactStore = new LocalArtifactStore(
+          path.join(deps.projectsRoot, projectId),
+          deps.artifacts
+        );
+        const artifact = await artifactStore.writeImmutable({
+          id: randomUUID(),
+          projectId,
+          kind: "USER_INPUT",
+          relativePath:
+            "reference-video/" +
+            randomUUID() +
+            "-" +
+            safeFileName(name),
+          immutable: true,
+          bytes,
+          mimeType
+        });
+        const profile = await deps.referenceVideo.analyzeUpload({
+          projectId,
+          artifactId: artifact.id,
+          originalFilename: name
+        });
+        await refreshProjectSnapshot(deps, projectId);
+        return json(res, 201, { artifact, profile });
+      }
+
+      const referenceVideoDeactivateMatch = url.pathname.match(
+        /^\/api\/projects\/([^/]+)\/reference-video\/deactivate$/
+      );
+      if (req.method === "POST" && referenceVideoDeactivateMatch) {
+        const projectId = referenceVideoDeactivateMatch[1]!;
+        if (!(await deps.productFlow.getProject(projectId))) {
+          return json(res, 404, { error: "PROJECT_NOT_FOUND" });
+        }
+        await deps.referenceVideo.deactivate(projectId);
+        await refreshProjectSnapshot(deps, projectId);
+        return json(res, 200, { active: false });
+      }
+
+      const researchRunMatch = url.pathname.match(
+        /^\/api\/projects\/([^/]+)\/research\/run$/
+      );
+      if (req.method === "POST" && researchRunMatch) {
+        const projectId = researchRunMatch[1]!;
+        const body = (await readJson(req)) as {
+          mode?: unknown;
+          goal?: unknown;
+          sourceUrls?: unknown;
+          queries?: unknown;
+        };
+        if (
+          body.mode !== "OFF" &&
+          body.mode !== "BASIC" &&
+          body.mode !== "DEEP"
+        ) {
+          throw new DomainValidationError("无效的研究模式");
+        }
+        const sourceTypeSet = new Set([
+          "OFFICIAL",
+          "USER_URL",
+          "PUBLIC_PRODUCT",
+          "COMPETITOR",
+          "INDUSTRY",
+          "TREND",
+          "PLATFORM"
+        ]);
+        const sourceUrls = Array.isArray(body.sourceUrls)
+          ? body.sourceUrls.map((raw, index) => {
+              if (!raw || typeof raw !== "object") {
+                throw new DomainValidationError(
+                  `research source #${index + 1} 无效`
+                );
+              }
+              const item = raw as Record<string, unknown>;
+              const sourceType = requireString(
+                item.sourceType,
+                "research.sourceType"
+              );
+              if (!sourceTypeSet.has(sourceType)) {
+                throw new DomainValidationError(
+                  "无效的 Research sourceType"
+                );
+              }
+              return {
+                url: requireString(item.url, "research.url"),
+                sourceType: sourceType as
+                  | "OFFICIAL"
+                  | "USER_URL"
+                  | "PUBLIC_PRODUCT"
+                  | "COMPETITOR"
+                  | "INDUSTRY"
+                  | "TREND"
+                  | "PLATFORM"
+              };
+            })
+          : [];
+        const queries = Array.isArray(body.queries)
+          ? body.queries.map((item) =>
+              requireString(item, "research.query")
+            )
+          : [];
+        const result = await deps.research.startRun({
+          projectId,
+          mode: body.mode,
+          goal:
+            typeof body.goal === "string"
+              ? body.goal
+              : "",
+          sourceUrls,
+          queries
+        });
+        await refreshProjectSnapshot(deps, projectId);
+        return json(res, 201, result);
+      }
+
+      const researchResumeMatch = url.pathname.match(
+        /^\/api\/projects\/([^/]+)\/research\/runs\/([^/]+)\/resume$/
+      );
+      if (req.method === "POST" && researchResumeMatch) {
+        const projectId = researchResumeMatch[1]!;
+        const runId = researchResumeMatch[2]!;
+        const result = await deps.research.resumeRun(
+          projectId,
+          runId
+        );
+        await refreshProjectSnapshot(deps, projectId);
+        return json(res, 200, result);
+      }
+
+      const researchClaimsMatch = url.pathname.match(
+        /^\/api\/projects\/([^/]+)\/research\/claims\/send-to-truth$/
+      );
+      if (req.method === "POST" && researchClaimsMatch) {
+        const projectId = researchClaimsMatch[1]!;
+        const body = (await readJson(req)) as {
+          briefId?: unknown;
+          claimIds?: unknown;
+          usageRuleIds?: unknown;
+        };
+        const result =
+          await deps.research.sendClaimsToProductTruth({
+            projectId,
+            briefId: requireString(
+              body.briefId,
+              "briefId"
+            ),
+            claimIds: Array.isArray(body.claimIds)
+              ? body.claimIds.map((item) =>
+                  requireString(item, "claimId")
+                )
+              : [],
+            usageRuleIds: Array.isArray(body.usageRuleIds)
+              ? body.usageRuleIds.map((item) =>
+                  requireString(item, "usageRuleId")
+                )
+              : []
+          });
+        await refreshProjectSnapshot(deps, projectId);
+        return json(res, 200, result);
       }
 
       const productInputMatch = url.pathname.match(
@@ -554,7 +1678,7 @@ export function createAppServer(
         );
         const uploads = Array.isArray(body.images) ? body.images : [];
         if (!uploads.length) {
-          throw new DomainValidationError("At least one product image is required");
+          throw new DomainValidationError("至少需要 1 张产品图片");
         }
 
         const artifactStore = new LocalArtifactStore(
@@ -585,10 +1709,23 @@ export function createAppServer(
           const name = requireString(upload.name, "upload.name");
           const mimeType = requireString(upload.mimeType, "upload.mimeType");
           if (!mimeType.startsWith("image/")) {
-            throw new DomainValidationError("Only image uploads are allowed in P0");
+            throw new DomainValidationError(
+              type === "logo"
+                ? `Logo“${name}”：必须是图片文件`
+                : `文件“${name}”：只支持图片文件`
+            );
           }
-          const base64 = requireString(upload.base64, "upload.base64");
-          const bytes = decodeBase64(base64);
+          let bytes: Buffer;
+          try {
+            const base64 = requireString(upload.base64, "upload.base64");
+            bytes = decodeBase64(base64, 10 * 1024 * 1024);
+          } catch (error) {
+            throw new DomainValidationError(
+              type === "logo"
+                ? `Logo“${name}”：内容无效或超过 10 MB`
+                : `文件“${name}”：内容无效或超过 10 MB`
+            );
+          }
           const relativePath =
             "input/assets/" + randomUUID() + "-" + safeFileName(name);
           const artifact = await artifactStore.writeImmutable({
@@ -601,7 +1738,11 @@ export function createAppServer(
             mimeType
           });
           if (!artifact.sha256 || artifact.sizeBytes === undefined) {
-            throw new DomainValidationError("Uploaded artifact did not become READY");
+            throw new DomainValidationError(
+              type === "logo"
+                ? `Logo“${name}”：上传写入失败`
+                : `文件“${name}”：上传写入失败`
+            );
           }
           const asset: AssetRef = {
             id: randomUUID(),
@@ -731,11 +1872,12 @@ export function createAppServer(
         const body = (await readJson(req)) as {
           projectId?: unknown;
           dispositions?: unknown;
+          usageRuleDispositions?: unknown;
         };
         assertProjectBody(truthMatch[1]!, body);
         const workspace = await deps.productFlow.getWorkspace(projectId);
         if (!workspace?.productTruth) {
-          throw new DomainValidationError("No current ProductTruth to confirm");
+          throw new DomainValidationError("当前没有可确认的产品事实");
         }
         if (workspace.productTruth.status === "DRAFT") {
           if (!body.dispositions || typeof body.dispositions !== "object") {
@@ -757,7 +1899,15 @@ export function createAppServer(
           );
           const confirmed = confirmProductTruthDraft(
             workspace.productTruth,
-            body.dispositions as Record<string, ClaimDisposition>
+            body.dispositions as Record<string, ClaimDisposition>,
+            new Date(),
+            body.usageRuleDispositions &&
+            typeof body.usageRuleDispositions === "object"
+              ? (body.usageRuleDispositions as Record<
+                  string,
+                  UsageRuleDisposition
+                >)
+              : {}
           );
           let project = await deps.productFlow.confirmProductTruth(confirmed);
           const creativeVersion = await deps.productFlow.nextVersion(
@@ -765,9 +1915,13 @@ export function createAppServer(
             "CreativeBatch",
             "creative-batch"
           );
+          const referenceVideoProfile =
+            await deps.referenceVideo.latest(projectId);
           const batch = await deps.aiGeneration.generateCreativeBatch(
             confirmed,
-            creativeVersion
+            creativeVersion,
+            workspace.project.targetDurationMs,
+            referenceVideoProfile
           );
           project = await deps.productFlow.activateCreativeBatch(batch);
           return json(res, 200, { project, productTruth: confirmed, creativeBatch: batch });
@@ -833,16 +1987,20 @@ export function createAppServer(
         const projectId = creativeGenerateMatch[1]!;
         const workspace = await deps.productFlow.getWorkspace(projectId);
         if (!workspace?.productTruth || workspace.productTruth.status !== "CONFIRMED") {
-          throw new DomainValidationError("Confirmed ProductTruth is required");
+          throw new DomainValidationError("需要先确认当前产品事实");
         }
         const version = await deps.productFlow.nextVersion(
           projectId,
           "CreativeBatch",
           "creative-batch"
         );
+        const referenceVideoProfile =
+          await deps.referenceVideo.latest(projectId);
         const batch = await deps.aiGeneration.generateCreativeBatch(
           workspace.productTruth,
-          version
+          version,
+          workspace.project.targetDurationMs,
+          referenceVideoProfile
         );
         const project = await deps.productFlow.activateCreativeBatch(batch);
         return json(res, 201, { project, creativeBatch: batch });
@@ -867,19 +2025,22 @@ export function createAppServer(
         let project = await deps.productFlow.selectCreative(projectId, body.creativeId);
         const workspace = await deps.productFlow.getWorkspace(projectId);
         if (!workspace?.productTruth || !workspace.creativeBatch) {
-          throw new DomainValidationError("Current ProductTruth and CreativeBatch are required");
+          throw new DomainValidationError("需要当前产品事实和创意方案");
         }
         const version = await deps.productFlow.nextVersion(
           projectId,
           "ScriptDraft",
           "script"
         );
+        const referenceVideoProfile =
+          await deps.referenceVideo.latest(projectId);
         const script = await deps.aiGeneration.generateScriptDraft({
           truth: workspace.productTruth,
           batch: workspace.creativeBatch,
           selectedCreativeId: body.creativeId,
           version,
-          targetDurationMs: workspace.project.targetDurationMs
+          targetDurationMs: workspace.project.targetDurationMs,
+          referenceVideoProfile
         });
         project = await deps.productFlow.saveScriptDraft(script);
         return json(res, 200, { project, script });
@@ -891,6 +2052,7 @@ export function createAppServer(
         const body = (await readJson(req)) as {
           projectId?: unknown;
           confirmCurrent?: unknown;
+          generationSettings?: unknown;
         };
         assertProjectBody(projectId, body);
         if (body.confirmCurrent === true) {
@@ -900,28 +2062,49 @@ export function createAppServer(
             !workspace.creativeBatch ||
             !workspace.script
           ) {
-            throw new DomainValidationError("Current ProductTruth, CreativeBatch and Script are required");
+            throw new DomainValidationError("需要当前产品事实、创意方案和脚本");
           }
+          await deps.aiGeneration.assertScriptUsageCompliance(
+            workspace.productTruth,
+            workspace.script
+          );
           const confirmedScript = confirmScriptDraft(workspace.script);
+          const generationTarget = body.generationSettings === undefined ? undefined
+            : resolveDirectorGenerationTarget(await deps.dreaminaCapability.registry(), directorGenerationSettingsSchema.parse(body.generationSettings));
           let project = await deps.productFlow.confirmScript(confirmedScript);
+          // Confirm the script first; new plans require a model selected before directing.
+          if (!generationTarget) return json(res, 200, { project, script: confirmedScript });
           const planVersion = await deps.productFlow.nextVersion(
             projectId,
             "ProductionPlan",
             "production-plan"
           );
+          const referenceVideoProfile =
+            await deps.referenceVideo.latest(projectId);
           const plan = await deps.productDirector.generate({
             productTruth: workspace.productTruth,
             creativeBatch: workspace.creativeBatch,
             selectedCreativeId: confirmedScript.selectedCreativeId,
             script: confirmedScript,
+            generationTarget,
+            referenceVideoProfile,
             projectTargetDurationMs: workspace.project.targetDurationMs,
             productionPlanVersion: planVersion
           });
           project = await deps.productFlow.saveProductionPlanDraft(plan);
           return json(res, 200, { project, script: confirmedScript, productionPlan: plan });
         }
+        const workspace = await deps.productFlow.getWorkspace(projectId);
+        if (!workspace?.productTruth) {
+          throw new DomainValidationError("需要当前产品事实");
+        }
+        const manualScript = body as ScriptDraft;
+        await deps.aiGeneration.assertScriptUsageCompliance(
+          workspace.productTruth,
+          manualScript
+        );
         return json(res, 200, {
-          project: await deps.productFlow.confirmScript(body as ScriptDraft)
+          project: await deps.productFlow.confirmScript(manualScript)
         });
       }
 
@@ -945,12 +2128,15 @@ export function createAppServer(
           "ScriptDraft",
           "script"
         );
+        const referenceVideoProfile =
+          await deps.referenceVideo.latest(projectId);
         const script = await deps.aiGeneration.generateScriptDraft({
           truth: workspace.productTruth,
           batch: workspace.creativeBatch,
           selectedCreativeId: workspace.project.selectedCreativeId,
           version,
-          targetDurationMs: workspace.project.targetDurationMs
+          targetDurationMs: workspace.project.targetDurationMs,
+          referenceVideoProfile
         });
         const project = await deps.productFlow.saveScriptDraft(script);
         return json(res, 201, { project, script });
@@ -963,11 +2149,11 @@ export function createAppServer(
         const projectId = scriptReviseMatch[1]!;
         const body = (await readJson(req)) as { beats?: unknown };
         if (!Array.isArray(body.beats) || !body.beats.length) {
-          throw new DomainValidationError("Script revision requires beats");
+          throw new DomainValidationError("修改脚本时至少需要一个脚本段落");
         }
         const workspace = await deps.productFlow.getWorkspace(projectId);
         if (!workspace?.script) {
-          throw new DomainValidationError("No current ScriptDraft to revise");
+          throw new DomainValidationError("当前没有可修改的脚本草稿");
         }
         const beats = body.beats.map((raw, index) => {
           if (!raw || typeof raw !== "object") {
@@ -1010,6 +2196,11 @@ export function createAppServer(
       );
       if (req.method === "POST" && planGenerateMatch) {
         const projectId = planGenerateMatch[1]!;
+        const body = await readJson(req) as { generationSettings?: unknown };
+        if (!body || typeof body !== "object" || body.generationSettings === undefined) {
+          throw new DomainValidationError("请先选择导演目标模型、画幅、分辨率和声音策略，再生成分镜");
+        }
+        const generationSettings = directorGenerationSettingsSchema.parse(body.generationSettings);
         const workspace = await deps.productFlow.getWorkspace(projectId);
         if (
           !workspace?.productTruth ||
@@ -1022,16 +2213,21 @@ export function createAppServer(
             "Confirmed ProductTruth/Script and current CreativeBatch selection are required"
           );
         }
+        const generationTarget = resolveDirectorGenerationTarget(await deps.dreaminaCapability.registry(), generationSettings);
         const planVersion = await deps.productFlow.nextVersion(
           projectId,
           "ProductionPlan",
           "production-plan"
         );
+        const referenceVideoProfile =
+          await deps.referenceVideo.latest(projectId);
         const plan = await deps.productDirector.generate({
           productTruth: workspace.productTruth,
           creativeBatch: workspace.creativeBatch,
           selectedCreativeId: workspace.project.selectedCreativeId,
           script: workspace.script,
+          referenceVideoProfile,
+          generationTarget,
           projectTargetDurationMs: workspace.project.targetDurationMs,
           productionPlanVersion: planVersion
         });
@@ -1048,6 +2244,7 @@ export function createAppServer(
           visualDirection?: unknown;
           soundDirection?: unknown;
           productShowcaseRules?: unknown;
+          clips?: unknown;
           segments?: unknown;
         };
         const workspace = await deps.productFlow.getWorkspace(projectId);
@@ -1073,6 +2270,22 @@ export function createAppServer(
             id: requireString(item.id, "segment.id")
           } as ProductionPlanSegmentRevision;
         });
+        const clipPatches = Array.isArray(body.clips)
+          ? body.clips.map((raw, index) => {
+              if (!raw || typeof raw !== "object") {
+                throw new DomainValidationError(
+                  `Invalid Clip revision at index ${index}`
+                );
+              }
+              const item = raw as Record<string, unknown>;
+              return {
+                id: requireString(item.id, "clip.id"),
+                ...(typeof item.durationMs === "number"
+                  ? { durationMs: item.durationMs }
+                  : {})
+              } as ProductionPlanClipRevision;
+            })
+          : [];
         const revised = reviseProductionPlanDraft(workspace.productionPlan, {
           ...(typeof body.visualDirection === "string"
             ? { visualDirection: body.visualDirection }
@@ -1087,6 +2300,7 @@ export function createAppServer(
                 )
               }
             : {}),
+          clips: clipPatches,
           segments: segmentPatches
         });
         const project = await deps.productFlow.saveProductionPlanDraft(revised);
@@ -1104,15 +2318,28 @@ export function createAppServer(
         assertProjectBody(projectId, body);
         if (body.confirmCurrent === true) {
           const workspace = await deps.productFlow.getWorkspace(projectId);
-          if (!workspace?.productionPlan) {
-            throw new DomainValidationError("No current ProductionPlan to confirm");
+          if (!workspace?.productTruth || !workspace.productionPlan) {
+            throw new DomainValidationError("当前没有可确认的产品事实或导演方案");
           }
+          await deps.productDirector.assertPlanUsageCompliance(
+            workspace.productTruth,
+            workspace.productionPlan
+          );
           const confirmedPlan = confirmProductionPlanDraft(workspace.productionPlan);
           const project = await deps.productFlow.confirmProductionPlan(confirmedPlan);
           return json(res, 200, { project, productionPlan: confirmedPlan });
         }
+        const workspace = await deps.productFlow.getWorkspace(projectId);
+        if (!workspace?.productTruth) {
+          throw new DomainValidationError("需要当前产品事实");
+        }
+        const manualPlan = body as ProductionPlan;
+        await deps.productDirector.assertPlanUsageCompliance(
+          workspace.productTruth,
+          manualPlan
+        );
         return json(res, 200, {
-          project: await deps.productFlow.confirmProductionPlan(body as ProductionPlan)
+          project: await deps.productFlow.confirmProductionPlan(manualPlan)
         });
       }
 
@@ -1124,10 +2351,49 @@ export function createAppServer(
         const body = (await readJson(req)) as {
           clipIds?: unknown;
           acceptedDuplicateSubmissionRisk?: unknown;
+          generationSettings?: unknown;
         };
         const clipIds = Array.isArray(body.clipIds)
           ? body.clipIds.map((item) => requireString(item, "clipId"))
           : undefined;
+        let generationSettings:
+          | {
+              requestedModelVersion: string;
+              aspectRatio: string;
+              videoResolution: string;
+              nativeAudioOutputRequested: boolean;
+            }
+          | undefined;
+        if (body.generationSettings !== undefined) {
+          if (
+            !body.generationSettings ||
+            typeof body.generationSettings !== "object"
+          ) {
+            throw new DomainValidationError("生成参数格式无效");
+          }
+          const raw = body.generationSettings as {
+            requestedModelVersion?: unknown;
+            aspectRatio?: unknown;
+            videoResolution?: unknown;
+            nativeAudioOutputRequested?: unknown;
+          };
+          generationSettings = {
+            requestedModelVersion: requireString(
+              raw.requestedModelVersion,
+              "generationSettings.requestedModelVersion"
+            ),
+            aspectRatio: requireString(
+              raw.aspectRatio,
+              "generationSettings.aspectRatio"
+            ),
+            videoResolution: requireString(
+              raw.videoResolution,
+              "generationSettings.videoResolution"
+            ),
+            nativeAudioOutputRequested:
+              raw.nativeAudioOutputRequested === true
+          };
+        }
         const [workspace, productInput] = await Promise.all([
           deps.productFlow.getWorkspace(projectId),
           deps.productInput.latest(projectId)
@@ -1171,6 +2437,7 @@ export function createAppServer(
             projectsRoot: deps.projectsRoot,
             projectId,
             snapshot: productInput,
+            confirmedReferenceAssets: CreativeReferenceService.assets(await deps.creativeReferences?.assertExpected(projectId,workspace.productionPlan.creativeReferenceSetRef)??null),
             artifacts: deps.artifacts,
             requiredAssetIds: requiredReferenceAssetIds
           });
@@ -1187,6 +2454,7 @@ export function createAppServer(
           assets: productInput.assets,
           ...(clipIds?.length ? { clipIds } : {}),
           inputBlockers: referenceImageValidation.blockers,
+          ...(generationSettings ? { generationSettings } : {}),
           acceptedDuplicateSubmissionRisk:
             body.acceptedDuplicateSubmissionRisk === true
         });
@@ -1308,6 +2576,64 @@ export function createAppServer(
         return json(res, 200, { attempt: updated });
       }
 
+      const visualCompareMatch = url.pathname.match(
+        /^\/api\/projects\/([^/]+)\/clips\/([^/]+)\/visual-compare$/
+      );
+      if (req.method === "POST" && visualCompareMatch) {
+        const projectId = visualCompareMatch[1]!;
+        const clipId = visualCompareMatch[2]!;
+        if (!deps.visualEditAssessment) {
+          return json(res, 503, {
+            error: "VISUAL_EDIT_NOT_CONFIGURED",
+            message: "视觉审片 / 智能剪辑服务尚未配置"
+          });
+        }
+        const workspace = await deps.productFlow.getWorkspace(projectId);
+        if (
+          !workspace?.productTruth ||
+          workspace.productTruth.status !== "CONFIRMED" ||
+          !workspace.productionPlan ||
+          workspace.productionPlan.status !== "CONFIRMED"
+        ) {
+          throw new DomainValidationError(
+            "多版本视觉比较需要已确认的产品事实和当前导演分镜"
+          );
+        }
+        const clip = workspace.productionPlan.scenes
+          .flatMap(scene => scene.clips)
+          .find(item => item.id === clipId);
+        if (!clip) {
+          throw new DomainValidationError("当前导演方案中找不到该镜头");
+        }
+        const comparable = (await deps.workflow.listGenerationAttempts(projectId))
+          .filter(
+            attempt =>
+              attempt.clipId === clipId &&
+              ["SUCCEEDED", "RECONCILED_SUCCEEDED"].includes(attempt.status) &&
+              Boolean(attempt.outputArtifactId)
+          )
+          .sort((a, b) => b.attemptNumber - a.attemptNumber)
+          .slice(0, 6)
+          .map(attempt => ({
+            attemptId: attempt.id,
+            attemptNumber: attempt.attemptNumber,
+            outputArtifactId: attempt.outputArtifactId!
+          }));
+        if (comparable.length < 2) {
+          throw new DomainValidationError(
+            "当前镜头至少需要两个成功并已下载的视频版本才能进行 AI 多版本比较"
+          );
+        }
+        const comparison = await deps.visualEditAssessment.compareVersions({
+          projectId,
+          truth: workspace.productTruth,
+          clip,
+          attempts: comparable
+        });
+        await refreshProjectSnapshot(deps, projectId);
+        return json(res, 200, { comparison });
+      }
+
       const reviewMatch = url.pathname.match(
         /^\/api\/projects\/([^/]+)\/clips\/([^/]+)\/review$/
       );
@@ -1359,11 +2685,316 @@ export function createAppServer(
         return json(res, 201, result);
       }
 
+      const timelineGetMatch = url.pathname.match(
+        /^\/api\/projects\/([^/]+)\/timeline$/
+      );
+      if (req.method === "GET" && timelineGetMatch) {
+        const projectId = timelineGetMatch[1]!;
+        const timeline = await deps.timeline.getOrCreate(projectId);
+        const renderJob = await deps.timeline.latestRenderJob(projectId);
+        return json(res, 200, {
+          timeline,
+          durationMs: timelineDurationMs(timeline),
+          ...(renderJob ? { renderJob } : {})
+        });
+      }
+
+      const timelineResetMatch = url.pathname.match(
+        /^\/api\/projects\/([^/]+)\/timeline\/reset$/
+      );
+      if (req.method === "POST" && timelineResetMatch) {
+        const projectId = timelineResetMatch[1]!;
+        const timeline = await deps.timeline.resetFromAccepted(projectId);
+        await refreshProjectSnapshot(deps, projectId);
+        return json(res, 201, {
+          timeline,
+          durationMs: timelineDurationMs(timeline)
+        });
+      }
+
+      const timelineReorderMatch = url.pathname.match(
+        /^\/api\/projects\/([^/]+)\/timeline\/reorder$/
+      );
+      if (req.method === "POST" && timelineReorderMatch) {
+        const projectId = timelineReorderMatch[1]!;
+        const body = (await readJson(req)) as {
+          orderedClipEditIds?: unknown;
+        };
+        if (
+          !Array.isArray(body.orderedClipEditIds) ||
+          body.orderedClipEditIds.some(
+            (item) => typeof item !== "string" || !item.trim()
+          )
+        ) {
+          throw new DomainValidationError(
+            "orderedClipEditIds must be an array of clip edit ids"
+          );
+        }
+        const timeline = await deps.timeline.reorder(
+          projectId,
+          body.orderedClipEditIds as string[]
+        );
+        await refreshProjectSnapshot(deps, projectId);
+        return json(res, 200, {
+          timeline,
+          durationMs: timelineDurationMs(timeline)
+        });
+      }
+
+      const timelineClipMatch = url.pathname.match(
+        /^\/api\/projects\/([^/]+)\/timeline\/clips\/([^/]+)$/
+      );
+      if (req.method === "POST" && timelineClipMatch) {
+        const projectId = timelineClipMatch[1]!;
+        const clipEditId = timelineClipMatch[2]!;
+        const body = (await readJson(req)) as Record<string, unknown>;
+        const transitionType =
+          body.transitionType === undefined
+            ? undefined
+            : body.transitionType === "CUT" ||
+                body.transitionType === "CROSSFADE" ||
+                body.transitionType === "FADE"
+              ? body.transitionType
+              : (() => {
+                  throw new DomainValidationError(
+                    "transitionType must be CUT, CROSSFADE or FADE"
+                  );
+                })();
+        if (
+          body.deleted !== undefined &&
+          typeof body.deleted !== "boolean"
+        ) {
+          throw new DomainValidationError("deleted must be boolean");
+        }
+        if (body.muted !== undefined && typeof body.muted !== "boolean") {
+          throw new DomainValidationError("muted must be boolean");
+        }
+        const timeline = await deps.timeline.updateClip(projectId, clipEditId, {
+          ...(optionalNumber(body.inMs, "inMs") !== undefined
+            ? { inMs: optionalNumber(body.inMs, "inMs") }
+            : {}),
+          ...(optionalNumber(body.outMs, "outMs") !== undefined
+            ? { outMs: optionalNumber(body.outMs, "outMs") }
+            : {}),
+          ...(body.deleted !== undefined
+            ? { deleted: body.deleted as boolean }
+            : {}),
+          ...(optionalNumber(body.volume, "volume") !== undefined
+            ? { volume: optionalNumber(body.volume, "volume") }
+            : {}),
+          ...(body.muted !== undefined ? { muted: body.muted as boolean } : {}),
+          ...(transitionType ? { transitionType } : {}),
+          ...(optionalNumber(
+            body.transitionDurationMs,
+            "transitionDurationMs"
+          ) !== undefined
+            ? {
+                transitionDurationMs: optionalNumber(
+                  body.transitionDurationMs,
+                  "transitionDurationMs"
+                )
+              }
+            : {})
+        });
+        await refreshProjectSnapshot(deps, projectId);
+        return json(res, 200, {
+          timeline,
+          durationMs: timelineDurationMs(timeline)
+        });
+      }
+
+      const timelineTextMatch = url.pathname.match(
+        /^\/api\/projects\/([^/]+)\/timeline\/text$/
+      );
+      if (req.method === "POST" && timelineTextMatch) {
+        const projectId = timelineTextMatch[1]!;
+        const body = (await readJson(req)) as Record<string, unknown>;
+        const kind =
+          body.kind === "CAPTION" || body.kind === "CTA"
+            ? body.kind
+            : (() => {
+                throw new DomainValidationError(
+                  "kind must be CAPTION or CTA"
+                );
+              })();
+        const position =
+          body.position === undefined
+            ? undefined
+            : body.position === "TOP" ||
+                body.position === "CENTER" ||
+                body.position === "BOTTOM"
+              ? body.position
+              : (() => {
+                  throw new DomainValidationError(
+                    "position must be TOP, CENTER or BOTTOM"
+                  );
+                })();
+        const startMs = optionalNumber(body.startMs, "startMs");
+        const endMs = optionalNumber(body.endMs, "endMs");
+        if (startMs === undefined || endMs === undefined) {
+          throw new DomainValidationError("startMs and endMs are required");
+        }
+        const timeline = await deps.timeline.addTextItem(projectId, {
+          kind,
+          text: requireString(body.text, "text"),
+          startMs,
+          endMs,
+          ...(position ? { position } : {}),
+          ...(optionalNumber(body.fontScale, "fontScale") !== undefined
+            ? { fontScale: optionalNumber(body.fontScale, "fontScale") }
+            : {})
+        });
+        await refreshProjectSnapshot(deps, projectId);
+        return json(res, 201, {
+          timeline,
+          durationMs: timelineDurationMs(timeline)
+        });
+      }
+
+      const timelineTextDeleteMatch = url.pathname.match(
+        /^\/api\/projects\/([^/]+)\/timeline\/text\/([^/]+)\/delete$/
+      );
+      if (req.method === "POST" && timelineTextDeleteMatch) {
+        const projectId = timelineTextDeleteMatch[1]!;
+        const timeline = await deps.timeline.removeTextItem(
+          projectId,
+          timelineTextDeleteMatch[2]!
+        );
+        await refreshProjectSnapshot(deps, projectId);
+        return json(res, 200, {
+          timeline,
+          durationMs: timelineDurationMs(timeline)
+        });
+      }
+
+      const timelineBgmMatch = url.pathname.match(
+        /^\/api\/projects\/([^/]+)\/timeline\/bgm$/
+      );
+      if (req.method === "POST" && timelineBgmMatch) {
+        const projectId = timelineBgmMatch[1]!;
+        const body = (await readJson(req, 90 * 1024 * 1024)) as {
+          artifactId?: unknown;
+          audio?: unknown;
+          startMs?: unknown;
+          inMs?: unknown;
+          outMs?: unknown;
+          volume?: unknown;
+        };
+        let artifactId =
+          typeof body.artifactId === "string" && body.artifactId.trim()
+            ? body.artifactId.trim()
+            : undefined;
+        if (!artifactId) {
+          if (!body.audio || typeof body.audio !== "object") {
+            throw new DomainValidationError(
+              "BGM requires artifactId or audio upload"
+            );
+          }
+          const upload = body.audio as {
+            name?: unknown;
+            mimeType?: unknown;
+            base64?: unknown;
+          };
+          const name = requireString(upload.name, "audio.name");
+          const mimeType = requireString(upload.mimeType, "audio.mimeType");
+          if (!mimeType.startsWith("audio/")) {
+            throw new DomainValidationError("BGM upload must be audio");
+          }
+          const bytes = decodeBase64(
+            requireString(upload.base64, "audio.base64"),
+            80 * 1024 * 1024
+          );
+          const store = new LocalArtifactStore(
+            path.join(deps.projectsRoot, projectId),
+            deps.artifacts
+          );
+          const artifact = await store.writeImmutable({
+            id: randomUUID(),
+            projectId,
+            kind: "USER_INPUT",
+            relativePath:
+              "timeline/bgm/" + randomUUID() + "-" + safeFileName(name),
+            immutable: true,
+            bytes,
+            mimeType
+          });
+          if (!artifact.sha256) {
+            throw new DomainValidationError(
+              "BGM Artifact did not become READY"
+            );
+          }
+          artifactId = artifact.id;
+        }
+        const timeline = await deps.timeline.setBgm({
+          projectId,
+          artifactId,
+          ...(optionalNumber(body.startMs, "startMs") !== undefined
+            ? { startMs: optionalNumber(body.startMs, "startMs") }
+            : {}),
+          ...(optionalNumber(body.inMs, "inMs") !== undefined
+            ? { inMs: optionalNumber(body.inMs, "inMs") }
+            : {}),
+          ...(optionalNumber(body.outMs, "outMs") !== undefined
+            ? { outMs: optionalNumber(body.outMs, "outMs") }
+            : {}),
+          ...(optionalNumber(body.volume, "volume") !== undefined
+            ? { volume: optionalNumber(body.volume, "volume") }
+            : {})
+        });
+        await refreshProjectSnapshot(deps, projectId);
+        return json(res, 201, {
+          timeline,
+          durationMs: timelineDurationMs(timeline)
+        });
+      }
+
+      const timelineBgmRemoveMatch = url.pathname.match(
+        /^\/api\/projects\/([^/]+)\/timeline\/bgm\/remove$/
+      );
+      if (req.method === "POST" && timelineBgmRemoveMatch) {
+        const projectId = timelineBgmRemoveMatch[1]!;
+        const timeline = await deps.timeline.removeBgm(projectId);
+        await refreshProjectSnapshot(deps, projectId);
+        return json(res, 200, {
+          timeline,
+          durationMs: timelineDurationMs(timeline)
+        });
+      }
+
+      const timelineConfirmMatch = url.pathname.match(
+        /^\/api\/projects\/([^/]+)\/timeline\/confirm$/
+      );
+      if (req.method === "POST" && timelineConfirmMatch) {
+        const projectId = timelineConfirmMatch[1]!;
+        const timeline = await deps.timeline.confirm(projectId);
+        const renderJob = await deps.timeline.latestRenderJob(projectId);
+        await refreshProjectSnapshot(deps, projectId);
+        return json(res, 200, {
+          timeline,
+          durationMs: timelineDurationMs(timeline),
+          ...(renderJob ? { renderJob } : {})
+        });
+      }
+
       const finalRenderMatch = url.pathname.match(
         /^\/api\/projects\/([^/]+)\/final\/render$/
       );
       if (req.method === "POST" && finalRenderMatch) {
         const projectId = finalRenderMatch[1]!;
+        const workspace = await deps.productFlow.getWorkspace(projectId);
+        const latestTimeline = await deps.timeline.latestTimeline(projectId);
+        if (workspace?.productionPlan || latestTimeline) {
+          const timeline =
+            latestTimeline ?? (await deps.timeline.getOrCreate(projectId));
+          if (timeline.status !== "CONFIRMED") {
+            throw new DomainValidationError(
+              "请先在 Timeline 页面确认剪辑，再生成最终成片"
+            );
+          }
+          const result = await deps.renderEngine.render(projectId);
+          await refreshProjectSnapshot(deps, projectId);
+          return json(res, 201, result);
+        }
         const assembly = await deps.finalAssembly.render(projectId);
         await refreshProjectSnapshot(deps, projectId);
         return json(res, 201, { assembly });
@@ -1379,10 +3010,167 @@ export function createAppServer(
         return json(res, 200, { assembly });
       }
 
+      const publishProvidersMatch = url.pathname.match(
+        /^\/api\/projects\/([^/]+)\/publish\/providers$/
+      );
+      if (req.method === "GET" && publishProvidersMatch) {
+        const projectId = publishProvidersMatch[1]!;
+        return json(
+          res,
+          200,
+          await deps.publishBridge.providerStatus(projectId)
+        );
+      }
+
+      const publishProviderPreferenceMatch = url.pathname.match(
+        /^\/api\/projects\/([^/]+)\/publish\/provider$/
+      );
+      if (req.method === "POST" && publishProviderPreferenceMatch) {
+        const projectId = publishProviderPreferenceMatch[1]!;
+        const body = (await readJson(req)) as { providerType?: unknown };
+        const providerType = publishProviderTypeSchema.parse(body.providerType);
+        const preference = await deps.publishBridge.setPreference(
+          projectId,
+          providerType
+        );
+        await refreshProjectSnapshot(deps, projectId);
+        return json(res, 200, { preference });
+      }
+
+      const publishPackageCreateMatch = url.pathname.match(
+        /^\/api\/projects\/([^/]+)\/publish\/packages$/
+      );
+      if (req.method === "POST" && publishPackageCreateMatch) {
+        const projectId = publishPackageCreateMatch[1]!;
+        const body = (await readJson(req)) as {
+          title?: unknown;
+          description?: unknown;
+          coverArtifactId?: unknown;
+        };
+        const created = await deps.publishBridge.createPackage({
+          projectId,
+          title: requireString(body.title, "title"),
+          ...(typeof body.description === "string" && body.description.trim()
+            ? { description: body.description.trim() }
+            : {}),
+          ...(typeof body.coverArtifactId === "string" &&
+          body.coverArtifactId.trim()
+            ? { coverArtifactId: body.coverArtifactId.trim() }
+            : {}),
+          publicBaseUrl: requestPublicBaseUrl(req)
+        });
+        await refreshProjectSnapshot(deps, projectId);
+        return json(res, 201, {
+          package: created.package,
+          claimUrl: created.claimUrl,
+          qrSvg: qrCodeSvg(created.claimUrl)
+        });
+      }
+
+      const publishPackageDirectMatch = url.pathname.match(
+        /^\/api\/projects\/([^/]+)\/publish\/packages\/([^/]+)\/direct$/
+      );
+      if (req.method === "POST" && publishPackageDirectMatch) {
+        const projectId = publishPackageDirectMatch[1]!;
+        const packageId = publishPackageDirectMatch[2]!;
+        const body = (await readJson(req)) as { confirmed?: unknown };
+        const result = await deps.publishBridge.directPublish({
+          projectId,
+          packageId,
+          confirmed: body.confirmed === true
+        });
+        await refreshProjectSnapshot(deps, projectId);
+        return json(res, 200, result);
+      }
+
+      const publishClaimMatch = url.pathname.match(
+        /^\/api\/publish\/packages\/([^/]+)\/claim$/
+      );
+      if (req.method === "POST" && publishClaimMatch) {
+        const body = (await readJson(req)) as { token?: unknown };
+        const result = await deps.publishBridge.claimPackage({
+          packageId: publishClaimMatch[1]!,
+          token: requireString(body.token, "token")
+        });
+        await refreshProjectSnapshot(deps, result.package.projectId);
+        return json(res, 200, result);
+      }
+
+      const publishPackageSessionMatch = url.pathname.match(
+        /^\/api\/publish\/packages\/([^/]+)$/
+      );
+      if (req.method === "GET" && publishPackageSessionMatch) {
+        const result = await deps.publishBridge.packageForSession({
+          packageId: publishPackageSessionMatch[1]!,
+          sessionToken: requireBearerToken(req)
+        });
+        return json(res, 200, { package: result });
+      }
+
+      const publishHandoffStartMatch = url.pathname.match(
+        /^\/api\/publish\/packages\/([^/]+)\/handoff\/start$/
+      );
+      if (req.method === "POST" && publishHandoffStartMatch) {
+        const result = await deps.publishBridge.startHandoff({
+          packageId: publishHandoffStartMatch[1]!,
+          sessionToken: requireBearerToken(req),
+          publicBaseUrl: requestPublicBaseUrl(req)
+        });
+        await refreshProjectSnapshot(deps, result.package.projectId);
+        return json(res, 200, result);
+      }
+
+      const publishHandoffCompleteMatch = url.pathname.match(
+        /^\/api\/publish\/packages\/([^/]+)\/handoff\/complete$/
+      );
+      if (req.method === "POST" && publishHandoffCompleteMatch) {
+        const body = (await readJson(req)) as { note?: unknown };
+        const result = await deps.publishBridge.completeHandoff({
+          packageId: publishHandoffCompleteMatch[1]!,
+          sessionToken: requireBearerToken(req),
+          ...(typeof body.note === "string" && body.note.trim()
+            ? { note: body.note.trim() }
+            : {})
+        });
+        await refreshProjectSnapshot(deps, result.projectId);
+        return json(res, 200, { package: result });
+      }
+
+      const publishMediaMatch = url.pathname.match(
+        /^\/api\/publish\/packages\/([^/]+)\/media$/
+      );
+      if (req.method === "GET" && publishMediaMatch) {
+        const packageId = publishMediaMatch[1]!;
+        const mediaToken = url.searchParams.get("media_token")?.trim();
+        const source = mediaToken
+          ? await deps.publishBridge.mediaByToken({
+              packageId,
+              mediaToken
+            })
+          : await deps.publishBridge.mediaBySession({
+              packageId,
+              sessionToken: requireBearerToken(req)
+            });
+        const nodeFs = await import("node:fs");
+        res.writeHead(200, {
+          "content-type": source.artifact.mimeType ?? "video/mp4",
+          ...(source.artifact.sizeBytes !== undefined
+            ? { "content-length": String(source.artifact.sizeBytes) }
+            : {}),
+          "cache-control": "private, no-store"
+        });
+        return nodeFs.createReadStream(source.absolutePath).pipe(res);
+      }
+
       const douyinOAuthStartMatch = url.pathname.match(
         /^\/api\/projects\/([^/]+)\/publish\/douyin\/oauth\/start$/
       );
       if (req.method === "GET" && douyinOAuthStartMatch) {
+        if (process.env.PVS_DOUYIN_OPENAPI_DIRECT_ENABLED?.trim() !== "1") {
+          throw new DomainValidationError(
+            "OpenAPI direct publish is disabled by administrator"
+          );
+        }
         const projectId = douyinOAuthStartMatch[1]!;
         const { authorizationUrl } = await deps.douyinPublish.beginOAuth(
           projectId
@@ -1395,6 +3183,11 @@ export function createAppServer(
         req.method === "GET" &&
         url.pathname === "/api/douyin/oauth/callback"
       ) {
+        if (process.env.PVS_DOUYIN_OPENAPI_DIRECT_ENABLED?.trim() !== "1") {
+          throw new DomainValidationError(
+            "OpenAPI direct publish is disabled by administrator"
+          );
+        }
         const code = url.searchParams.get("code")?.trim();
         const state = url.searchParams.get("state")?.trim();
         if (!code || !state) {
@@ -1414,23 +3207,11 @@ export function createAppServer(
         /^\/api\/projects\/([^/]+)\/publish\/douyin$/
       );
       if (req.method === "POST" && douyinPublishMatch) {
-        const projectId = douyinPublishMatch[1]!;
-        const body = (await readJson(req)) as {
-          title?: unknown;
-          description?: unknown;
-          confirmed?: unknown;
-        };
-        const title = requireString(body.title, "title");
-        const result = await deps.douyinPublish.publish({
-          projectId,
-          title,
-          ...(typeof body.description === "string" && body.description.trim()
-            ? { description: body.description.trim() }
-            : {}),
-          confirmed: body.confirmed === true
+        return json(res, 410, {
+          error: "LEGACY_PUBLISH_ENDPOINT_DISABLED",
+          message:
+            "P1-07 已停用旧式直接发布入口，请使用 PublishPackage / PublishProvider 流程。"
         });
-        await refreshProjectSnapshot(deps, projectId);
-        return json(res, 201, { publishAttempt: result });
       }
 
       const artifactContentMatch = url.pathname.match(
@@ -1442,26 +3223,29 @@ export function createAppServer(
         );
         if (
           !artifact ||
-          artifact.integrityStatus !== "READY" ||
-          (artifact.kind !== "GENERATED_VIDEO" &&
-            artifact.kind !== "FINAL_VIDEO")
+          !canServeArtifactContent(artifact)
         ) {
-          return json(res, 404, { error: "VIDEO_ARTIFACT_NOT_FOUND" });
+          return json(res, 404, { error: "MEDIA_ARTIFACT_NOT_FOUND" });
         }
         const store = new LocalArtifactStore(
           path.join(deps.projectsRoot, artifact.projectId),
           deps.artifacts
         );
         const absolute = store.resolveArtifactPath(artifact.relativePath);
-        const fs = await import("node:fs");
+        try {
+          await fs.access(absolute);
+        } catch {
+          return json(res, 404, { error: "MEDIA_ARTIFACT_FILE_MISSING" });
+        }
+        const fsSync = await import("node:fs");
         res.writeHead(200, {
-          "content-type": artifact.mimeType ?? "video/mp4",
+          "content-type": artifact.mimeType ?? "application/octet-stream",
           ...(artifact.sizeBytes !== undefined
             ? { "content-length": String(artifact.sizeBytes) }
             : {}),
           "cache-control": "no-store"
         });
-        return fs.createReadStream(absolute).pipe(res);
+        return fsSync.createReadStream(absolute).pipe(res);
       }
 
       if (req.method === "GET" && url.pathname === "/") {
@@ -1483,8 +3267,228 @@ export function createAppServer(
         return html(res, 200, renderProjectsPage(projects, blockerCounts));
       }
 
+      if (req.method === "GET" && url.pathname === "/agent") {
+        return html(
+          res,
+          200,
+          renderAgentHome(await deps.productFlow.listProjects())
+        );
+      }
+
+      const mobilePublishPageMatch = url.pathname.match(
+        /^\/publish\/mobile\/([^/]+)$/
+      );
+      if (req.method === "GET" && mobilePublishPageMatch) {
+        return html(
+          res,
+          200,
+          renderMobilePublishPage(mobilePublishPageMatch[1]!)
+        );
+      }
+
+      const projectAgentPageMatch = url.pathname.match(
+        /^\/projects\/([^/]+)\/agent$/
+      );
+      if (req.method === "GET" && projectAgentPageMatch) {
+        const projectId = projectAgentPageMatch[1]!;
+        const workspace = await deps.productFlow.getWorkspace(projectId);
+        if (!workspace) {
+          return json(res, 404, { error: "PROJECT_NOT_FOUND" });
+        }
+        const referenceArtifactId =
+          url.searchParams.get("referenceArtifactId")?.trim();
+        let prefillReference:
+          | {
+              artifactId: string;
+              originalFilename: string;
+              mimeType: string;
+            }
+          | undefined;
+        if (referenceArtifactId) {
+          const [artifact, profile] = await Promise.all([
+            deps.artifacts.findById(referenceArtifactId),
+            deps.referenceVideo.latest(projectId)
+          ]);
+          if (
+            artifact &&
+            artifact.projectId === projectId &&
+            artifact.integrityStatus === "READY" &&
+            artifact.mimeType?.startsWith("video/")
+          ) {
+            prefillReference = {
+              artifactId: artifact.id,
+              originalFilename:
+                profile?.videoArtifactId === artifact.id &&
+                profile.originalFilename
+                  ? profile.originalFilename
+                  : path.basename(artifact.relativePath),
+              mimeType: artifact.mimeType
+            };
+          }
+        }
+        const [tasks, artifacts] = await Promise.all([
+          deps.agentMode.listTasks(projectId),
+          deps.artifacts.listByProject(projectId)
+        ]);
+        const referencedArtifactIds = new Set(
+          tasks.flatMap((task) =>
+            task.materials.map((material) => material.artifactId)
+          )
+        );
+        const agentArtifactStore = new LocalArtifactStore(
+          path.join(deps.projectsRoot, projectId),
+          deps.artifacts
+        );
+        const verifiedArtifacts = await Promise.all(
+          artifacts.map(async (artifact) => {
+            if (
+              !referencedArtifactIds.has(artifact.id) ||
+              artifact.integrityStatus !== "READY"
+            ) {
+              return artifact;
+            }
+            try {
+              await fs.access(
+                agentArtifactStore.resolveArtifactPath(artifact.relativePath)
+              );
+              return artifact;
+            } catch {
+              return {
+                ...artifact,
+                integrityStatus: "MISSING" as const
+              };
+            }
+          })
+        );
+        return html(
+          res,
+          200,
+          renderAgentProjectPage({
+            workspace,
+            tasks,
+            artifacts: verifiedArtifacts,
+            ...(prefillReference ? { prefillReference } : {})
+          })
+        );
+      }
+
+      const referenceVideoPageMatch = url.pathname.match(
+        /^\/projects\/([^/]+)\/reference-video$/
+      );
+      if (req.method === "GET" && referenceVideoPageMatch) {
+        const projectId = referenceVideoPageMatch[1]!;
+        const workspace = await deps.productFlow.getWorkspace(projectId);
+        if (!workspace) {
+          return json(res, 404, { error: "PROJECT_NOT_FOUND" });
+        }
+        const [profile, history] = await Promise.all([
+          deps.referenceVideo.latest(projectId),
+          deps.referenceVideo.list(projectId)
+        ]);
+        return html(
+          res,
+          200,
+          renderReferenceVideoPage({
+            workspace,
+            profile,
+            history
+          })
+        );
+      }
+
+      const researchPageMatch = url.pathname.match(
+        /^\/projects\/([^/]+)\/research$/
+      );
+      if (req.method === "GET" && researchPageMatch) {
+        const projectId = researchPageMatch[1]!;
+        const workspace = await deps.productFlow.getWorkspace(projectId);
+        if (!workspace) {
+          return json(res, 404, { error: "PROJECT_NOT_FOUND" });
+        }
+        const researchData = await deps.research.pageData(projectId);
+        return html(
+          res,
+          200,
+          renderResearchPage({
+            workspace,
+            ...researchData
+          })
+        );
+      }
+
+      if (req.method === "GET" && url.pathname === "/settings/ai") {
+        const [providers, systemPreference] = await Promise.all([
+          deps.aiSettings.listProviders(),
+          deps.aiSettings.getSystemPreference()
+        ]);
+        return html(
+          res,
+          200,
+          renderAiSettingsPage(providers, systemPreference)
+        );
+      }
+
+      const projectModelsPageMatch = url.pathname.match(
+        /^\/projects\/([^/]+)\/models$/
+      );
+      if (req.method === "GET" && projectModelsPageMatch) {
+        const projectId = projectModelsPageMatch[1]!;
+        const workspace = await deps.productFlow.getWorkspace(projectId);
+        if (!workspace) {
+          return json(res, 404, { error: "PROJECT_NOT_FOUND" });
+        }
+        const [
+          providers,
+          systemPreference,
+          projectPreference,
+          overrides,
+          executions
+        ] = await Promise.all([
+          deps.aiSettings.listProviders(),
+          deps.aiSettings.getSystemPreference(),
+          deps.aiSettings.getProjectPreference(projectId),
+          deps.aiSettings.listStepOverrides(projectId),
+          deps.aiSettings.listExecutions(projectId)
+        ]);
+        return html(
+          res,
+          200,
+          renderProjectModelSettingsPage({
+            workspace,
+            providers,
+            systemPreference,
+            projectPreference,
+            overrides,
+            executions
+          })
+        );
+      }
+
+      const publishSettingsPageMatch = url.pathname.match(
+        /^\/projects\/([^/]+)\/publish-settings$/
+      );
+      if (req.method === "GET" && publishSettingsPageMatch) {
+        const projectId = publishSettingsPageMatch[1]!;
+        const workspace = await deps.productFlow.getWorkspace(projectId);
+        if (!workspace) {
+          return json(res, 404, { error: "PROJECT_NOT_FOUND" });
+        }
+        const providerStatus = await deps.publishBridge.providerStatus(
+          projectId
+        );
+        return html(
+          res,
+          200,
+          renderPublishSettingsPage({
+            workspace,
+            preference: providerStatus.preference,
+            probes: providerStatus.probes
+          })
+        );
+      }
+
       const pageMatch = url.pathname.match(
-        /^\/projects\/([^/]+)\/(product|truth|creative|script|director|generate|final)$/
+        /^\/projects\/([^/]+)\/(product|truth|creative|script|director|generate|timeline|final)$/
       );
       if (req.method === "GET" && pageMatch) {
         const projectId = pageMatch[1]!;
@@ -1495,6 +3499,7 @@ export function createAppServer(
           | "script"
           | "director"
           | "generate"
+          | "timeline"
           | "final";
         const workspace = await deps.productFlow.getWorkspace(projectId);
         if (!workspace) {
@@ -1526,9 +3531,12 @@ export function createAppServer(
         ]);
         let blockers = persistedBlockers;
         let probe;
+        let timeline;
+        let renderJob;
         let finalAssembly;
         let publishAttempts;
         let publishProbe;
+        let publishBridge;
         if (kind === "generate") {
           probe = await deps.provider.probe();
           const providerBlocker = blockerFromProviderProbe(projectId, probe);
@@ -1543,14 +3551,26 @@ export function createAppServer(
             blockers = [...blockers, providerBlocker];
           }
         }
+        if (kind === "timeline") {
+          timeline = await deps.timeline.getOrCreate(projectId);
+          renderJob = (await deps.timeline.latestRenderJob(projectId)) ?? undefined;
+        }
         if (kind === "final") {
+          timeline = (await deps.timeline.latestTimeline(projectId)) ?? undefined;
+          renderJob = (await deps.timeline.latestRenderJob(projectId)) ?? undefined;
           finalAssembly =
             (await deps.finalOutput.latestAssembly(projectId)) ?? undefined;
           publishAttempts = await deps.finalOutput.listPublishAttempts(projectId);
-          if (finalAssembly?.status === "ACCEPTED") {
-            publishProbe = await deps.douyinPublish.probe(projectId);
-            blockers = await deps.workflow.listOpenBlockers(projectId);
-          }
+          const [providerStatus, publishAudit] = await Promise.all([
+            deps.publishBridge.providerStatus(projectId),
+            deps.publishBridge.audit(projectId)
+          ]);
+          publishBridge = {
+            preference: providerStatus.preference,
+            probes: providerStatus.probes,
+            packages: publishAudit.packages,
+            receipts: publishAudit.receipts
+          };
         }
 
         return html(
@@ -1570,9 +3590,12 @@ export function createAppServer(
             reviewDecisions,
             commandAttempts,
             ...(probe ? { probe } : {}),
+            ...(timeline ? { timeline } : {}),
+            ...(renderJob ? { renderJob } : {}),
             ...(finalAssembly ? { finalAssembly } : {}),
             ...(publishAttempts ? { publishAttempts } : {}),
-            ...(publishProbe ? { publishProbe } : {})
+            ...(publishProbe ? { publishProbe } : {}),
+            ...(publishBridge ? { publishBridge } : {})
           })
         );
       }
@@ -1591,6 +3614,17 @@ export function createAppServer(
       });
     }
   });
+  let stopSmartWorker: (() => void) | undefined;
+  server.once("listening", () => {
+    if (deps.smartGeneration && process.env.NODE_ENV !== "test" && process.env.PVS_SMART_WORKER_DISABLED !== "1") {
+      let warned = false;
+      stopSmartWorker = startSmartGenerationWorker(deps.smartGeneration, { onError: () => {
+        if (!warned) { warned = true; console.error("一键成片执行器遇到阻塞，请核对新增迁移与任务检查点；不会自动重提失败生成。"); }
+      } });
+    }
+  });
+  server.once("close", () => stopSmartWorker?.());
+  return server;
 }
 
 if (process.env.NODE_ENV !== "test") {
@@ -1612,7 +3646,7 @@ if (process.env.NODE_ENV !== "test") {
     }
     createAppServer(deps).listen(port, "127.0.0.1", () => {
       console.log(
-        "Product Video Studio P0 listening on http://127.0.0.1:" + port
+        "Product Video Studio P1 listening on http://127.0.0.1:" + port
       );
     });
   })();

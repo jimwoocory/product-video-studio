@@ -69,6 +69,7 @@ export function makeValidClip(): Clip {
         productState: "closed",
         dialogueOrNarration: { kind: "NONE" },
         ambientSound: { kind: "NONE" },
+        postProductionText: [],
         lighting: "soft",
         continuityIn: state(H.a, "open"),
         continuityOut: state(H.b, "middle"),
@@ -94,6 +95,7 @@ export function makeValidClip(): Clip {
           estimatorVersion: "p0-v1"
         },
         ambientSound: { kind: "AMBIENT", description: "quiet studio" },
+        postProductionText: [],
         lighting: "hero light",
         continuityIn: state(H.b, "middle"),
         continuityOut: state(H.c, "close"),

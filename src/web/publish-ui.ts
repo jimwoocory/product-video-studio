@@ -1,0 +1,150 @@
+
+import type { ProjectWorkspace } from "../application/services/product-flow.js";
+import type { PublishProviderProbe } from "../application/ports/publish-provider.js";
+import type { PublicPublishPackage } from "../application/services/publish-bridge-service.js";
+import type { PublishPreference, PublishReceipt } from "../domain/publish.js";
+
+function esc(value: unknown): string {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;");
+}
+
+function providerLabel(type: string): string {
+  if (type === "DOUYIN_SDK_HANDOFF") return "抖音 Open SDK 唤起发布";
+  if (type === "DOUYIN_H5_HANDOFF") return "抖音 H5 扫码投稿";
+  if (type === "DOUYIN_OPENAPI_DIRECT") return "抖音 OpenAPI 直发";
+  return "下载 MP4 / 手动发布";
+}
+
+function probeLabel(code: PublishProviderProbe["code"]): string {
+  if (code === "READY") return "可用";
+  if (code === "DISABLED") return "未启用";
+  if (code === "NOT_CONFIGURED") return "未配置";
+  if (code === "AUTH_REQUIRED") return "需要授权 / 能力确认";
+  return "不可用";
+}
+
+function modeLabel(mode: PublishProviderProbe["mode"]): string {
+  if (mode === "DIRECT") return "平台直发";
+  if (mode === "HANDOFF") return "手机 / 平台交接";
+  return "手动导出";
+}
+
+function capabilitySummary(probes: PublishProviderProbe[]): string {
+  const ready = probes.filter((probe) => probe.code === "READY");
+  const manual = probes.find((probe) => probe.providerType === "MANUAL_EXPORT");
+  const externalReady = ready.filter(
+    (probe) => probe.providerType !== "MANUAL_EXPORT"
+  );
+  return `<section class="card"><h3>发布能力状态</h3>
+    <p><b>当前可用：${ready.length}/${probes.length}</b> · 外部发布通道可用 ${externalReady.length} 个</p>
+    <p class="muted">${manual?.code === "READY"
+      ? "最终 MP4 的下载 / 手动发布兜底已就绪；即使 SDK、H5 或 OpenAPI 暂不可用，也不会阻断成片交付。"
+      : "手动导出异常，请先恢复最终 MP4 下载能力。"}</p>
+  </section>`;
+}
+
+function statusLabel(status: PublicPublishPackage["status"]): string {
+  if (status === "PACKAGE_READY") return "等待手机领取";
+  if (status === "HANDOFF_STARTED") return "交接已开始";
+  if (status === "AWAITING_USER_ACTION") return "已交给抖音/移动端，等待用户完成发布";
+  if (status === "DIRECT_PUBLISHING") return "正在执行 OpenAPI 直发";
+  if (status === "HANDOFF_COMPLETED") return "交接完成，未确认最终发布";
+  if (status === "PUBLISHED_CONFIRMED") return "平台可信回执已确认发布";
+  if (status === "FAILED") return "失败";
+  return "已过期";
+}
+
+export function renderPublishSettingsPage(input: {
+  workspace: ProjectWorkspace;
+  preference: PublishPreference;
+  probes: PublishProviderProbe[];
+}): string {
+  const cards = input.probes.map((probe) => {
+    const selected = input.preference.providerType === probe.providerType;
+    return "<label class=\"provider " + (selected ? "selected" : "") + "\">" +
+      "<div><input type=\"radio\" name=\"provider\" value=\"" + esc(probe.providerType) + "\"" + (selected ? " checked" : "") + "> " +
+      "<b>" + esc(probe.displayName) + "</b> <span class=\"badge\">" + esc(probeLabel(probe.code)) + "</span> <span class=\"badge\">" + esc(modeLabel(probe.mode)) + "</span></div>" +
+      (probe.reason ? "<p class=\"danger\">" + esc(probe.reason) + "</p>" : "") +
+      (probe.complianceNotice ? "<p class=\"muted\">" + esc(probe.complianceNotice) + "</p>" : "") +
+      "<p class=\"muted\">" + (probe.supportsTrustedFinalConfirmation ? "可提供可信最终回执" : "交接本身不能证明最终发布") + "</p>" +
+      "</label>";
+  }).join("");
+  const projectId = JSON.stringify(input.workspace.project.id);
+  return "<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">" +
+    "<title>发布设置</title><style>:root{font-family:Inter,\"Microsoft YaHei\",system-ui,sans-serif;background:#f5f5f3;color:#171717}*{box-sizing:border-box}body{margin:0}.wrap{max-width:920px;margin:auto;padding:24px}.card,.provider{display:block;background:white;border:1px solid #ddd;border-radius:12px;padding:16px;margin:12px 0}.provider.selected{border:2px solid #171717}.badge{background:#eee;border-radius:999px;padding:4px 8px;font-size:12px}.muted{color:#707070;font-size:13px}.danger{color:#8a1f11}.primary,.secondary{border-radius:9px;padding:10px 14px;font-weight:700}.primary{border:0;background:#171717;color:white}.secondary{border:1px solid #bbb;background:white;color:#171717;text-decoration:none}</style></head><body><main class=\"wrap\">" +
+    "<p><a class=\"secondary\" href=\"/projects/" + esc(input.workspace.project.id) + "/final\">← 返回成片与发布</a></p>" +
+    "<section class=\"card\"><h2>发布方式</h2><p class=\"muted\">抖音 SDK 唤起是默认目标路径，但只有正式应用与投稿权限配置完成后才可用。下载 MP4 手动发布始终保留。</p><p class=\"muted\">唤起 SDK/H5、手机领取、完成交接都不等于“已发布”；只有可信平台回执才能确认发布。</p></section>" +
+    capabilitySummary(input.probes) +
+    cards +
+    "<p><button class=\"primary\" id=\"save\">保存发布方式</button></p><div id=\"error\" class=\"danger\"></div></main>" +
+    "<script>(()=>{const projectId=" + projectId + ";document.querySelector('#save').addEventListener('click',async()=>{const selected=document.querySelector('input[name=provider]:checked');if(!selected)return;const b=document.querySelector('#save'),e=document.querySelector('#error');b.disabled=true;e.textContent='';try{const r=await fetch('/api/projects/'+encodeURIComponent(projectId)+'/publish/provider',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({providerType:selected.value})});const j=await r.json();if(!r.ok)throw new Error(j.message||j.error);location.reload();}catch(err){e.textContent=err.message||String(err);b.disabled=false;}});})();</script></body></html>";
+}
+
+export function renderPublishCenter(input: {
+  projectId: string;
+  projectName: string;
+  acceptedFinal: boolean;
+  preference: PublishPreference;
+  probes: PublishProviderProbe[];
+  packages: PublicPublishPackage[];
+  receipts: PublishReceipt[];
+}): string {
+  if (!input.acceptedFinal) {
+    return "<section class=\"card\"><h3>发布中心</h3><p class=\"muted\">先生成或恢复一个可校验、可下载，并已确认的最终 MP4，才能创建发布包。发布资质不会替代成片完整性检查。</p></section>";
+  }
+  const selected = input.probes.find((probe) => probe.providerType === input.preference.providerType);
+  const ready = selected?.code === "READY";
+  const direct = input.preference.providerType === "DOUYIN_OPENAPI_DIRECT";
+  const manualSelected = input.preference.providerType === "MANUAL_EXPORT";
+  const manual = input.probes.find((probe) => probe.providerType === "MANUAL_EXPORT");
+  const manualFallback =
+    !ready && manual?.code === "READY" && !manualSelected
+      ? "<p class=\"muted\">当前选择的外部发布方式暂不可用，但不会阻断成片交付。</p><p><button class=\"secondary\" id=\"p1-manual-fallback\">切换到下载 MP4 / 手动发布</button></p>"
+      : manualSelected
+        ? "<p class=\"muted\">手动发布不需要平台 API。你可以直接使用上方“下载成片 MP4”；一次性发布包仅用于安全地把成片交给手机。</p>"
+        : "";
+  const overview = input.probes.map((probe) =>
+    "<div class=\"clip\"><b>" + esc(probe.displayName) + "</b> · " + esc(probeLabel(probe.code)) +
+      " · " + esc(modeLabel(probe.mode)) +
+      (probe.reason ? "<p class=\"muted\">" + esc(probe.reason) + "</p>" : "") +
+    "</div>"
+  ).join("");
+  const history = input.packages.length ? input.packages.slice().reverse().map((pkg) => {
+    const count = input.receipts.filter((r) => r.packageId === pkg.id).length;
+    return "<div class=\"clip\"><b>" + esc(providerLabel(pkg.providerType)) + " · " + esc(statusLabel(pkg.status)) + "</b>" +
+      "<p class=\"muted\">" + esc(pkg.titleDraft) + " · " + esc(pkg.expiresAt) + "</p>" +
+      (pkg.errorMessage ? "<p class=\"danger\">" + esc(pkg.errorMessage) + "</p>" : "") +
+      "<p class=\"technical hash\">package=" + esc(pkg.id) + "<br>receipts=" + count + "</p></div>";
+  }).join("") : "<p class=\"muted\">还没有发布记录。</p>";
+  const oauth = direct && selected && (selected.code === "AUTH_REQUIRED" || selected.code === "NOT_CONFIGURED")
+    ? "<p><a class=\"secondary\" href=\"/api/projects/" + esc(input.projectId) + "/publish/douyin/oauth/start\">连接 / 重新授权抖音 OpenAPI</a></p>"
+    : "";
+  const projectId = JSON.stringify(input.projectId);
+  const directFlag = direct ? "true" : "false";
+  return capabilitySummary(input.probes) +
+    "<section class=\"card\" id=\"publish-center\"><h3>发布中心</h3>" +
+    "<p><b>当前发布方式：</b>" + esc(selected?.displayName ?? providerLabel(input.preference.providerType)) + " · " + esc(selected ? probeLabel(selected.code) : "未知") + "</p>" +
+    (selected?.reason ? "<p class=\"danger\">" + esc(selected.reason) + "</p>" : "") +
+    (selected?.complianceNotice ? "<p class=\"muted\">" + esc(selected.complianceNotice) + "</p>" : "") +
+    manualFallback +
+    "<details><summary>查看全部发布能力</summary>" + overview + "</details>" +
+    "<p><a class=\"secondary\" href=\"/projects/" + esc(input.projectId) + "/publish-settings\">发布设置 / 切换发布方式</a></p>" + oauth +
+    "<div class=\"row\"><label class=\"field\">发布标题<input id=\"p1-title\" maxlength=\"100\" value=\"" + esc(input.projectName) + "\"></label></div>" +
+    "<label class=\"field\">描述 / 话题<textarea id=\"p1-desc\" placeholder=\"可选\"></textarea></label>" +
+    "<p><button class=\"primary\" id=\"p1-create\" " + (ready ? "" : "disabled") + ">" + (direct ? "创建直发发布包" : manualSelected ? "创建手机领取包（可选）" : "创建一次性发布包 / 手机二维码") + "</button></p>" +
+    "<div id=\"p1-error\" class=\"danger\"></div><div id=\"p1-result\"></div>" +
+    "<div id=\"p1-direct\" hidden><p class=\"danger\"><b>抖音 OpenAPI 直发会直接提交平台。</b></p><label><input id=\"p1-direct-confirm\" type=\"checkbox\"> 我明确确认本次直发</label><p><button class=\"primary\" id=\"p1-direct-go\">确认直发</button></p><div id=\"p1-direct-error\" class=\"danger\"></div></div>" +
+    "<details><summary>发布记录（" + input.packages.length + "）</summary>" + history + "</details>" +
+    "<p class=\"muted\">“交接完成”不等于“已发布”。只有可信平台回执才会把项目标记为已发布。</p></section>" +
+    "<script>(()=>{const projectId=" + projectId + ",direct=" + directFlag + ";let packageId='';const fallback=document.querySelector('#p1-manual-fallback');if(fallback)fallback.addEventListener('click',async()=>{fallback.disabled=true;try{const r=await fetch('/api/projects/'+encodeURIComponent(projectId)+'/publish/provider',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({providerType:'MANUAL_EXPORT'})});const j=await r.json();if(!r.ok)throw new Error(j.message||j.error);location.reload();}catch(err){document.querySelector('#p1-error').textContent=err.message||String(err);fallback.disabled=false;}});const create=document.querySelector('#p1-create');if(create)create.addEventListener('click',async()=>{const e=document.querySelector('#p1-error'),o=document.querySelector('#p1-result');create.disabled=true;e.textContent='';o.innerHTML='';try{const r=await fetch('/api/projects/'+encodeURIComponent(projectId)+'/publish/packages',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({title:document.querySelector('#p1-title').value,description:document.querySelector('#p1-desc').value})});const j=await r.json();if(!r.ok)throw new Error(j.message||j.error);packageId=j.package.id;if(direct){document.querySelector('#p1-direct').hidden=false;o.innerHTML='<div class=\"clip\"><b>直发发布包已创建</b><p class=\"muted\">还需要再次明确确认。</p></div>';}else{o.innerHTML='<div class=\"clip\"><b>一次性发布包已创建</b><p class=\"muted\">二维码只在本次创建后显示；刷新后需重新创建发布包。</p><div class=\"publish-qr\">'+j.qrSvg+'</div><p><a class=\"secondary\" target=\"_blank\" rel=\"noopener\" href=\"'+j.claimUrl+'\">打开手机领取页</a></p></div>';}}catch(err){e.textContent=err.message||String(err);create.disabled=false;}});const go=document.querySelector('#p1-direct-go');if(go)go.addEventListener('click',async()=>{if(!document.querySelector('#p1-direct-confirm').checked){alert('请先明确确认直发');return;}if(!packageId)return;go.disabled=true;const e=document.querySelector('#p1-direct-error');try{const r=await fetch('/api/projects/'+encodeURIComponent(projectId)+'/publish/packages/'+encodeURIComponent(packageId)+'/direct',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({confirmed:true})});const j=await r.json();if(!r.ok)throw new Error(j.message||j.error);location.reload();}catch(err){e.textContent=err.message||String(err);go.disabled=false;}});})();</script>";
+}
+
+export function renderMobilePublishPage(packageId: string): string {
+  const id = JSON.stringify(packageId);
+  return "<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1,maximum-scale=1\"><title>手机发布交接</title><style>:root{font-family:Inter,\"Microsoft YaHei\",system-ui,sans-serif;background:#f4f4f2;color:#171717}*{box-sizing:border-box}body{margin:0}.wrap{max-width:620px;margin:auto;padding:18px}.card{background:white;border:1px solid #ddd;border-radius:14px;padding:18px;margin:12px 0}.primary,.secondary{display:inline-block;border-radius:10px;padding:12px 16px;font-weight:700;text-decoration:none}.primary{border:0;background:#171717;color:white}.secondary{border:1px solid #bbb;background:white;color:#171717}.muted{color:#707070;font-size:13px}.danger{color:#8a1f11}.status{background:#f4f4ef;padding:10px;border-radius:9px}</style></head><body><main class=\"wrap\"><section class=\"card\"><h2>Product Video Studio</h2><p>手机发布交接</p><p class=\"muted\">领取凭证只能使用一次；领取后立即失效，并切换为短时安全会话。</p></section><section class=\"card\" id=\"content\">正在读取发布包…</section></main>" +
+    "<script>(()=>{const packageId=" + id + ",key='pvs-publish-session:'+packageId,box=document.querySelector('#content');const clean=s=>String(s||'').replace(/[<>&]/g,'');const api=async(path,opts={})=>{const session=sessionStorage.getItem(key)||'',headers={...(opts.headers||{})};if(session)headers.authorization='Bearer '+session;const r=await fetch('/api/publish/packages/'+encodeURIComponent(packageId)+path,{...opts,headers});const j=await r.json();if(!r.ok)throw new Error(j.message||j.error);return j;};const providerName=s=>s==='DOUYIN_SDK_HANDOFF'?'抖音 SDK 唤起发布':s==='DOUYIN_H5_HANDOFF'?'抖音 H5 扫码投稿':s==='DOUYIN_OPENAPI_DIRECT'?'抖音 OpenAPI 直发':'下载 MP4 / 手动发布';const label=s=>s==='PACKAGE_READY'?'发布包已领取':s==='AWAITING_USER_ACTION'?'已交给抖音/移动端，请在抖音完成最终发布':s==='HANDOFF_COMPLETED'?'交接完成，但未确认最终发布':s==='PUBLISHED_CONFIRMED'?'平台可信回执已确认发布':s;const render=p=>{box.innerHTML='<h3>'+clean(p.titleDraft)+'</h3><p class=\"status\"><b>'+clean(label(p.status))+'</b></p><p class=\"muted\">发布方式：'+clean(providerName(p.providerType))+'<br>有效期：'+clean(p.expiresAt)+'</p>'+((p.status==='PACKAGE_READY'||p.status==='HANDOFF_STARTED'||p.status==='AWAITING_USER_ACTION')?'<p><button class=\"primary\" id=\"start\">开始交接 / 打开发布流程</button></p>':'')+((p.status==='HANDOFF_STARTED'||p.status==='AWAITING_USER_ACTION')?'<p><button class=\"secondary\" id=\"complete\">我已完成交接（不代表已发布）</button></p>':'')+'<div id=\"handoff\"></div>';document.querySelector('#start')?.addEventListener('click',start);document.querySelector('#complete')?.addEventListener('click',complete);};const claim=async token=>{const r=await fetch('/api/publish/packages/'+encodeURIComponent(packageId)+'/claim',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({token})});const j=await r.json();if(!r.ok)throw new Error(j.message||j.error);sessionStorage.setItem(key,j.sessionToken);history.replaceState(null,'',location.pathname);render(j.package);};const start=async()=>{try{const j=await api('/handoff/start',{method:'POST'});render(j.package);if(j.handoff.launchUrl)document.querySelector('#handoff').innerHTML='<p>'+clean(j.handoff.instruction)+'</p><p><a class=\"primary\" href=\"'+String(j.handoff.launchUrl)+'\">打开发布流程</a></p>';}catch(err){box.insertAdjacentHTML('beforeend','<p class=\"danger\">'+clean(err.message||err)+'</p>');}};const complete=async()=>{try{const j=await api('/handoff/complete',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({note:'用户确认交接动作完成；不作为最终发布确认。'})});render(j.package);}catch(err){box.insertAdjacentHTML('beforeend','<p class=\"danger\">'+clean(err.message||err)+'</p>');}};(async()=>{try{const token=new URLSearchParams(location.hash.slice(1)).get('token');if(token){await claim(token);return;}const session=sessionStorage.getItem(key);if(!session)throw new Error('领取链接已失效或缺少一次性凭证，请从电脑端重新创建发布包并扫码。');render((await api('',{method:'GET'})).package);}catch(err){box.innerHTML='<p class=\"danger\">'+clean(err.message||err)+'</p>';}})();})();</script></body></html>";
+}

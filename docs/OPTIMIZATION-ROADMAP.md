@@ -3,9 +3,13 @@
 更新时间：2026-09-28  
 定位：P1 正式开发路线图。P0 当前主闭环保持可用，P1 在不破坏现有生成、审片、成片与发布链的基础上，完成产品可用性、Agent、Research、模型管理与剪辑能力。
 
+> 2026-09-30：本路线图保留为历史规划依据；P1-01～P1-07 核心阶段已完成。后续唯一执行顺序与 Gate 以 `docs/P1-FINAL-OPTIMIZATION-PLAN.md` 为准。
+
 ## P1 高优先级能力
 
 ### 1. 参考视频分析（Reference Video）
+
+状态：**P1-04 已完成（2026-09-29）**
 
 目标：允许用户提供抖音/其他平台参考视频，学习其创作结构，而不是照搬内容。
 
@@ -30,7 +34,7 @@
 - 支持粘贴抖音视频链接
 - 用户登录/授权后获取可分析视频
 - 下载失败、登录失效或平台风控时允许人工接管
-- 单独核实 dreamina/Seedance 是否支持视频作为生成参考；未确认前不得假定支持
+- 已确认当前官方 dreamina CLI 的 multimodal2video 支持 --image / --video / --audio 混合参考；执行时仍必须以当前 CLI help 动态校验模型与输入限制
 
 ### 2. 中文优先与新手模式
 
@@ -150,6 +154,8 @@
 
 ### 6. Agent 模式 + Dreamina Skill 直达生成
 
+状态：**P1-03 已完成（2026-09-28）**
+
 目标：在保留“标准模式”的同时，增加一个面向快速创作的 Agent 模式。用户不需要理解 Product Truth / Creative / Script / Director 全流程，只需选择能力、提供必要素材和生成要求，即可由 Agent 自动规划并调用即梦官方 CLI 完成视频生成。
 
 #### 6.1 双模式入口
@@ -255,6 +261,8 @@ Agent 模式不得绕过现有的 ProviderIdentity、Preflight、显式付费确
 
 ### 7. Research Engine
 
+状态：**P1-05 已完成（2026-09-29）**
+
 在 P1 轻量联网研究基础层之上扩展：
 - ResearchProvider
 - EvidenceStore
@@ -288,6 +296,28 @@ Agent 模式不得绕过现有的 ProviderIdentity、Preflight、显式付费确
 - 多轨
 - 最终 RenderEngine
 
+### 9. 抖音发布 Provider 与 Mobile Publish Bridge
+
+P1 默认不把服务器 OpenAPI 全自动直发作为抖音发布主路径。
+
+默认方案：
+- Web 成片页创建一次性 PublishPackage
+- 手机端 Companion App 领取指定 FINAL_VIDEO
+- 调用抖音 SDK 唤起投稿/编辑页面
+- 用户在抖音完成标题、封面、话题等最终编辑与发布确认
+
+Provider 结构：
+- DouyinSdkHandoffProvider：默认
+- DouyinOpenApiDirectProvider：仅取得对应开放权限后启用
+- ManualExportProvider：永久兜底
+
+状态原则：
+- “已交给抖音”不等于“已发布”
+- 无平台可验证结果时显示“等待用户在抖音完成发布”
+- 只有获得可信确认时才能进入 PUBLISHED_CONFIRMED
+
+Web 为主的 Product Video Studio 不能直接承载移动 SDK，因此 P1 增加 Mobile Publish Bridge；移动端只负责安全领取成片和 SDK 调起，不复制 Web 的生产逻辑。
+
 ## 优先级建议
 
 1. 中文优先 + 新手模式
@@ -299,6 +329,7 @@ Agent 模式不得绕过现有的 ProviderIdentity、Preflight、显式付费确
 7. 参考视频链接输入
 8. P1 Research Engine
 9. P1 Timeline / 剪辑
+10. 抖音 SDK Publish Bridge
 
 ## 统一生成前流程目标
 

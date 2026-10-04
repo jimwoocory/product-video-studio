@@ -27,6 +27,34 @@ import { H, ISO, makeProductTruth, makeValidClip } from "./fixtures.js";
 
 process.env.DATABASE_URL ??= "file:./dev.db";
 
+test("production Dreamina runtime treats logged-out user_credit and CLI permission denial as terminal, not unknown", async () => {
+  const config = JSON.parse(
+    await fs.readFile(
+      path.resolve(process.cwd(), "config", "dreamina-runtime.verified.json"),
+      "utf8"
+    )
+  );
+  const runtime = buildVerifiedDreaminaRuntime(config);
+  assert.equal(
+    runtime.account?.parse({
+      stdout: JSON.stringify({ total_credit: 0, user_id: 0, user_name: "", vip_level: "" }),
+      stderr: "",
+      exitCode: 0,
+      timedOut: false
+    }).status,
+    "NOT_AUTHENTICATED"
+  );
+  assert.equal(
+    runtime.submit?.classifyFailure?.({
+      stdout: "",
+      stderr: "当前账号没有 dreamina_cli 使用权限: current account is not allowed to use dreamina_cli",
+      exitCode: 1,
+      timedOut: false
+    }),
+    "FAILED"
+  );
+});
+
 function makeConfig(executablePath: string, executableSha256: string) {
   return {
     schemaVersion: "p0-v1",

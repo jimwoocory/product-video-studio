@@ -80,6 +80,14 @@ function attemptToDomain(row: {
 export class PrismaWorkflowRepository implements WorkflowRepository {
   constructor(private readonly db: PrismaClient) {}
 
+  async claimCreatedAttempt(id: string): Promise<GenerationAttempt | null> {
+    const claimed = await this.db.generationAttemptRecord.updateMany({
+      where: { id, status: "CREATED" },
+      data: { status: "SUBMITTING" }
+    });
+    return claimed.count === 1 ? this.getGenerationAttempt(id) : null;
+  }
+
   async createBlocker(blockerInput: WorkflowBlocker): Promise<WorkflowBlocker> {
     const blocker = workflowBlockerSchema.parse(blockerInput);
     const row = await this.db.workflowBlockerRecord.create({

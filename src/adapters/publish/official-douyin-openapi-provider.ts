@@ -79,7 +79,7 @@ export class OfficialDouyinOpenApiProvider implements DouyinPublishProvider {
       return {
         code: "NOT_CONFIGURED",
         reason:
-          "需要配置 DOUYIN_CLIENT_KEY、DOUYIN_CLIENT_SECRET 和 DOUYIN_REDIRECT_URI，并在抖音开放平台申请 video.create 权限。"
+          "需要完成抖音开放平台应用密钥与回调地址配置，并申请视频发布权限。"
       };
     }
     const token = await this.token(projectId);
@@ -223,7 +223,7 @@ export class OfficialDouyinOpenApiProvider implements DouyinPublishProvider {
     const probe = await this.probe(input.projectId);
     if (probe.code !== "READY") {
       throw new DomainValidationError(
-        `Douyin publish is not ready: ${probe.reason}`
+        `抖音发布尚不可用：${probe.reason}`
       );
     }
     const token = await this.token(input.projectId);

@@ -7,6 +7,7 @@ import type {
 
 export interface GenerationRepository {
   markSubmissionChainStale(projectId: string, staleAt: string): Promise<void>;
+  markRequestChainStale(generationRequestId: string, staleAt: string): Promise<void>;
   saveCompiledPrompt(prompt: CompiledPrompt): Promise<CompiledPrompt>;
   listCompiledPrompts(projectId: string): Promise<CompiledPrompt[]>;
   createGenerationRequest(request: GenerationRequest): Promise<GenerationRequest>;

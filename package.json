@@ -1,11 +1,11 @@
 {
   "name": "product-video-studio",
-  "version": "0.2.0",
+  "version": "0.3.0-p1-final",
   "private": true,
   "type": "module",
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "start": "node dist/src/web/server.js",
+    "start": "node --use-system-ca dist/src/web/server.js",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "tsc -p tsconfig.json && node --test dist/tests/*.test.js",
     "prisma:generate": "prisma generate",
@@ -16,6 +16,7 @@
   "dependencies": {
     "@prisma/client": "6.12.0",
     "image-size": "2.0.4",
+    "qrcode-svg": "1.1.0",
     "zod": "4.6.5"
   },
   "devDependencies": {

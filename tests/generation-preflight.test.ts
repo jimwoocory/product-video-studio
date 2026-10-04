@@ -14,6 +14,11 @@ import type {
 import type { GenerationRepository } from "../src/application/ports/generation-repository.js";
 import type { WorkflowRepository } from "../src/application/ports/workflow-repository.js";
 import { GenerationPreflightService } from "../src/application/services/generation-preflight.js";
+import { resolveDirectorGenerationTarget } from "../src/application/services/director-generation-target.js";
+import type {
+  DreaminaAgentCapabilityService,
+  DreaminaCapabilityRegistry
+} from "../src/application/services/dreamina-agent-capability.js";
 import type {
   CompiledPrompt,
   CreativeBatch,
@@ -40,6 +45,7 @@ class MemoryGenerationRepository implements GenerationRepository {
   approvals: UserApproval[] = [];
   staleCalls = 0;
 
+  async markRequestChainStale(): Promise<void> {}
   async markSubmissionChainStale(): Promise<void> {
     this.staleCalls += 1;
   }
@@ -157,6 +163,110 @@ class MissingDreaminaProvider implements VideoProvider {
   }
 }
 
+class ReadyLegacyProbeProvider implements VideoProvider {
+  readonly id = "domestic-jimeng-cli" as const;
+  async probe(): Promise<ProviderProbeResult> {
+    return {
+      code: "READY",
+      cliFound: true,
+      identityVerified: true,
+      executablePath: "C:\\dreamina.exe",
+      executableSha256: H.a,
+      cliVersion: "test",
+      providerIdentityHash: H.b,
+      supportedOperations: ["submit", "status", "download"],
+      supportedModels: ["seedance-2.0-mini"],
+      supportedDurationsMs: [4000,5000,6000,7000,8000,9000,10000,11000,12000,13000,14000,15000],
+      capabilityFingerprint: H.c,
+      rawStdout: "",
+      rawStderr: ""
+    };
+  }
+  async accountStatus(): Promise<AccountStatus> {
+    return { status: "AUTHENTICATED", availableCredits: 100 };
+  }
+  async estimate(): Promise<CostEstimateResult> {
+    return { status: "KNOWN", estimatedCredits: 1 };
+  }
+  async submit(): Promise<SubmitResult> { throw new Error("not used"); }
+  async status(): Promise<GenerationStatusResult> { throw new Error("not used"); }
+  async download(): Promise<DownloadedAsset> { throw new Error("not used"); }
+  async reconcileSubmission(): Promise<ReconcileResult> {
+    return { outcome: "INCONCLUSIVE", reason: "not used" };
+  }
+}
+
+function standardRegistry(nativeAudio=false): DreaminaCapabilityRegistry {
+  const text2video = {
+    operation: "text2video" as const,
+    operationLabel: "文生视频",
+    helpSha256: H.d,
+    modelConfigurable: true,
+    fixedModel: false,
+    defaultModelVersion: "seedance2.0mini",
+    supportedModels: ["seedance2.0mini","seedance2.5"],
+    supportedRatios: ["1:1","3:4","16:9","4:3","9:16","21:9"],
+    models: [
+      {modelVersion:"seedance2.0mini",supportedResolutions:["720p"],durationMinSeconds:4,durationMaxSeconds:15,explicitRatioAllowed:true,vipOnly:false},
+      {modelVersion:"seedance2.5",supportedResolutions:["480p","720p","1080p"],durationMinSeconds:4,durationMaxSeconds:30,explicitRatioAllowed:true,vipOnly:true}
+    ],
+    fixedResolutions: [],
+    supportsImages: false,
+    supportsVideos: false,
+    supportsReferenceAudio: false,
+    supportsNativeAudioOutput: nativeAudio
+  };
+  return {
+    source:"DREAMINA_SKILL_AND_CLI_HELP",
+    skillPath:"C:\\Dreamina\\SKILL.md",
+    skillSha256:H.e,
+    rootHelpSha256:H.f,
+    cliVersion:"test",
+    providerIdentityHash:H.b,
+    providerCapabilityFingerprint:H.c,
+    registryFingerprint:H.one,
+    checkedAt:ISO,
+    operations:[text2video],
+    models:["seedance2.0mini","seedance2.5"],
+    ratios:["1:1","3:4","16:9","4:3","9:16","21:9"],
+    nativeAudioOutputSupported:nativeAudio
+  };
+}
+test("bound director defaults flow into Preflight without manual settings; no approval is manufactured", async () => {
+  const generation = new MemoryGenerationRepository();
+  const workflow = new MemoryWorkflowRepository();
+  const registry = standardRegistry();
+  const batch = makeBatch(), script = makeScript(batch), plan = makePlan(script);
+  plan.generationTarget = resolveDirectorGenerationTarget(registry, {
+    requestedModelVersion: "seedance2.0mini", aspectRatio: "16:9", videoResolution: "720p", nativeAudioOutputRequested: false
+  }, ["text2video"]);
+  const capability = { registry: async () => registry } as unknown as DreaminaAgentCapabilityService;
+  const service = new GenerationPreflightService(generation, workflow, new ReadyLegacyProbeProvider(), async () => 1, "seedance-2.0", undefined, capability);
+  const result = await service.run({ projectId: plan.projectId, productTruth: makeProductTruth(), creativeBatch: batch, script, productionPlan: plan, assets: [] });
+  assert.equal(result.requests.length, 1);
+  assert.equal(result.requests[0]!.model, "seedance2.0mini");
+  assert.equal(result.requests[0]!.aspectRatio, "16:9");
+  assert.deepEqual(generation.compiled[0]!.generationProfile, result.requests[0]!.generationProfile);
+  assert.equal(generation.approvals.length, 0);
+  assert.equal(workflow.attempts.length, 0);
+});
+
+test("changed registry invalidates old request chain and refuses to create replacements from a stale director target", async () => {
+  const generation = new MemoryGenerationRepository();
+  const workflow = new MemoryWorkflowRepository();
+  const registry = standardRegistry();
+  const batch = makeBatch(), script = makeScript(batch), plan = makePlan(script);
+  plan.generationTarget = resolveDirectorGenerationTarget(registry, {
+    requestedModelVersion: "seedance2.0mini", aspectRatio: "16:9", videoResolution: "720p", nativeAudioOutputRequested: false
+  }, ["text2video"]);
+  const capability = { registry: async () => ({ ...registry, registryFingerprint: H.two }) } as unknown as DreaminaAgentCapabilityService;
+  const service = new GenerationPreflightService(generation, workflow, new ReadyLegacyProbeProvider(), async () => 1, "seedance-2.0", undefined, capability);
+  await assert.rejects(service.run({ projectId: plan.projectId, productTruth: makeProductTruth(), creativeBatch: batch, script, productionPlan: plan, assets: [] }), /能力表已变化/);
+  assert.equal(generation.staleCalls, 1);
+  assert.equal(generation.requests.length, 0);
+  assert.equal(generation.approvals.length, 0);
+});
+
 function makeBatch(): CreativeBatch {
   const truth = makeProductTruth();
   return {
@@ -266,6 +376,94 @@ function makePlan(script: ScriptDraft): ProductionPlan {
   };
 }
 
+test("standard Preflight uses Registry GenerationProfile instead of legacy probe model list", async () => {
+  const generation = new MemoryGenerationRepository();
+  const workflow = new MemoryWorkflowRepository();
+  const provider = new ReadyLegacyProbeProvider();
+  const capability = {
+    async registry() { return standardRegistry(false); }
+  } as unknown as DreaminaAgentCapabilityService;
+  let nextVersion = 0;
+  const service = new GenerationPreflightService(
+    generation,
+    workflow,
+    provider,
+    async () => ++nextVersion,
+    "seedance-2.0-mini",
+    undefined,
+    capability
+  );
+  const truth = makeProductTruth();
+  const batch = makeBatch();
+  const script = makeScript(batch);
+  const plan = makePlan(script);
+
+  const result = await service.run({
+    projectId: truth.projectId,
+    productTruth: truth,
+    creativeBatch: batch,
+    script,
+    productionPlan: plan,
+    assets: [],
+    generationSettings: {
+      requestedModelVersion: "seedance2.5",
+      aspectRatio: "16:9",
+      videoResolution: "1080p",
+      nativeAudioOutputRequested: false
+    }
+  });
+
+  assert.equal(result.overallStatus, "PASS");
+  assert.equal(result.requests.length, 1);
+  const request = result.requests[0]!;
+  assert.equal(request.model, "seedance2.5");
+  assert.equal(request.dreaminaOperation, "text2video");
+  assert.equal(request.aspectRatio, "16:9");
+  assert.equal(request.videoResolution, "1080p");
+  assert.equal(request.generationProfile?.modelMode, "EXPLICIT");
+  assert.equal(request.generationProfile?.requestedModelVersion, "seedance2.5");
+  assert.equal(request.generationProfile?.modelVersion, "seedance2.5");
+  assert.equal(request.generationProfile?.videoResolution, "1080p");
+  assert.equal(generation.compiled[0]?.generationParams.aspectRatio, "16:9");
+  assert.equal(generation.compiled[0]?.generationParams.videoResolution, "1080p");
+  assert.equal(result.reports[0]?.blockers.includes("CAPABILITY_UNSUPPORTED:seedance2.5"), false);
+});
+
+test("standard Preflight rejects native audio when current CLI Registry does not expose an output-audio switch", async () => {
+  const generation = new MemoryGenerationRepository();
+  const workflow = new MemoryWorkflowRepository();
+  const provider = new ReadyLegacyProbeProvider();
+  const capability = {
+    async registry() { return standardRegistry(false); }
+  } as unknown as DreaminaAgentCapabilityService;
+  let nextVersion = 0;
+  const service = new GenerationPreflightService(
+    generation, workflow, provider, async () => ++nextVersion,
+    "seedance-2.0-mini", undefined, capability
+  );
+  const truth = makeProductTruth();
+  const batch = makeBatch();
+  const script = makeScript(batch);
+  const plan = makePlan(script);
+  await assert.rejects(
+    service.run({
+      projectId: truth.projectId,
+      productTruth: truth,
+      creativeBatch: batch,
+      script,
+      productionPlan: plan,
+      assets: [],
+      generationSettings: {
+        requestedModelVersion: "seedance2.5",
+        aspectRatio: "16:9",
+        videoResolution: "1080p",
+        nativeAudioOutputRequested: true
+      }
+    }),
+    /未暴露原生声音输出开关|native audio output was requested/
+  );
+  assert.equal(generation.requests.length, 0);
+});
 test("DREAMINA_NOT_FOUND produces BLOCKED preflight and no approval/attempt", async () => {
   const generation = new MemoryGenerationRepository();
   const workflow = new MemoryWorkflowRepository();

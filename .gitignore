@@ -11,3 +11,8 @@ projects/
 .tmp/
 .runtime-secrets/
 *.tsbuildinfo
+.pvs-server.*.log
+.tmp-*
+.playwright-mcp/
+playwright-report/
+test-results/

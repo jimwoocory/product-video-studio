@@ -75,7 +75,7 @@ export class FinalAssemblyService {
   async render(projectId: string): Promise<FinalAssembly> {
     const workspace = await this.productFlow.getWorkspace(projectId);
     if (!workspace?.productionPlan) {
-      throw new DomainValidationError("Current ProductionPlan is required");
+      throw new DomainValidationError("需要先生成当前导演方案");
     }
 
     const clips = workspace.productionPlan.scenes.flatMap((scene) => scene.clips);
@@ -285,7 +285,7 @@ export class FinalAssemblyService {
       artifact.integrityStatus !== "READY" ||
       artifact.sha256 !== assembly.outputArtifactHash
     ) {
-      throw new DomainValidationError("Final video Artifact is not READY");
+      throw new DomainValidationError("最终成片尚不可用");
     }
     const accepted = await this.finalOutput.updateAssembly(assembly.id, {
       status: "ACCEPTED",

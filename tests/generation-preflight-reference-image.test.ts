@@ -32,6 +32,7 @@ class MemoryGenerationRepository implements GenerationRepository {
   requests: GenerationRequest[] = [];
   reports: PreflightReport[] = [];
   approvals: UserApproval[] = [];
+  async markRequestChainStale(): Promise<void> {}
   async markSubmissionChainStale(): Promise<void> {}
   async saveCompiledPrompt(prompt: CompiledPrompt): Promise<CompiledPrompt> {
     this.compiled.push(prompt);
@@ -364,7 +365,108 @@ test("a clean Preflight rerun resolves stale reference blockers without clearing
   });
 
   assert.equal(clean.overallStatus, "PASS");
+  assert.equal(clean.requests[0]?.dreaminaOperation, "text2video");
   assert.ok(staleReferenceBlocker.resolvedAt);
   const open = await workflow.listOpenBlockers(truth.projectId);
   assert.deepEqual(open.map((item) => item.id), ["unrelated-blocker"]);
+});
+
+test("a clean Preflight rerun resolves an obsolete capability blocker from an older clip duration", async () => {
+  const generation = new MemoryGenerationRepository();
+  const workflow = new MemoryWorkflowRepository();
+  const service = new GenerationPreflightService(
+    generation,
+    workflow,
+    new ReadyProvider(),
+    async () => 1,
+    "seedance-2.0-mini"
+  );
+  const truth = makeProductTruth();
+  const batch = makeBatch();
+  const script = makeScript(batch);
+  const plan = makePlan(script);
+  workflow.blockers.push({
+    id: "stale-capability-duration",
+    projectId: truth.projectId,
+    scope: "PREFLIGHT",
+    reasonCode: "CAPABILITY_UNSUPPORTED",
+    message:
+      "国内官方 dreamina CLI 当前能力不满足生成要求：CAPABILITY_UNSUPPORTED:duration-5500",
+    requiredUserAction: "旧版本测试阻塞",
+    resumeCheckpoint: "preflight.provider-capability",
+    createdAt: ISO
+  });
+  workflow.blockers.push({
+    id: "unrelated-project-blocker",
+    projectId: truth.projectId,
+    scope: "PROJECT",
+    reasonCode: "ORPHAN_ARTIFACT_QUARANTINED",
+    message: "unrelated",
+    requiredUserAction: "unrelated",
+    resumeCheckpoint: "recovery.artifacts",
+    createdAt: ISO
+  });
+
+  const clean = await service.run({
+    projectId: truth.projectId,
+    productTruth: truth,
+    creativeBatch: batch,
+    script,
+    productionPlan: plan,
+    assets: [],
+    inputBlockers: []
+  });
+  assert.equal(clean.overallStatus, "PASS");
+  assert.ok(workflow.blockers.find(item => item.id === "stale-capability-duration")?.resolvedAt);
+  const open = await workflow.listOpenBlockers(truth.projectId);
+  assert.deepEqual(open.map(item => item.id), ["unrelated-project-blocker"]);
+});
+
+test("Preflight selects multimodal2video when the Clip has reference assets", async () => {
+  const generation = new MemoryGenerationRepository();
+  const workflow = new MemoryWorkflowRepository();
+  const service = new GenerationPreflightService(
+    generation,
+    workflow,
+    new ReadyProvider(),
+    async () => 1,
+    "seedance-2.0-mini"
+  );
+  const truth = makeProductTruth();
+  const batch = makeBatch();
+  const script = makeScript(batch);
+  const plan = makePlan(script);
+  plan.scenes[0]!.clips[0]!.referenceAssets = [
+    {
+      assetId: "asset-product",
+      role: "PRIMARY_PRODUCT",
+      priority: 0,
+      required: true
+    }
+  ];
+
+  const result = await service.run({
+    projectId: truth.projectId,
+    productTruth: truth,
+    creativeBatch: batch,
+    script,
+    productionPlan: plan,
+    assets: [
+      {
+        id: "asset-product",
+        artifactId: "artifact-product",
+        type: "image",
+        source: "user_upload",
+        originalFilename: "product.png",
+        sha256: H.f,
+        mimeType: "image/png",
+        sizeBytes: 1024,
+        createdAt: ISO
+      }
+    ]
+  });
+
+  assert.equal(result.overallStatus, "PASS");
+  assert.equal(result.requests[0]?.assetManifest.length, 1);
+  assert.equal(result.requests[0]?.dreaminaOperation, "multimodal2video");
 });

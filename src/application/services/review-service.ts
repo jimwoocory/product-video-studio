@@ -141,6 +141,13 @@ export class ReviewService {
     clipId: string;
     generationAttemptId?: string;
     decision: "ACCEPT" | "REDO" | "SKIP" | "USE";
+    source?: "USER" | "AI_VISUAL_GATE";
+    visualAssessment?: {
+      artifactId: string;
+      artifactHash: string;
+      assessmentContentHash: string;
+      evaluatorVersion: string;
+    };
     note?: string;
     now?: Date;
   }): Promise<{
@@ -149,14 +156,20 @@ export class ReviewService {
     redoClipId?: string;
   }> {
     const now = input.now ?? new Date();
+    const source = input.source ?? "USER";
+    if (source === "AI_VISUAL_GATE" && input.decision !== "ACCEPT") {
+      throw new DomainValidationError(
+        "视觉 AI 只能在高置信安全门通过时自动采用，不能自动跳过或触发重做"
+      );
+    }
     const workspace = await this.productFlow.getWorkspace(input.projectId);
     if (!workspace?.productionPlan) {
-      throw new DomainValidationError("Current ProductionPlan is required");
+      throw new DomainValidationError("需要先生成当前导演方案");
     }
     const clips = workspace.productionPlan.scenes.flatMap((scene) => scene.clips);
     const clip = clips.find((item) => item.id === input.clipId);
     if (!clip) {
-      throw new DomainValidationError("Review clip is not in current ProductionPlan");
+      throw new DomainValidationError("当前导演方案中找不到该镜头");
     }
 
     if (input.decision === "SKIP" || input.decision === "USE") {
@@ -166,6 +179,10 @@ export class ReviewService {
         clipId: clip.id,
         clipHash: clip.contentHash,
         decision: input.decision,
+        source,
+        ...(input.visualAssessment
+          ? { visualAssessment: input.visualAssessment }
+          : {}),
         ...(input.note?.trim() ? { note: input.note.trim() } : {}),
         decidedAt: now.toISOString()
       });
@@ -198,7 +215,7 @@ export class ReviewService {
       );
     }
     if (!attempt.outputArtifactId) {
-      throw new DomainValidationError("Successful attempt has no output Artifact");
+      throw new DomainValidationError("生成任务已完成，但没有可用输出视频");
     }
     const artifact = await this.artifacts.findById(attempt.outputArtifactId);
     if (
@@ -208,7 +225,7 @@ export class ReviewService {
       artifact.integrityStatus !== "READY" ||
       !artifact.sha256
     ) {
-      throw new DomainValidationError("Output video Artifact is not READY");
+      throw new DomainValidationError("输出视频尚不可用");
     }
 
     const attempts = await this.workflow.listGenerationAttempts(input.projectId);
@@ -236,6 +253,10 @@ export class ReviewService {
       outputArtifactId: artifact.id,
       outputArtifactHash: artifact.sha256,
       decision: input.decision,
+      source,
+      ...(input.visualAssessment
+        ? { visualAssessment: input.visualAssessment }
+        : {}),
       ...(input.note?.trim() ? { note: input.note.trim() } : {}),
       decidedAt: now.toISOString()
     });

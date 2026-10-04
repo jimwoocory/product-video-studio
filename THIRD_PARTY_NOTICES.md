@@ -5,9 +5,15 @@ Last reviewed: 2026-09-28
 
 This file records third-party code, packages and external runtimes approved for Product Video Studio P0. Approval is default-deny and must match `dependency-allowlist.json`.
 
+## Windows system speech
+
+P1 Final optionally invokes the user's already installed Windows `System.Speech` synthesis engine for offline narration. The application does not distribute Microsoft binaries, voice data, language packs, models or fonts. Host operating-system and installed-voice terms continue to apply; this entry is not a blanket commercial-use clearance for every third-party installed voice. Only enabled installed voices are enumerated, and the caller must explicitly select local narration in post-production settings. Plain text is passed through JSON stdin; SSML, remote lexicons and downloads are not used.
+
+The allowlist retains its legacy `approvedForP0` field name for gate compatibility. This P1-only optional host integration does not alter or rebuild the P0 frozen release artifacts. The external-terms category indicates non-redistributed proprietary host terms, not a remote speech service. Set `PVS_LOCAL_TTS_DISABLED=1` to disable the integration. API source: https://learn.microsoft.com/dotnet/api/system.speech.synthesis.speechsynthesizer .
+
 ## Bundled npm dependency inventory
 
-The lockfile currently resolves 34 exact npm package versions. Installation is allowed only while `npm run license:gate` passes against the exact lockfile.
+The lockfile currently resolves 35 exact npm package versions. Installation is allowed only while `npm run license:gate` passes against the exact lockfile.
 
 | Package | Version | License | Scope |
 | --- | --- | --- | --- |
@@ -42,6 +48,7 @@ The lockfile currently resolves 34 exact npm package versions. Installation is a
 | image-size | 2.0.4 | MIT | production |
 | jiti | 2.4.2 | MIT | transitive |
 | prisma | 6.12.0 | Apache-2.0 | development |
+| qrcode-svg | 1.1.0 | MIT | production |
 | typescript | 7.0.2 | Apache-2.0 | development |
 | undici-types | 8.9.0 | MIT | transitive |
 | zod | 4.6.5 | MIT | production |

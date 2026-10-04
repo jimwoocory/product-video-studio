@@ -14,6 +14,8 @@ function toDomain(row: {
   outputArtifactId: string | null;
   outputArtifactHash: string | null;
   decision: string;
+  source: string;
+  visualReviewJson: string | null;
   note: string | null;
   decidedAt: Date;
 }): ReviewDecision {
@@ -26,6 +28,10 @@ function toDomain(row: {
     ...(row.outputArtifactId ? { outputArtifactId: row.outputArtifactId } : {}),
     ...(row.outputArtifactHash ? { outputArtifactHash: row.outputArtifactHash } : {}),
     decision: row.decision,
+    source: row.source,
+    ...(row.visualReviewJson
+      ? { visualAssessment: JSON.parse(row.visualReviewJson) }
+      : {}),
     ...(row.note ? { note: row.note } : {}),
     decidedAt: row.decidedAt.toISOString()
   });
@@ -46,6 +52,10 @@ export class PrismaReviewRepository implements ReviewRepository {
         outputArtifactId: decision.outputArtifactId ?? null,
         outputArtifactHash: decision.outputArtifactHash ?? null,
         decision: decision.decision,
+        source: decision.source ?? "USER",
+        visualReviewJson: decision.visualAssessment
+          ? JSON.stringify(decision.visualAssessment)
+          : null,
         note: decision.note,
         decidedAt: new Date(decision.decidedAt)
       }

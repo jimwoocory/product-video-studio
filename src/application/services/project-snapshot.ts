@@ -6,6 +6,10 @@ import type { ProductInputStore } from "../ports/product-input-store.js";
 import type { ProviderAuditRepository } from "../ports/provider-audit-repository.js";
 import type { ReviewRepository } from "../ports/review-repository.js";
 import type { WorkflowRepository } from "../ports/workflow-repository.js";
+import type { ReferenceVideoRepository } from "../ports/reference-video-repository.js";
+import type { ResearchRepository } from "../ports/research-repository.js";
+import type { TimelineRepository } from "../ports/timeline-repository.js";
+import type { PublishBridgeService } from "./publish-bridge-service.js";
 import type { ProductFlowService } from "./product-flow.js";
 
 export class ProjectSnapshotService {
@@ -17,7 +21,11 @@ export class ProjectSnapshotService {
     private readonly generation: GenerationRepository,
     private readonly workflow: WorkflowRepository,
     private readonly review: ReviewRepository,
-    private readonly providerAudit: ProviderAuditRepository
+    private readonly providerAudit: ProviderAuditRepository,
+    private readonly referenceVideo?: ReferenceVideoRepository,
+    private readonly research?: ResearchRepository,
+    private readonly timeline?: TimelineRepository,
+    private readonly publishBridge?: PublishBridgeService
   ) {}
 
   async refresh(projectId: string): Promise<string> {
@@ -33,7 +41,13 @@ export class ProjectSnapshotService {
       attempts,
       blockers,
       decisions,
-      commandAttempts
+      commandAttempts,
+      referenceVideoProfile,
+      researchRuns,
+      researchBrief,
+      timeline,
+      renderJobs,
+      publishAudit
     ] = await Promise.all([
       this.productInput.latest(projectId),
       this.artifacts.listByProject(projectId),
@@ -43,11 +57,34 @@ export class ProjectSnapshotService {
       this.workflow.listGenerationAttempts(projectId),
       this.workflow.listOpenBlockers(projectId),
       this.review.listDecisions(projectId),
-      this.providerAudit.listCommandAttempts(projectId)
+      this.providerAudit.listCommandAttempts(projectId),
+      this.referenceVideo
+        ? this.referenceVideo.latestActive(projectId)
+        : Promise.resolve(null),
+      this.research
+        ? this.research.listRuns(projectId)
+        : Promise.resolve([]),
+      this.research
+        ? this.research.latestBrief(projectId)
+        : Promise.resolve(null),
+      this.timeline
+        ? this.timeline.latestTimeline(projectId)
+        : Promise.resolve(null),
+      this.timeline
+        ? this.timeline.listRenderJobs(projectId)
+        : Promise.resolve([]),
+      this.publishBridge
+        ? this.publishBridge.audit(projectId)
+        : Promise.resolve(null)
     ]);
+    const latestResearchRun = researchRuns[0];
+    const researchEvidence =
+      this.research && latestResearchRun
+        ? await this.research.listEvidence(latestResearchRun.id)
+        : [];
 
     const snapshot = {
-      schemaVersion: "p0-v0.2",
+      schemaVersion: "p1-v1",
       derived: true,
       generatedAt: new Date().toISOString(),
       project: workspace.project,
@@ -56,8 +93,16 @@ export class ProjectSnapshotService {
         productTruth: workspace.productTruth,
         creativeBatch: workspace.creativeBatch,
         script: workspace.script,
-        productionPlan: workspace.productionPlan
+        productionPlan: workspace.productionPlan,
+        referenceVideoProfile,
+        researchBrief,
+        timeline
       },
+      research: {
+        latestRun: latestResearchRun,
+        evidence: researchEvidence
+      },
+      publish: publishAudit,
       workflow: {
         blockers,
         requests,
@@ -68,7 +113,8 @@ export class ProjectSnapshotService {
       },
       audit: {
         commandAttempts,
-        artifacts
+        artifacts,
+        renderJobs
       }
     };
 

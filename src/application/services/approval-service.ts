@@ -10,12 +10,16 @@ import {
 import { hashValue } from "../../domain/hashing.js";
 import { computeApprovalHash } from "./hash-contracts.js";
 import { DomainValidationError } from "../../domain/validation.js";
+import { withSerialOperation } from "./serial-operation.js";
 
 export type ApproveCurrentRequestsInput = {
   projectId: string;
+  generationRequestIds?: string[];
   acceptedUnknownCostRisk: boolean;
   acceptedDuplicateSubmissionRisk: boolean;
   now?: Date;
+  /** Internal recovery only: caller has a durable explicit consent for these exact request hashes. */
+  reuseMatchingApprovals?: boolean;
 };
 
 export type ApprovalBatchResult = {
@@ -32,9 +36,13 @@ export class ApprovalService {
   async approveCurrentRequests(
     input: ApproveCurrentRequestsInput
   ): Promise<ApprovalBatchResult> {
+    return withSerialOperation("approval:" + input.projectId, () => this.approveExclusive(input));
+  }
+
+  private async approveExclusive(input: ApproveCurrentRequestsInput): Promise<ApprovalBatchResult> {
     const now = input.now ?? new Date();
     const [
-      requests,
+      allRequests,
       reports,
       existingApprovals,
       existingAttempts
@@ -44,9 +52,20 @@ export class ApprovalService {
       this.generationRepo.listUserApprovals(input.projectId),
       this.workflowRepo.listGenerationAttempts(input.projectId)
     ]);
+    const requestIdFilter = input.generationRequestIds?.length
+      ? new Set(input.generationRequestIds)
+      : null;
+    const requests = requestIdFilter
+      ? allRequests.filter((item) => requestIdFilter.has(item.id))
+      : allRequests;
 
     if (!requests.length) {
       throw new DomainValidationError("No CURRENT GenerationRequest to approve");
+    }
+    if (requestIdFilter && requests.length !== requestIdFilter.size) {
+      throw new DomainValidationError(
+        "One or more scoped GenerationRequest ids are missing or stale"
+      );
     }
 
     const hasUnknownSubmission = existingAttempts.some(
@@ -78,7 +97,7 @@ export class ApprovalService {
     const attempts: GenerationAttempt[] = [];
 
     for (const request of requests) {
-      if (activeRequestIds.has(request.id)) {
+      if (activeRequestIds.has(request.id) && !input.reuseMatchingApprovals) {
         throw new DomainValidationError(
           `GenerationRequest already has ACTIVE UserApproval: ${request.id}`
         );
@@ -112,6 +131,20 @@ export class ApprovalService {
         );
       }
 
+    }
+
+    // Validate the whole scope above before creating the first approval; partial validation
+    // failures must not silently authorize a prefix of the batch.
+    for (const request of requests) {
+      const report = reportByRequest.get(request.id)!;
+      const recoveredApproval = existingApprovals.find((item) => item.generationRequestId === request.id && item.status === "ACTIVE");
+      if (recoveredApproval && (
+        recoveredApproval.requestHash !== request.requestHash || recoveredApproval.preflightHash !== report.reportHash ||
+        recoveredApproval.preflightReportId !== report.id ||
+        recoveredApproval.acceptedUnknownCostRisk !== input.acceptedUnknownCostRisk ||
+        recoveredApproval.acceptedDuplicateSubmissionRisk !== input.acceptedDuplicateSubmissionRisk
+      )) throw new DomainValidationError("恢复授权与本次明确确认的范围不一致，不能复用");
+
       const approvalWithoutHash = {
         id: randomUUID(),
         projectId: input.projectId,
@@ -128,11 +161,21 @@ export class ApprovalService {
         status: "ACTIVE" as const,
         approvedAt: now.toISOString()
       };
-      const approval = userApprovalSchema.parse({
+      const approval = recoveredApproval ?? userApprovalSchema.parse({
         ...approvalWithoutHash,
         approvalHash: computeApprovalHash(approvalWithoutHash)
       });
-      await this.generationRepo.createUserApproval(approval);
+      if (!recoveredApproval) await this.generationRepo.createUserApproval(approval);
+
+      const recoveredAttempt = existingAttempts.find((item) => item.userApprovalId === approval.id);
+      if (recoveredAttempt) {
+        if (recoveredAttempt.requestHash !== request.requestHash || recoveredAttempt.approvalHash !== approval.approvalHash) {
+          throw new DomainValidationError("恢复生成记录与审批绑定不一致");
+        }
+        approvals.push(approval);
+        attempts.push(recoveredAttempt);
+        continue;
+      }
 
       const attemptNumber = await this.workflowRepo.nextAttemptNumber(
         request.clipId

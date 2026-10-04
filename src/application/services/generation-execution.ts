@@ -1,6 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { ArtifactRepository } from "../ports/artifact-repository.js";
 import type { GenerationRepository } from "../ports/generation-repository.js";
 import type { ProviderAuditRepository } from "../ports/provider-audit-repository.js";
@@ -20,6 +20,11 @@ import {
 } from "../../domain/schemas.js";
 import { DomainValidationError } from "../../domain/validation.js";
 import { LocalArtifactStore } from "../../adapters/store/local-artifact-store.js";
+import { sha256Bytes } from "../../domain/hashing.js";
+import { withSerialOperation } from "./serial-operation.js";
+import { assertAttemptBinding } from "./submission-service.js";
+import type {CreativeReferenceGuard} from "./creative-reference-binding.js";
+import type { ReviewRepository } from "../ports/review-repository.js";
 
 const REDACTION_RULES_VERSION = "p0-redact-v1";
 const PARSER_VERSION = "p0-provider-v1";
@@ -31,7 +36,9 @@ export class GenerationExecutionService {
     private readonly artifacts: ArtifactRepository,
     private readonly providerAudit: ProviderAuditRepository,
     private readonly provider: VideoProvider,
-    private readonly projectsRoot: string
+    private readonly projectsRoot: string,
+    private readonly review?: Pick<ReviewRepository, "listDecisions">,
+    private readonly references?: CreativeReferenceGuard
   ) {}
 
   private async requireAttempt(id: string): Promise<GenerationAttempt> {
@@ -230,6 +237,28 @@ export class GenerationExecutionService {
     const command = await this.beginCommand(attempt, "PROBE");
     try {
       const probe = await this.provider.probe();
+      let agentHelpChanged = false;
+      if (
+        probe.code === "READY" &&
+        request.dreaminaOperation &&
+        request.agentCapabilityHelpHash
+      ) {
+        if (typeof this.provider.inspectCommandHelp !== "function") {
+          agentHelpChanged = true;
+        } else {
+          const inspected = await this.provider.inspectCommandHelp(
+            request.dreaminaOperation
+          );
+          const helpText = [inspected.stdout, inspected.stderr]
+            .filter(Boolean)
+            .join("\n");
+          const helpHash = createHash("sha256")
+            .update(helpText, "utf8")
+            .digest("hex");
+          agentHelpChanged =
+            helpHash !== request.agentCapabilityHelpHash;
+        }
+      }
       const evidence = await this.collectProviderEvidence(
         attempt,
         command,
@@ -238,7 +267,8 @@ export class GenerationExecutionService {
       const changed =
         probe.code !== "READY" ||
         probe.providerIdentityHash !== request.providerIdentityHash ||
-        probe.capabilityFingerprint !== request.capabilityFingerprint;
+        probe.capabilityFingerprint !== request.capabilityFingerprint ||
+        agentHelpChanged;
 
       await this.finishCommand(attempt.id, command, {
         ...evidence,
@@ -258,7 +288,9 @@ export class GenerationExecutionService {
         errorCode: "PROVIDER_CHANGED_BEFORE_SUBMIT",
         errorMessage:
           probe.code === "READY"
-            ? "Provider identity/capability changed after approval; external submit was blocked."
+            ? agentHelpChanged
+              ? "Dreamina command help changed after Agent approval; external submit was blocked."
+              : "Provider identity/capability changed after approval; external submit was blocked."
             : `Provider is no longer READY (${probe.code}); external submit was blocked.`
       });
       await this.ensureProviderChangedBlocker(
@@ -309,10 +341,29 @@ export class GenerationExecutionService {
   }
 
   async submitAttempt(attemptId: string): Promise<GenerationAttempt> {
+    return withSerialOperation("dreamina:submit", () =>
+      withSerialOperation("generation:" + attemptId, () => this.submitExclusive(attemptId)));
+  }
+
+  private async submitExclusive(attemptId: string): Promise<GenerationAttempt> {
     let attempt = await this.requireAttempt(attemptId);
     if (attempt.status !== "CREATED") {
       throw new DomainValidationError(
         `Attempt must be CREATED before submit, got ${attempt.status}`
+      );
+    }
+
+    const siblingAttempts = await this.workflow.listGenerationAttempts(
+      attempt.projectId
+    );
+    const newerAttempt = siblingAttempts.find(
+      (item) =>
+        item.clipId === attempt.clipId &&
+        item.attemptNumber > attempt.attemptNumber
+    );
+    if (newerAttempt) {
+      throw new DomainValidationError(
+        "此生成尝试已被更新的尝试替代，请提交该镜头最新一次记录，避免重复生成或重复扣费"
       );
     }
 
@@ -322,10 +373,54 @@ export class GenerationExecutionService {
       this.generation.getUserApproval(attempt.userApprovalId)
     ]);
     if (!request || !preflight || !approval) {
-      throw new DomainValidationError("Approval chain is incomplete");
+      throw new DomainValidationError("本次生成确认链不完整");
     }
+    assertAttemptBinding({ attempt, request, preflight, approval });
+    if(!request.agentTaskId)await this.references?.assertExpected(attempt.projectId,request.inputVersionRefs.find(r=>r.entityType==="CreativeReferenceSet"));
 
     const allArtifacts = await this.artifacts.listByProject(attempt.projectId);
+    if (request.agentTaskId) {
+      const adapted = request.assetManifest.filter(
+        (entry) => entry.agentReferenceAdaptation
+      );
+      if (adapted.length) {
+        const store = new LocalArtifactStore(
+          path.resolve(this.projectsRoot, attempt.projectId),
+          this.artifacts
+        );
+        const verifiedSources = new Set<string>();
+        for (const entry of adapted) {
+          const provenance = entry.agentReferenceAdaptation!;
+          const key =
+            provenance.sourceArtifactId + ":" + provenance.sourceArtifactHash;
+          if (verifiedSources.has(key)) continue;
+          const source = allArtifacts.find(
+            (artifact) => artifact.id === provenance.sourceArtifactId
+          );
+          if (
+            !source ||
+            source.projectId !== attempt.projectId ||
+            source.integrityStatus !== "READY" ||
+            source.sha256 !== provenance.sourceArtifactHash
+          ) {
+            throw new DomainValidationError(
+              "长参考视频来源已变化或不可用；派生关键帧不能脱离已确认来源提交"
+            );
+          }
+          const sourcePath = store.resolveArtifactPath(source.relativePath);
+          const sourceBytes = await fs.readFile(sourcePath).catch(() => null);
+          if (
+            !sourceBytes ||
+            sha256Bytes(sourceBytes) !== provenance.sourceArtifactHash
+          ) {
+            throw new DomainValidationError(
+              "长参考视频来源文件缺失或校验失败；不会只提交缓存关键帧"
+            );
+          }
+          verifiedSources.add(key);
+        }
+      }
+    }
     const gates = request.assetManifest.map((entry) => {
       const match = allArtifacts.find(
         (artifact) =>
@@ -346,15 +441,46 @@ export class GenerationExecutionService {
       artifacts: gates
     });
 
-    await this.assertProviderStillMatchesApprovedRequest(attempt, request);
-
-    attempt = await this.workflow.updateGenerationAttemptStatus(attempt.id, {
-      status: "SUBMITTING"
-    });
+    const claimed = this.workflow.claimCreatedAttempt
+      ? await this.workflow.claimCreatedAttempt(attempt.id)
+      : await this.workflow.updateGenerationAttemptStatus(attempt.id, { status: "SUBMITTING" });
+    if (!claimed) throw new DomainValidationError("该镜头已被其他执行器领取，禁止重复提交");
+    attempt = claimed;
+    try {
+      await this.assertProviderStillMatchesApprovedRequest(attempt, request);
+      // A probe can be slow: an intervening re-plan/review must invalidate this submit too.
+      const [freshReports, freshApprovals, currentRequests, siblings] = await Promise.all([
+        this.generation.getPreflightReport(attempt.preflightReportId),
+        this.generation.getUserApproval(attempt.userApprovalId),
+        this.generation.listCurrentGenerationRequests(attempt.projectId),
+        this.workflow.listGenerationAttempts(attempt.projectId)
+      ]);
+      if (!currentRequests.some((item) => item.id === request.id && item.requestHash === request.requestHash) ||
+          !freshReports || !freshApprovals ||
+          siblings.some((item) => item.clipId === attempt.clipId && item.attemptNumber > attempt.attemptNumber)) {
+        throw new DomainValidationError("提交前计划或审批已更新，旧镜头不能继续提交");
+      }
+      assertSubmissionGate({ request, preflight: freshReports, approval: freshApprovals, artifacts: gates });
+      assertAttemptBinding({ attempt, request, preflight: freshReports, approval: freshApprovals });
+      if(!request.agentTaskId)await this.references?.assertExpected(attempt.projectId,request.inputVersionRefs.find(r=>r.entityType==="CreativeReferenceSet"));
+      if (this.review) {
+        const decision = (await this.review.listDecisions(attempt.projectId))
+          .filter(item => item.clipId === attempt.clipId && (item.decision === "SKIP" || item.decision === "USE"))
+          .sort((a,b) => b.decidedAt.localeCompare(a.decidedAt))[0];
+        if (decision?.decision === "SKIP") throw new DomainValidationError("镜头在提交前已被用户跳过，不执行付费生成");
+      }
+    } catch (error) {
+      // No paid submit has run. A hard crash here stays SUBMITTING and recovery fails closed.
+      await this.workflow.updateGenerationAttemptStatus(attempt.id, { status: "CREATED" });
+      throw error;
+    }
+    attempt = await this.requireAttempt(attempt.id);
     const command = await this.beginCommand(attempt, "SUBMIT");
 
+    let providerReturned = false;
     try {
       const handle = await this.provider.submit(request);
+      providerReturned = true;
       const evidence = await this.collectProviderEvidence(
         attempt,
         command,
@@ -372,7 +498,7 @@ export class GenerationExecutionService {
         submittedAt: new Date().toISOString()
       });
     } catch (error) {
-      if (error instanceof SubmissionOutcomeUnknownError) {
+      if (error instanceof SubmissionOutcomeUnknownError || providerReturned) {
         const evidence = await this.collectProviderEvidence(
           attempt,
           command,
@@ -389,7 +515,7 @@ export class GenerationExecutionService {
           {
             status: "SUBMISSION_OUTCOME_UNKNOWN",
             errorCode: "SUBMISSION_OUTCOME_UNKNOWN",
-            errorMessage: error.message
+            errorMessage: error instanceof Error ? error.message : String(error)
           }
         );
         await this.ensureReconcileBlocker(unknown);
@@ -416,6 +542,10 @@ export class GenerationExecutionService {
   }
 
   async pollAttempt(attemptId: string): Promise<GenerationAttempt> {
+    return withSerialOperation("generation:" + attemptId, () => this.pollExclusive(attemptId));
+  }
+
+  private async pollExclusive(attemptId: string): Promise<GenerationAttempt> {
     let attempt = await this.requireAttempt(attemptId);
     if (
       attempt.status !== "SUBMITTED" &&
@@ -426,7 +556,7 @@ export class GenerationExecutionService {
       );
     }
     if (!attempt.providerHandle) {
-      throw new DomainValidationError("Attempt has no provider handle");
+      throw new DomainValidationError("生成任务缺少平台任务信息");
     }
 
     const command = await this.beginCommand(attempt, "STATUS");
@@ -475,7 +605,16 @@ export class GenerationExecutionService {
   }
 
   async downloadAttempt(attemptId: string): Promise<GenerationAttempt> {
+    return withSerialOperation("generation:" + attemptId, () => this.downloadExclusive(attemptId));
+  }
+
+  private async downloadExclusive(attemptId: string): Promise<GenerationAttempt> {
     let attempt = await this.requireAttempt(attemptId);
+    if (attempt.outputArtifactId) {
+      const output = await this.artifacts.findById(attempt.outputArtifactId);
+      if (output?.projectId === attempt.projectId && output.kind === "GENERATED_VIDEO" && output.integrityStatus === "READY") return attempt;
+      throw new DomainValidationError("已记录的下载产物完整性异常，请先恢复产物，不创建重复下载记录");
+    }
     if (
       attempt.status !== "SUCCEEDED" &&
       attempt.status !== "RECONCILED_SUCCEEDED"
@@ -553,6 +692,10 @@ export class GenerationExecutionService {
   }
 
   async reconcileAttempt(attemptId: string): Promise<GenerationAttempt> {
+    return withSerialOperation("generation:" + attemptId, () => this.reconcileExclusive(attemptId));
+  }
+
+  private async reconcileExclusive(attemptId: string): Promise<GenerationAttempt> {
     let attempt = await this.requireAttempt(attemptId);
     if (
       attempt.status !== "SUBMISSION_OUTCOME_UNKNOWN" &&

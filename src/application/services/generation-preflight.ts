@@ -23,6 +23,20 @@ import { computeGenerationRequestHash } from "./hash-contracts.js";
 import { compileSeedancePrompt } from "./prompt-compiler.js";
 import { blockerFromProviderProbe } from "./provider-blocker.js";
 import { DomainValidationError } from "../../domain/validation.js";
+import type { StructuredAiRuntime } from "../ports/structured-ai-runtime.js";
+import { UsageComplianceService } from "./usage-compliance.js";
+import {assertReferenceBinding,type CreativeReferenceGuard} from "./creative-reference-binding.js";
+import {CreativeReferenceService} from "./creative-reference-service.js";
+import {
+  assertDirectorPlanTarget,
+  assertDirectorSettingsMatch,
+  assertProfileMatchesDirectorTarget,
+  standardClipOperation
+} from "./director-generation-target.js";
+import {
+  resolveGenerationProfile,
+  type DreaminaAgentCapabilityService
+} from "./dreamina-agent-capability.js";
 
 export type RunPreflightInput = {
   projectId: string;
@@ -34,6 +48,12 @@ export type RunPreflightInput = {
   clipIds?: string[];
   inputBlockers?: string[];
   acceptedDuplicateSubmissionRisk?: boolean;
+  generationSettings?: {
+    requestedModelVersion: string;
+    aspectRatio: string;
+    videoResolution: string;
+    nativeAudioOutputRequested: boolean;
+  };
 };
 
 export type RunPreflightResult = {
@@ -55,7 +75,8 @@ function reportHash(
 function providerBlockers(
   probe: ProviderProbeResult,
   model: VideoModel,
-  durationMs: number
+  durationMs: number,
+  profileValidated = false
 ): string[] {
   if (probe.code === "DREAMINA_NOT_FOUND") {
     return ["DREAMINA_NOT_FOUND"];
@@ -74,13 +95,15 @@ function providerBlockers(
   if (!probe.supportedOperations.includes("download")) {
     blockers.push("CAPABILITY_UNSUPPORTED:download");
   }
-  if (!probe.supportedModels.includes(model)) {
-    blockers.push(`CAPABILITY_UNSUPPORTED:${model}`);
-  }
-  if (!probe.supportedDurationsMs) {
-    blockers.push("CAPABILITY_UNSUPPORTED:duration-unknown");
-  } else if (!probe.supportedDurationsMs.includes(durationMs)) {
-    blockers.push(`CAPABILITY_UNSUPPORTED:duration-${durationMs}`);
+  if (!profileValidated) {
+    if (!probe.supportedModels.includes(model)) {
+      blockers.push(`CAPABILITY_UNSUPPORTED:${model}`);
+    }
+    if (!probe.supportedDurationsMs) {
+      blockers.push("CAPABILITY_UNSUPPORTED:duration-unknown");
+    } else if (!probe.supportedDurationsMs.includes(durationMs)) {
+      blockers.push(`CAPABILITY_UNSUPPORTED:duration-${durationMs}`);
+    }
   }
   return blockers;
 }
@@ -122,6 +145,8 @@ function syntheticCapabilityBlocker(
 }
 
 export class GenerationPreflightService {
+  private readonly usageCompliance?: UsageComplianceService;
+
   constructor(
     private readonly generationRepo: GenerationRepository,
     private readonly workflowRepo: WorkflowRepository,
@@ -130,8 +155,15 @@ export class GenerationPreflightService {
       projectId: string,
       entityKey: string
     ) => Promise<number>,
-    private readonly targetModel: VideoModel = "seedance-2.0"
-  ) {}
+    private readonly targetModel: VideoModel = "seedance-2.0",
+    usageComplianceRuntime?: StructuredAiRuntime,
+    private readonly dreaminaCapability?: DreaminaAgentCapabilityService,
+    private readonly references?: CreativeReferenceGuard
+  ) {
+    this.usageCompliance = usageComplianceRuntime
+      ? new UsageComplianceService(usageComplianceRuntime)
+      : undefined;
+  }
 
   private async persistBlockerOnce(
     projectId: string,
@@ -176,8 +208,47 @@ export class GenerationPreflightService {
     }
   }
 
+  private async reconcileCapabilityBlockers(
+    projectId: string,
+    activeBlockerCodes: readonly string[],
+    resolvedAt: string
+  ): Promise<void> {
+    const activeCapabilityBlockers = activeBlockerCodes.filter(
+      code => !code.startsWith("REFERENCE_")
+    );
+    const open = await this.workflowRepo.listOpenBlockers(projectId);
+    for (const item of open) {
+      if (
+        item.scope !== "PREFLIGHT" ||
+        item.resumeCheckpoint !== "preflight.provider-capability"
+      ) {
+        continue;
+      }
+      const stillActive = activeCapabilityBlockers.some(code =>
+        item.message.includes(code)
+      );
+      if (!stillActive) {
+        await this.workflowRepo.resolveBlocker(item.id, resolvedAt);
+      }
+    }
+  }
+
   async run(input: RunPreflightInput): Promise<RunPreflightResult> {
+    const references=await this.references?.assertExpected(input.projectId,input.productionPlan.creativeReferenceSetRef);
+    for(const artifact of [input.creativeBatch,input.script,input.productionPlan])assertReferenceBinding(artifact.creativeReferenceSetRef,references,input.productTruth);
+    if(references)input={...input,assets:[...input.assets.filter(a=>!a.id.startsWith("research-ref-")),...CreativeReferenceService.assets(references)]};
     const now = new Date();
+    const directorTarget = input.productionPlan.generationTarget;
+    if (directorTarget) {
+      assertDirectorPlanTarget(input.productionPlan);
+      if (input.generationSettings) assertDirectorSettingsMatch(directorTarget, input.generationSettings);
+      else input = { ...input, generationSettings: {
+        requestedModelVersion: directorTarget.requestedModelVersion,
+        aspectRatio: directorTarget.aspectRatio,
+        videoResolution: directorTarget.videoResolution,
+        nativeAudioOutputRequested: directorTarget.nativeAudioOutputRequested
+      } };
+    }
     const existingAttempts = await this.workflowRepo.listGenerationAttempts(
       input.projectId
     );
@@ -192,6 +263,13 @@ export class GenerationPreflightService {
     ) {
       throw new DomainValidationError(
         "Unresolved submission outcome requires explicit duplicate-submission cost-risk acceptance before creating a new Preflight chain"
+      );
+    }
+
+    if (this.usageCompliance) {
+      await this.usageCompliance.assertPlan(
+        input.productTruth,
+        input.productionPlan
       );
     }
 
@@ -235,13 +313,66 @@ export class GenerationPreflightService {
     if (requestedClipIds && clips.length !== requestedClipIds.size) {
       throw new Error("Preflight clipIds contain unknown or stale Clip ids");
     }
+    let capabilityRegistry;
+    if (input.generationSettings && probe.code === "READY") {
+      if (!this.dreaminaCapability) {
+        throw new DomainValidationError(
+          "标准生成尚未接入 DreaminaCapabilityRegistry，不能验证用户选择的模型/画幅/分辨率"
+        );
+      }
+      capabilityRegistry = await this.dreaminaCapability.registry();
+      if (directorTarget && capabilityRegistry.registryFingerprint !== directorTarget.registryFingerprint) {
+        throw new DomainValidationError("Dreamina 能力表已变化，旧生成请求和授权已失效；请返回导演分镜重新适配并审核");
+      }
+    }
+    if (directorTarget && !capabilityRegistry) {
+      throw new DomainValidationError("当前无法验证导演目标的实时模型能力，已阻止回退到旧生成参数；请恢复即梦连接后重试");
+    }
 
     for (const clip of clips) {
+      const dreaminaOperation = standardClipOperation(clip.referenceAssets.length);
+      const referenceAudioInputCount = clip.referenceAssets.filter((usage) => {
+        const asset = input.assets.find((item) => item.id === usage.assetId);
+        return asset?.mimeType?.startsWith("audio/") === true;
+      }).length;
+      const generationProfile =
+        input.generationSettings && capabilityRegistry
+          ? resolveGenerationProfile(capabilityRegistry, {
+              operation: dreaminaOperation,
+              requestedModelVersion:
+                input.generationSettings.requestedModelVersion,
+              aspectRatio: input.generationSettings.aspectRatio,
+              videoResolution: input.generationSettings.videoResolution,
+              durationMs: clip.durationMs,
+              referenceAudioInputCount,
+              nativeAudioOutputRequested:
+                input.generationSettings.nativeAudioOutputRequested
+            })
+          : undefined;
+      if (directorTarget && generationProfile) assertProfileMatchesDirectorTarget(directorTarget, generationProfile);
+      const requestModel =
+        generationProfile?.modelVersion ??
+        (input.generationSettings &&
+        input.generationSettings.requestedModelVersion !== "AUTO" &&
+        input.generationSettings.requestedModelVersion !== "FIXED"
+          ? input.generationSettings.requestedModelVersion
+          : this.targetModel);
+      const requestAspectRatio =
+        generationProfile?.aspectRatio ??
+        input.generationSettings?.aspectRatio ??
+        "9:16";
+      const requestVideoResolution =
+        generationProfile?.videoResolution ??
+        input.generationSettings?.videoResolution;
+      const requestGenerateAudio = generationProfile
+        ? generationProfile.nativeAudioOutputRequested
+        : undefined;
       const version = await this.nextCompiledPromptVersion(
         input.projectId,
         `compiled-prompt:${clip.id}`
       );
       const compiled = compileSeedancePrompt({
+        creativeReferenceSet: references,
         id: randomUUID(),
         version,
         createdAt: now.toISOString(),
@@ -250,7 +381,15 @@ export class GenerationPreflightService {
         script: input.script,
         productionPlan: input.productionPlan,
         clipId: clip.id,
-        model: this.targetModel,
+        model: requestModel,
+        ...(generationProfile ? { generationProfile } : {}),
+        aspectRatio: requestAspectRatio,
+        ...(requestVideoResolution
+          ? { videoResolution: requestVideoResolution }
+          : {}),
+        ...(requestGenerateAudio !== undefined
+          ? { generateAudio: requestGenerateAudio }
+          : {}),
         assets: input.assets
       });
       await this.generationRepo.saveCompiledPrompt(compiled);
@@ -264,17 +403,23 @@ export class GenerationPreflightService {
         provider: "domestic-jimeng-cli" as const,
         providerIdentityHash: probe.providerIdentityHash,
         capabilityFingerprint: probe.capabilityFingerprint,
-        model: this.targetModel,
+        model: requestModel,
         promptText: compiled.promptText,
         assetManifest: compiled.inputAssetManifest,
+        dreaminaOperation,
         durationMs: compiled.generationParams.durationMs,
-        aspectRatio: "9:16" as const,
+        aspectRatio: requestAspectRatio,
+        ...(requestVideoResolution
+          ? { videoResolution: requestVideoResolution }
+          : {}),
         generateAudio: compiled.generationParams.generateAudio,
+        ...(generationProfile ? { generationProfile } : {}),
         inputVersionRefs: [
           compiled.productTruthRef,
           compiled.creativeBatchRef,
           compiled.scriptRef,
-          compiled.productionPlanRef
+          compiled.productionPlanRef,
+          ...(compiled.creativeReferenceSetRef?[compiled.creativeReferenceSetRef]:[])
         ],
         createdAt: now.toISOString()
       };
@@ -327,7 +472,8 @@ export class GenerationPreflightService {
         ...providerBlockers(
           probe,
           request.model,
-          request.durationMs
+          request.durationMs,
+          Boolean(request.generationProfile)
         )
       ];
       if (probe.code === "READY" && authenticated !== true) {
@@ -377,6 +523,12 @@ export class GenerationPreflightService {
             );
       }
     }
+
+    await this.reconcileCapabilityBlockers(
+      input.projectId,
+      reports.flatMap(item => item.blockers),
+      now.toISOString()
+    );
 
     const blocker = await this.persistBlockerOnce(
       input.projectId,

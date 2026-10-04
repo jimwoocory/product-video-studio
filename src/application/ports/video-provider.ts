@@ -42,7 +42,7 @@ export type SubmitResult = {
 };
 
 export type GenerationHandle = SubmitResult;
-export type AccountStatus = { status: "UNKNOWN" | "NOT_AUTHENTICATED" | "AUTHENTICATED" };
+export type AccountStatus = { status: "UNKNOWN" | "NOT_AUTHENTICATED" | "AUTHENTICATED"; availableCredits?: number };
 export type CostEstimateResult = { status: "KNOWN" | "UNKNOWN"; estimatedCredits?: number; estimatedCostText?: string };
 export type GenerationStatusResult = { status: "SUBMITTED" | "PROCESSING" | "SUCCEEDED" | "FAILED" | "UNKNOWN" };
 export type DownloadedAsset = { path: string; sha256: string; sizeBytes: number };
@@ -99,4 +99,11 @@ export interface VideoProvider {
     submissionFingerprint: string;
     knownHandle?: GenerationHandle;
   }): Promise<ReconcileResult>;
+  inspectCommandHelp?(command: string): Promise<{
+    command: string;
+    stdout: string;
+    stderr: string;
+    executablePath: string;
+    executableSha256: string;
+  }>;
 }

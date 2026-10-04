@@ -17,13 +17,16 @@ import {
 
 export { SubmissionOutcomeUnknownError } from "../ports/video-provider.js";
 
-function assertAttemptBinding(input: {
+export function assertAttemptBinding(input: {
   attempt: GenerationAttempt;
   request: GenerationRequest;
   preflight: PreflightReport;
   approval: UserApproval;
 }): void {
   const { attempt, request, preflight, approval } = input;
+  if (attempt.projectId !== request.projectId || attempt.projectId !== preflight.projectId || attempt.projectId !== approval.projectId || attempt.clipId !== request.clipId) {
+    throw new DomainValidationError("GenerationAttempt project/clip binding mismatch");
+  }
   if (attempt.generationRequestId !== request.id) {
     throw new DomainValidationError("GenerationAttempt generationRequestId mismatch");
   }

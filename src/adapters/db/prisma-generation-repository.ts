@@ -32,6 +32,30 @@ export class PrismaGenerationRepository implements GenerationRepository {
     ]);
   }
 
+  async markRequestChainStale(
+    generationRequestId: string,
+    staleAt: string
+  ): Promise<void> {
+    const when = new Date(staleAt);
+    await this.db.$transaction([
+      this.db.generationRequestRecord.updateMany({
+        where: { id: generationRequestId, status: "CURRENT" },
+        data: { status: "STALE" }
+      }),
+      this.db.preflightReportRecord.updateMany({
+        where: {
+          generationRequestId,
+          status: { not: "STALE" }
+        },
+        data: { status: "STALE", staleAt: when }
+      }),
+      this.db.userApprovalRecord.updateMany({
+        where: { generationRequestId, status: "ACTIVE" },
+        data: { status: "STALE" }
+      })
+    ]);
+  }
+
   async saveCompiledPrompt(input: CompiledPrompt): Promise<CompiledPrompt> {
     const prompt = compiledPromptSchema.parse(input);
     await this.db.$transaction(async (tx) => {

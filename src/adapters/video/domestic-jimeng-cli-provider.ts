@@ -146,6 +146,7 @@ export type ResolvedGenerationAsset = {
   role: GenerationRequest["assetManifest"][number]["role"];
   priority: number;
   required: boolean;
+  inputType?: "image" | "video" | "audio";
 };
 
 export type ResolveGenerationAssets = (
@@ -453,6 +454,40 @@ export class DomesticJimengCliProvider
       return { status: "UNKNOWN" };
     }
     return runtime.account.parse(result);
+  }
+
+  async inspectCommandHelp(command: string): Promise<{
+    command: string;
+    stdout: string;
+    stderr: string;
+    executablePath: string;
+    executableSha256: string;
+  }> {
+    if (!/^[a-z0-9_-]+$/i.test(command)) {
+      throw new ProviderNotReadyError("Invalid dreamina command name");
+    }
+    const { executablePath, executableSha256 } =
+      await this.verifiedContext();
+    const helpArgs =
+      command === "__root__" ? ["-h"] : [command, "-h"];
+    const result = await this.execute(
+      "PROBE",
+      executablePath,
+      helpArgs,
+      10_000
+    );
+    if (result.exitCode !== 0 || result.timedOut) {
+      throw new ProviderNotReadyError(
+        `dreamina ${command} -h failed`
+      );
+    }
+    return {
+      command,
+      stdout: result.stdout,
+      stderr: result.stderr,
+      executablePath,
+      executableSha256
+    };
   }
 
   async estimate(requests: GenerationRequest[]): Promise<CostEstimateResult> {

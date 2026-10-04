@@ -14,6 +14,10 @@ function assemblyToDomain(row: {
   inputArtifactHashesJson: string;
   outputArtifactId: string;
   outputArtifactHash: string;
+  timelineId: string | null;
+  timelineHash: string | null;
+  renderJobId: string | null;
+  renderConfigJson: string | null;
   status: string;
   createdAt: Date;
   acceptedAt: Date | null;
@@ -27,6 +31,16 @@ function assemblyToDomain(row: {
     inputArtifactHashes: JSON.parse(row.inputArtifactHashesJson) as string[],
     outputArtifactId: row.outputArtifactId,
     outputArtifactHash: row.outputArtifactHash,
+    ...(row.timelineId ? { timelineId: row.timelineId } : {}),
+    ...(row.timelineHash ? { timelineHash: row.timelineHash } : {}),
+    ...(row.renderJobId ? { renderJobId: row.renderJobId } : {}),
+    ...(row.renderConfigJson
+      ? {
+          renderConfig: JSON.parse(
+            row.renderConfigJson
+          ) as NonNullable<FinalAssembly["renderConfig"]>
+        }
+      : {}),
     status: row.status as FinalAssembly["status"],
     createdAt: row.createdAt.toISOString(),
     ...(row.acceptedAt ? { acceptedAt: row.acceptedAt.toISOString() } : {})
@@ -81,6 +95,12 @@ export class PrismaFinalOutputRepository implements FinalOutputRepository {
         inputArtifactHashesJson: JSON.stringify(assembly.inputArtifactHashes),
         outputArtifactId: assembly.outputArtifactId,
         outputArtifactHash: assembly.outputArtifactHash,
+        timelineId: assembly.timelineId,
+        timelineHash: assembly.timelineHash,
+        renderJobId: assembly.renderJobId,
+        renderConfigJson: assembly.renderConfig
+          ? JSON.stringify(assembly.renderConfig)
+          : undefined,
         status: assembly.status,
         createdAt: new Date(assembly.createdAt),
         acceptedAt: assembly.acceptedAt ? new Date(assembly.acceptedAt) : null

@@ -1,3 +1,5 @@
+import { assertDirectorPlanTarget } from "./director-generation-target.js";
+import type { CreativeReferenceGuard } from "./creative-reference-binding.js";
 import {
   creativeBatchSchema,
   productTruthSchema,
@@ -75,7 +77,7 @@ export type ProjectWorkspace = {
 };
 
 export class ProductFlowService {
-  constructor(private readonly repo: ProductFlowRepository) {}
+  constructor(private readonly repo: ProductFlowRepository, private readonly references?: Pick<CreativeReferenceGuard,"assertExpected">) {}
 
   async createProject(project: Project): Promise<Project> {
     return this.repo.createProject(project);
@@ -186,6 +188,7 @@ export class ProductFlowService {
 
   async saveScriptDraft(input: ScriptDraft): Promise<Project> {
     const script = scriptDraftSchema.parse(input);
+    await this.references?.assertExpected(script.projectId,script.creativeReferenceSetRef);
     if (script.status !== "DRAFT") {
       throw new DomainValidationError("saveScriptDraft requires DRAFT ScriptDraft");
     }
@@ -238,6 +241,8 @@ export class ProductFlowService {
 
   async saveProductionPlanDraft(input: ProductionPlan): Promise<Project> {
     const plan = productionPlanSchema.parse(input);
+    await this.references?.assertExpected(plan.projectId,plan.creativeReferenceSetRef);
+    assertDirectorPlanTarget(plan);
     if (plan.status !== "DRAFT") {
       throw new DomainValidationError("saveProductionPlanDraft requires DRAFT ProductionPlan");
     }
@@ -332,6 +337,7 @@ export class ProductFlowService {
 
   async activateCreativeBatch(input: CreativeBatch): Promise<Project> {
     const batch = creativeBatchSchema.parse(input);
+    await this.references?.assertExpected(batch.projectId,batch.creativeReferenceSetRef);
     if (batch.status !== "ACTIVE") {
       throw new DomainValidationError("CreativeBatch must be ACTIVE");
     }
@@ -410,6 +416,7 @@ export class ProductFlowService {
 
   async confirmScript(input: ScriptDraft): Promise<Project> {
     const script = scriptDraftSchema.parse(input);
+    await this.references?.assertExpected(script.projectId,script.creativeReferenceSetRef);
     if (script.status !== "CONFIRMED") {
       throw new DomainValidationError("ScriptDraft must be CONFIRMED before Director");
     }
@@ -463,6 +470,8 @@ export class ProductFlowService {
 
   async confirmProductionPlan(input: ProductionPlan): Promise<Project> {
     const plan = productionPlanSchema.parse(input);
+    await this.references?.assertExpected(plan.projectId,plan.creativeReferenceSetRef);
+    assertDirectorPlanTarget(plan);
     if (plan.status !== "CONFIRMED") {
       throw new DomainValidationError("ProductionPlan must be CONFIRMED before Preflight");
     }

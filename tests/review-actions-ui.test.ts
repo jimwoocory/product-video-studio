@@ -1,11 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { Script } from "node:vm";
 import {
   assertCanonicalProductArtifactReady,
   reviseProductionPlanDraft,
   reviseScriptDraft
 } from "../src/application/services/review-actions.js";
-import { renderProjectPage } from "../src/web/workbench-ui.js";
+import { renderProjectPage, renderProjectsPage } from "../src/web/workbench-ui.js";
 import type {
   ArtifactRecord,
   AssetRef,
@@ -353,7 +354,7 @@ test("old REDO decision does not hide review controls for a new Attempt/output",
     html,
     /data-attempt="attempt-new" data-clip="clip-1" data-decision="ACCEPT"/
   );
-  assert.match(html, /为此 Clip 运行新 Preflight/);
+  assert.match(html, /为此镜头重新运行生成前检查/);
 });
 
 test("GenerationAttempt cards follow current ProductionPlan clip order and isolate historical attempts", () => {
@@ -436,10 +437,413 @@ test("GenerationAttempt cards follow current ProductionPlan clip order and isola
 
   const clip1Index = html.indexOf("Clip 1 · Attempt #1 · CREATED");
   const clip2Index = html.indexOf("Clip 2 · Attempt #1 · CREATED");
-  const historyIndex = html.indexOf("历史/旧计划 Attempt（1）");
+  const historyIndex = html.indexOf("历史/旧计划生成任务（1）");
   assert.ok(clip1Index >= 0);
   assert.ok(clip2Index > clip1Index);
   assert.ok(historyIndex > clip2Index);
   assert.match(html, /旧计划 · #1 · CREATED/);
-  assert.match(html, /此记录不属于当前 ProductionPlan，仅保留为历史审计/);
+  assert.match(html, /此记录不属于当前导演方案，仅保留为历史记录/);
+});
+
+test("generation page exposes AI multi-version comparison only for two ready successful versions of the same current clip", () => {
+  const plan = makePlan();
+  const clip = plan.scenes[0]!.clips[0]!;
+  const project: Project = {
+    id: "project-1",
+    name: "AI Compare UI",
+    status: "GENERATION_REVIEW",
+    targetPlatform: "douyin",
+    targetDurationMs: 60000,
+    aspectRatio: "9:16",
+    currentProductionPlanRef: {
+      entityType: "ProductionPlan",
+      entityId: plan.id,
+      version: plan.version,
+      hash: plan.contentHash
+    },
+    createdAt: ISO,
+    updatedAt: ISO
+  };
+  const baseAttempt = {
+    projectId: project.id,
+    clipId: clip.id,
+    generationRequestId: "request-compare",
+    requestHash: H.a,
+    preflightReportId: "preflight-compare",
+    userApprovalId: "approval-compare",
+    approvalHash: H.b,
+    submissionFingerprint: H.c,
+    status: "SUCCEEDED" as const,
+    commandAttempts: [],
+    createdAt: ISO,
+    completedAt: ISO
+  };
+  const attempts = [
+    { ...baseAttempt, id: "attempt-compare-2", attemptNumber: 2, outputArtifactId: "video-compare-2" },
+    { ...baseAttempt, id: "attempt-compare-1", attemptNumber: 1, outputArtifactId: "video-compare-1" }
+  ];
+  const artifacts: ArtifactRecord[] = [1, 2].map(number => ({
+    id: `video-compare-${number}`,
+    projectId: project.id,
+    kind: "GENERATED_VIDEO",
+    relativePath: `generated/${number}.mp4`,
+    sha256: number === 1 ? H.d : H.e,
+    sizeBytes: 100,
+    mimeType: "video/mp4",
+    integrityStatus: "READY",
+    immutable: true,
+    createdAt: ISO
+  }));
+  const html = renderProjectPage({
+    kind: "generate",
+    workspace: { project, productionPlan: plan },
+    blockers: [],
+    attempts,
+    generationRequests: [],
+    preflights: [],
+    approvals: [],
+    compiledPrompts: [],
+    artifacts,
+    reviewDecisions: [],
+    commandAttempts: [],
+    probe: {
+      code: "READY",
+      cliFound: true,
+      identityVerified: true,
+      executablePath: "C:/verified/dreamina.exe",
+      executableSha256: H.c,
+      cliVersion: "fixture",
+      providerIdentityHash: H.a,
+      supportedOperations: ["submit", "status", "download"],
+      supportedModels: ["seedance-2.0-mini"],
+      supportedDurationsMs: [8000],
+      capabilityFingerprint: H.b,
+      rawStdout: "",
+      rawStderr: ""
+    }
+  });
+  assert.match(html, /AI 多版本比较/);
+  assert.match(html, /比较最近 2 个版本/);
+  assert.equal((html.match(/visual-compare-action/g) ?? []).length >= 2, true);
+  for (const [index, script] of [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].entries()) {
+    new Script(script[1]!, { filename: "generate-compare-" + index });
+  }
+});
+
+test("older CREATED attempt for the same current Clip is shown only as superseded history", () => {
+  const plan = makePlan();
+  const clip = plan.scenes[0]!.clips[0]!;
+  const project: Project = {
+    id: "project-1",
+    name: "UI Superseded Attempt",
+    status: "GENERATING",
+    targetPlatform: "douyin",
+    targetDurationMs: 60000,
+    aspectRatio: "9:16",
+    currentProductionPlanRef: {
+      entityType: "ProductionPlan",
+      entityId: plan.id,
+      version: plan.version,
+      hash: plan.contentHash
+    },
+    createdAt: ISO,
+    updatedAt: ISO
+  };
+  const baseAttempt = {
+    projectId: project.id,
+    clipId: clip.id,
+    generationRequestId: "request",
+    requestHash: H.a,
+    preflightReportId: "preflight",
+    userApprovalId: "approval",
+    approvalHash: H.b,
+    submissionFingerprint: H.c,
+    status: "CREATED" as const,
+    commandAttempts: [],
+    createdAt: ISO
+  };
+  const html = renderProjectPage({
+    kind: "generate",
+    workspace: { project, productionPlan: plan },
+    blockers: [],
+    attempts: [
+      { ...baseAttempt, id: "attempt-old", attemptNumber: 1 },
+      { ...baseAttempt, id: "attempt-new", attemptNumber: 2 }
+    ],
+    generationRequests: [],
+    preflights: [],
+    approvals: [],
+    compiledPrompts: [],
+    artifacts: [],
+    reviewDecisions: [],
+    commandAttempts: [],
+    probe: {
+      code: "DREAMINA_NOT_FOUND",
+      cliFound: false,
+      providerIdentityHash: H.a,
+      capabilityFingerprint: H.b,
+      rawStdout: "",
+      rawStderr: "missing"
+    }
+  });
+
+  assert.match(
+    html,
+    /data-attempt="attempt-new" data-action="submit"/
+  );
+  assert.doesNotMatch(
+    html,
+    /data-attempt="attempt-old" data-action="submit"/
+  );
+  assert.match(html, /同镜头已被替代的待提交记录（1）/);
+  assert.match(html, /第 1 次 · 已被替代/);
+});
+
+test("P1F-01 generation page exposes ordered workflow navigation and video-edit CTA", () => {
+  const plan = makePlan();
+  const clip = plan.scenes[0]!.clips[0]!;
+  const project: Project = {
+    id: "project-1",
+    name: "P1F UX",
+    status: "READY_TO_ASSEMBLE",
+    targetPlatform: "douyin",
+    targetDurationMs: 60000,
+    aspectRatio: "9:16",
+    currentProductionPlanRef: {
+      entityType: "ProductionPlan",
+      entityId: plan.id,
+      version: plan.version,
+      hash: plan.contentHash
+    },
+    createdAt: ISO,
+    updatedAt: ISO
+  };
+  const output: ArtifactRecord = {
+    id: "video-ready",
+    projectId: project.id,
+    kind: "GENERATED_VIDEO",
+    relativePath: "outputs/ready.mp4",
+    sha256: H.one,
+    sizeBytes: 12,
+    mimeType: "video/mp4",
+    integrityStatus: "READY",
+    immutable: true,
+    createdAt: ISO
+  };
+  const attempt = {
+    id: "attempt-ready",
+    projectId: project.id,
+    clipId: clip.id,
+    attemptNumber: 1,
+    generationRequestId: "request-ready",
+    requestHash: H.a,
+    preflightReportId: "preflight-ready",
+    userApprovalId: "approval-ready",
+    approvalHash: H.b,
+    submissionFingerprint: H.c,
+    status: "SUCCEEDED" as const,
+    providerHandle: { externalTaskId: "task-ready" },
+    commandAttempts: [],
+    outputArtifactId: output.id,
+    createdAt: ISO,
+    completedAt: ISO
+  };
+  const accepted: ReviewDecision = {
+    id: "review-ready",
+    projectId: project.id,
+    clipId: clip.id,
+    clipHash: clip.contentHash,
+    generationAttemptId: attempt.id,
+    outputArtifactId: output.id,
+    outputArtifactHash: output.sha256!,
+    decision: "ACCEPT",
+    decidedAt: ISO
+  };
+  const html = renderProjectPage({
+    kind: "generate",
+    workspace: { project, productionPlan: plan },
+    blockers: [],
+    attempts: [attempt],
+    generationRequests: [],
+    preflights: [],
+    approvals: [],
+    compiledPrompts: [],
+    artifacts: [output],
+    reviewDecisions: [accepted],
+    commandAttempts: [],
+    probe: {
+      code: "DREAMINA_NOT_FOUND",
+      cliFound: false,
+      providerIdentityHash: H.a,
+      capabilityFingerprint: H.b,
+      rawStdout: "",
+      rawStderr: "missing"
+    }
+  });
+
+  const orderedLabels = [
+    "1 产品输入",
+    "2 联网研究",
+    "3 产品事实",
+    "4 创意方案",
+    "5 脚本",
+    "6 导演分镜",
+    "7 视频生成",
+    "8 视频剪辑",
+    "9 成片与发布"
+  ];
+  let previous = -1;
+  for (const label of orderedLabels) {
+    const index = html.indexOf(label);
+    assert.ok(index > previous, `导航顺序错误：${label}`);
+    previous = index;
+  }
+  assert.match(html, /辅助工具/);
+  assert.match(html, />参考视频<\/a>/);
+  assert.match(html, />智能生成<\/a>/);
+  assert.match(html, />模型设置<\/a>/);
+  assert.match(html, /当前位置：视频生成/);
+  assert.match(html, /8 视频剪辑<\/span><small>下一步<\/small>/);
+  assert.doesNotMatch(html, /9 成片与发布<\/span><small>下一步<\/small>/);
+  assert.match(html, /id="enter-timeline" href="\/projects\/project-1\/timeline">进入视频剪辑/);
+  assert.match(html, /id="standard-generation-config"/);
+  assert.match(html, /id="standard-model"/);
+  assert.match(html, /id="standard-ratio"/);
+  assert.match(html, /id="standard-resolution"/);
+  assert.match(html, /id="standard-native-audio"/);
+  assert.match(html, /\/api\/dreamina\/capabilities/);
+  assert.match(html, /function currentStandardGenerationSettings\(\)/);
+  assert.match(html, /generationSettings:currentStandardGenerationSettings\(\)/);
+});
+test("P1F-01 manual product input uses managed image and Logo material controls", () => {
+  const project: Project = {
+    id: "project-manual-materials",
+    name: "Manual Materials",
+    status: "DRAFT",
+    targetPlatform: "douyin",
+    targetDurationMs: 30000,
+    aspectRatio: "9:16",
+    createdAt: ISO,
+    updatedAt: ISO
+  };
+  const html = renderProjectPage({
+    kind: "product",
+    workspace: { project },
+    blockers: [],
+    attempts: [],
+    generationRequests: [],
+    preflights: [],
+    approvals: [],
+    compiledPrompts: [],
+    artifacts: [],
+    reviewDecisions: [],
+    commandAttempts: []
+  });
+  assert.match(html, /id="product-image-list"/);
+  assert.match(html, /<label[^>]*for="product-image-input"[^>]*id="product-image-pick"/);
+  assert.match(html, /class="file-picker-input" id="product-image-input"/);
+  assert.match(html, /<label[^>]*for="product-logo-input"[^>]*id="product-logo-pick"/);
+  assert.match(html, /class="file-picker-input" id="product-logo-input"/);
+  assert.match(html, /fileInput\.showPicker\(\)/);
+  assert.doesNotMatch(html, /productMaterialManager\.pickFiles\(\)/);
+  assert.doesNotMatch(html, /productMaterialManager\.pickLogo\(\)/);
+  assert.match(html, /可继续追加/);
+  assert.match(html, /清空全部产品图片/);
+  assert.match(html, /pvsCreateMaterialManager/);
+  assert.match(html, /pvs-move-up/);
+  assert.match(html, /pvs-move-down/);
+  assert.match(html, /pvs-replace/);
+  assert.match(html, /pvs-remove/);
+  assert.match(html, /品牌标志 Logo（可选，独立管理）/);
+  assert.match(html, /id="product-logo-replace"/);
+  assert.match(html, /id="product-logo-remove"/);
+  assert.match(html, /请至少选择 1 张产品图片/);
+  assert.match(html, /请先删除或替换不可用产品图片/);
+});
+test("P1 project creation exposes 10-120 second quick and custom duration controls", () => {
+  const html = renderProjectsPage([], new Map());
+  assert.match(
+    html,
+    /id="duration-seconds" type="number" min="10" max="120" step="1"/
+  );
+  for (const seconds of [10, 15, 30, 45, 60, 90, 120]) {
+    assert.match(html, new RegExp(`data-seconds="${seconds}"`));
+  }
+  assert.match(html, /targetDurationMs/);
+  assert.match(html, /高级信息/);
+});
+
+test("P1 generation page auto-polls submitted attempts and keeps manual fallback", () => {
+  const plan = makePlan();
+  const clip = plan.scenes[0]!.clips[0]!;
+  const project: Project = {
+    id: "project-1",
+    name: "Auto Poll",
+    status: "GENERATING",
+    targetPlatform: "douyin",
+    targetDurationMs: 60000,
+    aspectRatio: "9:16",
+    currentProductionPlanRef: {
+      entityType: "ProductionPlan",
+      entityId: plan.id,
+      version: plan.version,
+      hash: plan.contentHash
+    },
+    createdAt: ISO,
+    updatedAt: ISO
+  };
+  const html = renderProjectPage({
+    kind: "generate",
+    workspace: { project, productionPlan: plan },
+    blockers: [],
+    attempts: [
+      {
+        id: "attempt-active",
+        projectId: project.id,
+        clipId: clip.id,
+        attemptNumber: 1,
+        generationRequestId: "request-1",
+        requestHash: H.a,
+        preflightReportId: "preflight-1",
+        userApprovalId: "approval-1",
+        approvalHash: H.b,
+        submissionFingerprint: H.c,
+        status: "SUBMITTED",
+        providerHandle: { externalTaskId: "task-active" },
+        commandAttempts: [],
+        createdAt: ISO,
+        submittedAt: ISO
+      }
+    ],
+    generationRequests: [],
+    preflights: [],
+    approvals: [],
+    compiledPrompts: [],
+    artifacts: [],
+    reviewDecisions: [],
+    commandAttempts: [],
+    probe: {
+      code: "READY",
+      cliFound: true,
+      identityVerified: true,
+      executablePath: "C:\\test\\dreamina.exe",
+      executableSha256: H.c,
+      providerIdentityHash: H.a,
+      capabilityFingerprint: H.b,
+      rawStdout: "",
+      rawStderr: "",
+      cliVersion: "test",
+      supportedModels: ["seedance-2.0-mini"],
+      supportedOperations: ["submit", "status", "download"]
+    }
+  });
+
+  assert.equal(html.includes('const autoPollAttemptIds=["attempt-active"]'), true);
+  assert.match(html, /系统会自动刷新正在生成的任务/);
+  assert.equal(html.includes("setTimeout(autoWatchGeneration,4000)"), true);
+  assert.match(
+    html,
+    /data-attempt="attempt-active" data-action="poll">刷新状态/
+  );
+  assert.match(html, /视频生成记录/);
 });
