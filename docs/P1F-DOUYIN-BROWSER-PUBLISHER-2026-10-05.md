@@ -3,7 +3,7 @@
 日期：2026-10-05  
 Product Video Studio 分支：`feat/douyin-browser-publisher`  
 social-auto-upload 二开分支：`feat/pvs-douyin-engine`  
-social-auto-upload 二开提交：`b900f625fda10f2b55736194867a40851751e9e0`
+social-auto-upload 二开提交：`9c2ccf9493afae91cfa23d785bfc028bd7056f85`
 
 ## 目标
 
