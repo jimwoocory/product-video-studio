@@ -61,6 +61,7 @@ import { WindowsSpeechSynthesis } from "../adapters/media/windows-speech-synthes
 import { ReferenceVideoAnalysisService } from "../application/services/reference-video-analysis.js";
 import { ResearchService } from "../application/services/research-service.js";
 import { TaskCenterService } from "../application/services/task-center-service.js";
+import { SystemHealthService } from "../application/services/system-health-service.js";
 import { ProductDirectorService } from "../application/services/product-director.js";
 import { GenerationPreflightService } from "../application/services/generation-preflight.js";
 import { ApprovalService } from "../application/services/approval-service.js";
@@ -113,6 +114,7 @@ import { qrCodeSvg } from "./qr-code.js";
 import { canServeArtifactContent } from "./artifact-media-policy.js";
 import { renderBlockedStepPage, renderSafeRequestErrorPage } from "./blocked-step-ui.js";
 import { renderTaskCenterPage } from "./task-center-ui.js";
+import { renderHealthCenterPage } from "./health-center-ui.js";
 import {
   renderMobilePublishPage,
   renderPublishSettingsPage
@@ -148,6 +150,7 @@ export type WebDependencies = {
   referenceVideo: ReferenceVideoAnalysisService;
   research: ResearchService;
   taskCenter: TaskCenterService;
+  health: SystemHealthService;
   productInput: ProductInputStore;
   aiGeneration: AiGenerationService;
   productDirector: ProductDirectorService;
@@ -366,6 +369,18 @@ export function createDefaultDependencies(): WebDependencies {
     publishProviders,
     projectsRoot
   );
+  const health = new SystemHealthService({
+    aiSettings,
+    productFlow,
+    provider,
+    publishBridge,
+    databasePing: async () => {
+      await prisma.$queryRawUnsafe("SELECT 1");
+    },
+    ffmpegPath: process.env.FFMPEG_PATH ?? "ffmpeg",
+    ffprobePath: process.env.FFPROBE_PATH ?? "ffprobe",
+    browserResearchUrl: process.env.PVS_BROWSER_RESEARCH_URL?.trim() ?? ""
+  });
   const douyinPublish = new DouyinPublishService(
     productFlow,
     workflow,
@@ -441,6 +456,7 @@ export function createDefaultDependencies(): WebDependencies {
     referenceVideo,
     research,
     taskCenter,
+    health,
     productInput,
     aiGeneration,
     productDirector,
@@ -749,6 +765,26 @@ export function createAppServer(
           service: "product-video-studio",
           specVersion: "P1-0.3.0-p1-final"
         });
+      }
+
+      if (req.method === "GET" && url.pathname === "/api/health/report") {
+        const projectId = url.searchParams.get("projectId") ?? undefined;
+        return json(res, 200, {
+          report: await deps.health.check(projectId)
+        });
+      }
+
+      if (req.method === "GET" && url.pathname === "/health-center") {
+        const projectId = url.searchParams.get("projectId") ?? undefined;
+        const [report, projects] = await Promise.all([
+          deps.health.check(projectId),
+          deps.productFlow.listProjects()
+        ]);
+        return html(
+          res,
+          200,
+          renderHealthCenterPage({ report, projects })
+        );
       }
 
       if (req.method === "GET" && url.pathname === "/api/tasks") {
