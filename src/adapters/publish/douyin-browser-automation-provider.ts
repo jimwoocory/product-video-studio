@@ -61,8 +61,8 @@ export class DouyinBrowserAutomationProvider implements PublishProvider {
       };
     }
 
-    const accountName = await this.runtime.resolveAccountName();
-    const account = await this.runtime.check(accountName);
+    const accountKey = await this.runtime.resolveAccountName();
+    const account = await this.runtime.check(accountKey);
     if (!account.valid) {
       return {
         providerType: this.type,
@@ -72,7 +72,12 @@ export class DouyinBrowserAutomationProvider implements PublishProvider {
         reason:
           account.message ??
           "抖音账号尚未登录或登录状态已经失效。",
-        accountName,
+        ...(account.displayName
+          ? { accountDisplayName: account.displayName }
+          : {}),
+        ...(account.platformUserId
+          ? { platformUserId: account.platformUserId }
+          : {}),
         supportsTrustedFinalConfirmation: true,
         requiresMobileDevice: false,
         complianceNotice:
@@ -85,7 +90,12 @@ export class DouyinBrowserAutomationProvider implements PublishProvider {
       displayName: this.displayName,
       mode: this.mode,
       code: "READY",
-      accountName,
+      ...(account.displayName
+        ? { accountDisplayName: account.displayName }
+        : {}),
+      ...(account.platformUserId
+        ? { platformUserId: account.platformUserId }
+        : {}),
       supportsTrustedFinalConfirmation: true,
       requiresMobileDevice: false,
       complianceNotice:
@@ -104,8 +114,7 @@ export class DouyinBrowserAutomationProvider implements PublishProvider {
       );
     }
 
-    const accountName =
-      probe.accountName ?? (await this.runtime.resolveAccountName());
+    const accountKey = await this.runtime.resolveAccountName();
     const copy = extractTopics(input.description);
     const result = await this.runtime.publish(
       {
@@ -117,7 +126,7 @@ export class DouyinBrowserAutomationProvider implements PublishProvider {
           process.env.PVS_DOUYIN_BROWSER_HEADED?.trim() !== "0",
         declaration: "内容由AI生成"
       },
-      accountName
+      accountKey
     );
 
     if (!result.ok) {

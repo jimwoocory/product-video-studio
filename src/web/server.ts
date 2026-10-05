@@ -3171,7 +3171,19 @@ export function createAppServer(
           await deps.douyinBrowserRuntime.resolveAccountName();
         const account =
           await deps.douyinBrowserRuntime.check(accountName);
-        return json(res, 200, { account });
+        return json(res, 200, {
+          account: {
+            valid: account.valid,
+            status: account.status,
+            ...(account.displayName
+              ? { displayName: account.displayName }
+              : {}),
+            ...(account.platformUserId
+              ? { platformUserId: account.platformUserId }
+              : {}),
+            ...(account.message ? { message: account.message } : {})
+          }
+        });
       }
 
       const douyinBrowserLoginMatch = url.pathname.match(
@@ -3187,11 +3199,9 @@ export function createAppServer(
             "抖音浏览器发布引擎尚未配置"
           );
         }
-        const body = (await readJson(req)) as { account?: unknown };
+        await readJson(req);
         const accountName =
-          typeof body.account === "string" && body.account.trim()
-            ? body.account.trim()
-            : await deps.douyinBrowserRuntime.resolveAccountName();
+          await deps.douyinBrowserRuntime.resolveAccountName();
         const login = await deps.douyinBrowserRuntime.login(
           accountName,
           true
@@ -3204,7 +3214,12 @@ export function createAppServer(
           await refreshProjectSnapshot(deps, projectId);
         }
         return json(res, login.ok ? 200 : 409, {
-          login,
+          login: {
+            ok: login.ok,
+            status: login.status,
+            ...(login.message ? { message: login.message } : {}),
+            ...(login.currentUrl ? { currentUrl: login.currentUrl } : {})
+          },
           ...(login.ok
             ? {
                 providerStatus:

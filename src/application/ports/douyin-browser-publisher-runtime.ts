@@ -12,6 +12,9 @@ export type DouyinBrowserAccountStatus = {
   account: string;
   status: "VALID" | "AUTH_REQUIRED" | "FAILED" | string;
   valid: boolean;
+  displayName?: string;
+  platformUserId?: string;
+  currentUrl?: string;
   message?: string;
 };
 

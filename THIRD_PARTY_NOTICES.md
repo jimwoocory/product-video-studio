@@ -95,7 +95,7 @@ Purpose: OAuth user authorization plus `video.create` upload/create APIs for exp
 
 Classification: external local runtime, not bundled into Product Video Studio.
 Upstream: https://github.com/dreammis/social-auto-upload
-Reviewed upstream baseline: commit `0012d2c355f88f683cc38dde2a2db209e14091bc`; PVS integration branch commit: `9c2ccf9493afae91cfa23d785bfc028bd7056f85`.
+Reviewed upstream baseline: commit `0012d2c355f88f683cc38dde2a2db209e14091bc`; PVS integration branch commit: `9059bca234efe71a578938c37a60b0ac6966b364`.
 License: MIT, Copyright (c) 2023 dreammis. The reviewed license text is archived at `third_party/licenses/social-auto-upload-MIT-LICENSE`.
 
 Product Video Studio uses a separately maintained PVS integration branch of this runtime only behind the `DOUYIN_BROWSER_AUTOMATION` adapter. The application calls the machine-readable `sau-pvs` bridge as an external process; the Python source tree, Patchright/Playwright browser binaries and Python dependency environment are not copied into or redistributed with Product Video Studio by this integration.

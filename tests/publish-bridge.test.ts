@@ -83,7 +83,8 @@ class FakeUnknownDirectProvider implements PublishProvider {
       displayName: this.displayName,
       mode: this.mode,
       code: "READY",
-      accountName: "jimwoo",
+      accountDisplayName: "WC",
+      platformUserId: "50805615998",
       supportsTrustedFinalConfirmation: true,
       requiresMobileDevice: false
     };

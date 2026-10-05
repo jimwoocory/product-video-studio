@@ -10,7 +10,8 @@ export type PublishProviderProbe = {
   mode: PublishProviderMode;
   code: PublishProviderProbeCode;
   reason?: string;
-  accountName?: string;
+  accountDisplayName?: string;
+  platformUserId?: string;
   supportsTrustedFinalConfirmation: boolean;
   requiresMobileDevice: boolean;
   complianceNotice?: string;

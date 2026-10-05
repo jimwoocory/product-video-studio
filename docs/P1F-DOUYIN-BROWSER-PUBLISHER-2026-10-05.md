@@ -3,7 +3,7 @@
 日期：2026-10-05  
 Product Video Studio 分支：`feat/douyin-browser-publisher`  
 social-auto-upload 二开分支：`feat/pvs-douyin-engine`  
-social-auto-upload 二开提交：`9c2ccf9493afae91cfa23d785bfc028bd7056f85`
+social-auto-upload 二开提交：`9059bca234efe71a578938c37a60b0ac6966b364`
 
 ## 目标
 
@@ -44,6 +44,8 @@ Product Video Studio 不直接拼接原始 `sau douyin ...` 业务命令，只�
 - `login`
 - `publish`
 - `SAU_RUNTIME_HOME`，允许 Product Video Studio 隔离 Cookie/会话
+- 账号显示身份从抖音创作者中心实时读取；本地 Cookie 文件名不作为用户昵称
+- 当前已登录身份：昵称 `WC`，抖音号 `50805615998`
 - 发布后进入作品管理页再次按本次标题做结果确认
 - 若平台已接受提交但无法确认作品，返回 `SUBMISSION_UNKNOWN`，禁止盲目重试
 - 补齐当前 CLI 仍使用的 `playwright==1.52.0` 依赖声明
@@ -93,13 +95,13 @@ Product Video Studio：
 - 全量 tests 297/297 PASS
 - 发布专项 18/18 PASS
 - 实际 Runtime Adapter probe = READY
-- 实际抖音账号 `jimwoo` check = VALID
+- 实际抖音账号昵称 `WC`、抖音号 `50805615998`，check = VALID
 
 social-auto-upload：
 
 - `py_compile` PASS
 - `sau-pvs probe` PASS
-- `sau-pvs check --account jimwoo` = VALID
+- `sau-pvs check --account 50805615998` = VALID，并返回 `displayName=WC` / `platformUserId=50805615998`
 - 上游原始 commit `0012d2c` 与二开分支运行相同完整 unittest 套件时均存在相同的 6 个既有失败，因此未把这些既有失败归因于本次二开。
 
 ## 未执行

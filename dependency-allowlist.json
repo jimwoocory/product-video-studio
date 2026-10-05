@@ -753,7 +753,7 @@
     },
     {
       "name": "social-auto-upload",
-      "version": "9c2ccf9493afae91cfa23d785bfc028bd7056f85",
+      "version": "9059bca234efe71a578938c37a60b0ac6966b364",
       "ecosystem": "external-runtime",
       "usage": "Locally installed and separately maintained MIT-licensed browser publishing runtime used by the DOUYIN_BROWSER_AUTOMATION provider. Product Video Studio calls the structured sau-pvs bridge and does not vendor the Python source tree or browser binaries.",
       "license": "MIT",

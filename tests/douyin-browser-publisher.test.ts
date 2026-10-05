@@ -17,14 +17,14 @@ class FakeRuntime implements DouyinBrowserPublisherRuntime {
   publishRequest?: DouyinBrowserPublishRequest;
   publishResult: DouyinBrowserPublishResult = {
     ok: true,
-    account: "jimwoo",
+    account: "50805615998",
     status: "PUBLISHED_CONFIRMED",
     verified: true,
     externalReference: "https://creator.douyin.com/creator-micro/content/manage"
   };
 
   async resolveAccountName(): Promise<string> {
-    return "jimwoo";
+    return "50805615998";
   }
 
   async probe(): Promise<DouyinBrowserEngineProbe> {
@@ -39,7 +39,9 @@ class FakeRuntime implements DouyinBrowserPublisherRuntime {
   async check(accountName?: string): Promise<DouyinBrowserAccountStatus> {
     return {
       ok: true,
-      account: accountName ?? "jimwoo",
+      account: accountName ?? "50805615998",
+      displayName: "WC",
+      platformUserId: "50805615998",
       status: "VALID",
       valid: true
     };
@@ -60,7 +62,7 @@ class FakeRuntime implements DouyinBrowserPublisherRuntime {
     this.publishRequest = request;
     return {
       ...this.publishResult,
-      account: accountName ?? "jimwoo"
+      account: accountName ?? "50805615998"
     };
   }
 }
@@ -71,7 +73,8 @@ test("Douyin browser provider exposes valid account and publishes only verified 
 
   const probe = await provider.probe("project-browser");
   assert.equal(probe.code, "READY");
-  assert.equal(probe.accountName, "jimwoo");
+  assert.equal(probe.accountDisplayName, "WC");
+  assert.equal(probe.platformUserId, "50805615998");
 
   const result = await provider.directPublish({
     projectId: "project-browser",
@@ -91,7 +94,7 @@ test("Douyin browser provider treats unverified submission as unknown and blocks
   const runtime = new FakeRuntime();
   runtime.publishResult = {
     ok: true,
-    account: "jimwoo",
+    account: "50805615998",
     status: "SUBMISSION_UNKNOWN",
     verified: false,
     externalReference:
