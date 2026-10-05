@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -78,6 +79,16 @@ await prisma.project.createMany({
       status: "READY_TO_GENERATE",
       targetPlatform: "douyin",
       targetDurationMs: 30000,
+      aspectRatio: "9:16",
+      createdAt: now,
+      updatedAt: now
+    },
+    {
+      id: "e2e-final",
+      name: "E2E Final QC Project",
+      status: "FINAL_REVIEW",
+      targetPlatform: "douyin",
+      targetDurationMs: 10000,
       aspectRatio: "9:16",
       createdAt: now,
       updatedAt: now
@@ -187,6 +198,282 @@ await prisma.researchRunRecord.create({
     requiredUserAction: "完成登录后点击继续深度研究",
     createdAt: new Date("2026-10-04T00:05:00.000Z"),
     updatedAt: new Date("2026-10-04T00:05:00.000Z")
+  }
+});
+
+
+const e2eFinalRoot = path.join(projectsRoot, "e2e-final");
+const e2eFinalRelative = "final/final.mp4";
+const e2eFinalFile = path.join(e2eFinalRoot, e2eFinalRelative);
+await fs.mkdir(path.dirname(e2eFinalFile), { recursive: true });
+const e2eFfmpeg = process.env.FFMPEG_PATH ?? "ffmpeg";
+const e2eVideo = spawnSync(
+  e2eFfmpeg,
+  [
+    "-hide_banner",
+    "-loglevel",
+    "error",
+    "-f",
+    "lavfi",
+    "-i",
+    "testsrc2=size=720x1280:rate=30:duration=3",
+    "-f",
+    "lavfi",
+    "-i",
+    "sine=frequency=440:sample_rate=48000:duration=3",
+    "-shortest",
+    "-c:v",
+    "libx264",
+    "-preset",
+    "ultrafast",
+    "-pix_fmt",
+    "yuv420p",
+    "-c:a",
+    "aac",
+    "-b:a",
+    "128k",
+    "-y",
+    e2eFinalFile
+  ],
+  {
+    cwd: root,
+    env,
+    encoding: "utf8",
+    windowsHide: true,
+    timeout: 120000
+  }
+);
+if (e2eVideo.status !== 0) {
+  console.error("E2E final-video fixture failed:", e2eVideo.stderr);
+  process.exit(e2eVideo.status ?? 1);
+}
+const e2eFinalBytes = await fs.readFile(e2eFinalFile);
+const e2eFinalHash = createHash("sha256").update(e2eFinalBytes).digest("hex");
+const e2ePlanHash = "a".repeat(64);
+const e2eTimelineHash = "c".repeat(64);
+const e2eSourceHash = "b".repeat(64);
+const e2eTimeline = {
+  id: "e2e-final-timeline",
+  projectId: "e2e-final",
+  version: 1,
+  status: "CONFIRMED",
+  productionPlanHash: e2ePlanHash,
+  tracks: [
+    {
+      id: "e2e-final-video-track",
+      kind: "VIDEO",
+      order: 0,
+      label: "主视频",
+      locked: false,
+      muted: false
+    }
+  ],
+  clips: [
+    {
+      id: "e2e-final-edit",
+      sourceClipId: "e2e-final-source-clip",
+      sourceArtifactId: "e2e-final-source-artifact",
+      sourceArtifactHash: e2eSourceHash,
+      sourceDurationMs: 3000,
+      inMs: 0,
+      outMs: 3000,
+      trackId: "e2e-final-video-track",
+      order: 0,
+      deleted: false,
+      transition: { type: "CUT", durationMs: 0 },
+      audio: { muted: false, volume: 1, keyframes: [] },
+      captions: []
+    }
+  ],
+  audioItems: [],
+  textItems: [],
+  repairMasks: [],
+  renderConfig: {
+    width: 720,
+    height: 1280,
+    fps: 30,
+    videoCodec: "libx264",
+    audioCodec: "aac",
+    format: "mp4"
+  },
+  contentHash: e2eTimelineHash,
+  createdAt: now.toISOString(),
+  updatedAt: now.toISOString(),
+  confirmedAt: now.toISOString()
+};
+
+
+const e2eContinuityState = {
+  description: "E2E continuity",
+  productState: "product stable",
+  environmentState: "studio stable",
+  stateHash: "d".repeat(64)
+};
+const e2eProductionPlan = {
+  id: "e2e-final-plan",
+  projectId: "e2e-final",
+  version: 1,
+  status: "CONFIRMED",
+  productTruthRef: {
+    entityType: "ProductTruth",
+    entityId: "e2e-final-truth-ref",
+    version: 1,
+    hash: "f".repeat(64)
+  },
+  scriptRef: {
+    entityType: "ScriptDraft",
+    entityId: "e2e-final-script-ref",
+    version: 1,
+    hash: "1".repeat(64)
+  },
+  selectedCreativeId: "e2e-final-creative",
+  visualDirection: "E2E clean product showcase",
+  soundDirection: "E2E clean audio",
+  productShowcaseRules: ["Keep the product stable"],
+  continuityLock: {
+    product: {
+      stableAttributes: ["product shape"],
+      forbiddenChanges: []
+    },
+    characters: [],
+    environments: [
+      {
+        sceneId: "e2e-final-scene",
+        stableElements: ["studio background"]
+      }
+    ]
+  },
+  scenes: [
+    {
+      id: "e2e-final-scene",
+      order: 0,
+      purpose: "E2E final QC",
+      location: "studio",
+      visualState: "clean",
+      sourceBeatIds: [],
+      requiredFactIds: [],
+      clips: [
+        {
+          id: "e2e-final-plan-clip",
+          sceneId: "e2e-final-scene",
+          order: 0,
+          durationMs: 4000,
+          purpose: "product showcase",
+          openingState: e2eContinuityState,
+          closingState: e2eContinuityState,
+          referenceAssets: [],
+          productVisibility: "HERO",
+          strictProductIdentity: false,
+          strictProductIdentityScope: [],
+          riskAssessment: {
+            level: "LOW",
+            reasonCodes: ["E2E_FIXTURE"],
+            mitigations: ["E2E_FIXTURE"],
+            source: "PRODUCT_DIRECTOR"
+          },
+          sourceBeatIds: [],
+          requiredFactIds: [],
+          segments: [
+            {
+              id: "e2e-final-segment",
+              order: 0,
+              startMs: 0,
+              endMs: 4000,
+              shotSize: "medium",
+              cameraPosition: "front",
+              cameraAngle: "eye-level",
+              cameraMovement: "static",
+              composition: "centered",
+              subjectAction: "product showcase",
+              productState: "stable",
+              dialogueOrNarration: { kind: "NONE" },
+              ambientSound: { kind: "NONE" },
+              postProductionText: [],
+              lighting: "even",
+              continuityIn: e2eContinuityState,
+              continuityOut: e2eContinuityState,
+              sourceBeatIds: [],
+              requiredFactIds: []
+            }
+          ],
+          aggregateStatus: "ACCEPTED",
+          contentHash: "e".repeat(64)
+        }
+      ]
+    }
+  ],
+  contentHash: e2ePlanHash,
+  confirmedAt: now.toISOString()
+};
+
+await prisma.versionedEntity.create({
+  data: {
+    id: e2eProductionPlan.id,
+    projectId: "e2e-final",
+    entityType: "ProductionPlan",
+    entityKey: "current",
+    version: 1,
+    status: "CONFIRMED",
+    contentHash: e2ePlanHash,
+    dataJson: JSON.stringify(e2eProductionPlan),
+    createdAt: now,
+    updatedAt: now
+  }
+});
+await prisma.project.update({
+  where: { id: "e2e-final" },
+  data: {
+    currentProductionPlanId: e2eProductionPlan.id,
+    currentProductionPlanVersion: 1,
+    currentProductionPlanHash: e2ePlanHash
+  }
+});
+
+await prisma.artifactRecord.create({
+  data: {
+    id: "e2e-final-artifact",
+    projectId: "e2e-final",
+    kind: "FINAL_VIDEO",
+    relativePath: e2eFinalRelative,
+    sha256: e2eFinalHash,
+    sizeBytes: e2eFinalBytes.byteLength,
+    mimeType: "video/mp4",
+    integrityStatus: "READY",
+    immutable: true,
+    createdAt: now
+  }
+});
+
+await prisma.timelineRecord.create({
+  data: {
+    id: e2eTimeline.id,
+    projectId: "e2e-final",
+    version: 1,
+    status: "CONFIRMED",
+    productionPlanHash: e2ePlanHash,
+    contentHash: e2eTimelineHash,
+    dataJson: JSON.stringify(e2eTimeline),
+    createdAt: now,
+    updatedAt: now,
+    confirmedAt: now
+  }
+});
+
+await prisma.finalAssemblyRecord.create({
+  data: {
+    id: "e2e-final-assembly",
+    projectId: "e2e-final",
+    productionPlanHash: e2ePlanHash,
+    selectedClipIdsJson: JSON.stringify(["e2e-final-source-clip"]),
+    inputArtifactIdsJson: JSON.stringify(["e2e-final-source-artifact"]),
+    inputArtifactHashesJson: JSON.stringify([e2eSourceHash]),
+    outputArtifactId: "e2e-final-artifact",
+    outputArtifactHash: e2eFinalHash,
+    timelineId: e2eTimeline.id,
+    timelineHash: e2eTimelineHash,
+    renderConfigJson: JSON.stringify(e2eTimeline.renderConfig),
+    status: "READY",
+    createdAt: now
   }
 });
 

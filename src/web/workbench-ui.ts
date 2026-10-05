@@ -22,6 +22,7 @@ import type { ProviderProbeResult } from "../application/ports/video-provider.js
 import type { DouyinPublishProbe } from "../application/ports/douyin-publish-provider.js";
 import type { PublishProviderProbe } from "../application/ports/publish-provider.js";
 import type { PublicPublishPackage } from "../application/services/publish-bridge-service.js";
+import type { FinalQcReport } from "../domain/final-qc.js";
 import type {
   PublishPreference,
   PublishReceipt
@@ -3027,6 +3028,7 @@ function renderFinal(
   timeline: Timeline | undefined,
   renderJob: RenderJob | undefined,
   assembly: FinalAssembly | undefined,
+  finalQc: FinalQcReport | undefined,
   artifacts: ArtifactRecord[],
   publishAttempts: PublishAttempt[],
   publishProbe: DouyinPublishProbe | undefined,
@@ -3051,6 +3053,15 @@ function renderFinal(
   const finalDeliverableReady = Boolean(
     assembly?.status === "ACCEPTED" && finalArtifactReady
   );
+  const finalQcReady = Boolean(finalQc && finalQc.overall !== "BLOCK");
+  const finalPublishReady = finalDeliverableReady && finalQcReady;
+  const finalQcStatusLabel = finalQc
+    ? finalQc.overall === "PASS"
+      ? "通过"
+      : finalQc.overall === "WARN"
+        ? "有警告"
+        : "阻止发布"
+    : "尚未运行";
   const currentClips = (workspace.productionPlan?.scenes ?? []).flatMap(
     (scene) => scene.clips
   );
@@ -3088,6 +3099,20 @@ function renderFinal(
   const renderJobStatusHtml = renderJob
     ? `<p class="${renderJob.status === "FAILED" ? "danger" : "muted"}">渲染任务：<b>${esc(renderJobStatusLabel[renderJob.status])}</b>${renderJob.errorMessage ? " · " + esc(renderJob.errorMessage) : ""}</p>`
     : "";
+  const finalQcHtml =
+    assembly && finalArtifactReady
+      ? `<section class="card"><div class="head"><div><h3>发布前质检</h3><p class="muted">检查文件、媒体流、时长、尺寸、音轨、黑帧/冻结帧、长静音、字幕/CTA 和已有视觉审片证据。</p></div><span class="status">${esc(finalQcStatusLabel)}</span></div>
+          ${finalQc
+            ? `<div class="grid">${finalQc.checks
+                .map(
+                  (check) =>
+                    `<div class="card"><b>${esc(check.label)}</b><p>${esc(check.severity === "PASS" ? "通过" : check.severity === "WARN" ? "警告" : "阻止")}</p><p class="muted">${esc(check.message)}</p><p class="technical"><code>${esc(check.code)}</code></p></div>`
+                )
+                .join("")}</div><p class="muted">报告绑定：artifact ${esc(finalQc.artifactId)} · ${esc(finalQc.artifactHash.slice(0, 12))}…</p>`
+            : `<p>当前成片还没有发布前 QC 报告。</p>`}
+          <p><button class="secondary" type="button" id="run-final-qc">${finalQc ? "重新运行发布前质检" : "运行发布前质检"}</button></p>
+          <div id="final-qc-error" class="danger"></div></section>`
+      : "";
   const assemblyHtml =
     assembly && assembly.status !== "STALE" && finalArtifact?.integrityStatus === "READY"
       ? `<div class="card">
@@ -3099,7 +3124,7 @@ function renderFinal(
           <p><a class="secondary" href="/api/artifacts/${esc(finalArtifact.id)}/content" download="product-video-${esc(assembly.id)}.mp4">下载成片 MP4</a></p>
           <p class="muted">${isAgentAssembly ? "此成片来自智能生成直出；确认后可进入发布。" : isTimelineAssembly ? "此成片由已确认的视频剪辑方案进行非破坏式渲染生成。" : "此成片来自兼容的旧式成片链路。"}</p>
           ${assembly.status === "READY"
-            ? `<p><button class="primary" id="accept-final">接受成片</button></p><div id="accept-final-error" class="danger"></div>`
+            ? `<p><button class="primary" id="accept-final" ${finalQcReady ? "" : "disabled"}>接受成片</button></p><p class="muted">${finalQc ? finalQc.overall === "BLOCK" ? "QC 存在阻止项，修复并重新质检后才能接受成片。" : "QC 已完成，可以接受成片。" : "请先运行发布前质检。"}</p><div id="accept-final-error" class="danger"></div>`
             : `<p class="ok">成片已确认。你可以直接下载 MP4，或在发布中心选择当前可用的发布方式。</p>`}
         </div>`
       : `<div class="card">
@@ -3130,7 +3155,7 @@ function renderFinal(
     ? renderPublishCenter({
         projectId: workspace.project.id,
         projectName: workspace.project.name,
-        acceptedFinal: finalDeliverableReady,
+        acceptedFinal: finalPublishReady,
         preference: publishBridge.preference,
         probes: publishBridge.probes,
         packages: publishBridge.packages,
@@ -3147,7 +3172,7 @@ function renderFinal(
     )
   );
   const deliveryStatus = `<section class="card"><h3>最终交付状态</h3>
-    <p>最终 MP4：<b>${finalArtifactReady ? "可下载" : "尚未就绪"}</b> · 成片确认：<b>${assembly?.status === "ACCEPTED" ? "已确认" : assembly?.status === "READY" ? "待确认" : "尚未就绪"}</b></p>
+    <p>最终 MP4：<b>${finalArtifactReady ? "可下载" : "尚未就绪"}</b> · 成片确认：<b>${assembly?.status === "ACCEPTED" ? "已确认" : assembly?.status === "READY" ? "待确认" : "尚未就绪"}</b> · 发布前 QC：<b>${esc(finalQcStatusLabel)}</b></p>
     <p>当前发布方式：<b>${esc(selectedPublishProbe?.displayName ?? "尚未读取")}</b> · ${esc(selectedPublishProbe ? selectedPublishProbe.code === "READY" ? "可用" : "当前不可用" : "未知")}</p>
     <p class="muted">${finalDeliverableReady && manualPublishReady
       ? "下载 MP4 / 手动发布兜底可用。外部发布资质或授权缺失不会阻断最终成片交付。"
@@ -3160,6 +3185,7 @@ function renderFinal(
   return `${projectHeader(workspace, "成片与发布")}
   ${deliveryStatus}
   <section class="card"><h3>成片</h3>${assemblyHtml}</section>
+${finalQcHtml}
 ${publishCenter}
 ${publishHistory ? `<section class="card"><h3>兼容的旧发布记录（只读）</h3>${publishHistory}</section>` : ""}
 <script>
@@ -3181,6 +3207,17 @@ if(renderFinal) renderFinal.addEventListener('click',async()=>{
     const j=await r.json(); if(!r.ok) throw new Error(j.message||j.error);
     location.reload();
   }catch(err){error.textContent=err.message||String(err);renderFinal.disabled=false;}
+});
+
+const runFinalQc=document.querySelector('#run-final-qc');
+if(runFinalQc) runFinalQc.addEventListener('click',async()=>{
+  runFinalQc.disabled=true;
+  const error=document.querySelector('#final-qc-error'); if(error) error.textContent='';
+  try{
+    const r=await fetch('/api/projects/${workspace.project.id}/final/qc',{method:'POST'});
+    const j=await r.json(); if(!r.ok) throw new Error(j.message||j.error);
+    location.reload();
+  }catch(err){if(error)error.textContent=err.message||String(err);runFinalQc.disabled=false;}
 });
 
 const acceptFinal=document.querySelector('#accept-final');
@@ -3220,6 +3257,7 @@ export function renderProjectPage(input: {
   timeline?: Timeline;
   renderJob?: RenderJob;
   finalAssembly?: FinalAssembly;
+  finalQc?: FinalQcReport;
   publishAttempts?: PublishAttempt[];
   publishProbe?: DouyinPublishProbe;
   publishBridge?: {
@@ -3279,6 +3317,7 @@ export function renderProjectPage(input: {
       input.timeline,
       input.renderJob,
       input.finalAssembly,
+      input.finalQc,
       artifacts,
       input.publishAttempts ?? [],
       input.publishProbe,

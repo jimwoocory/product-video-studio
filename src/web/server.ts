@@ -72,6 +72,7 @@ import { RecoveryService } from "../application/services/recovery-service.js";
 import { resolveWorkflowNavigation } from "../application/services/workflow-navigation.js";
 import { inspectFinalAccess, inspectTimelineAccess } from "../application/services/workflow-step-access.js";
 import { FinalAssemblyService } from "../application/services/final-assembly-service.js";
+import { FinalQcService } from "../application/services/final-qc-service.js";
 import {
   TimelineService,
   timelineDurationMs
@@ -162,6 +163,7 @@ export type WebDependencies = {
   renderEngine: RenderEngine;
   publishBridge: PublishBridgeService;
   finalAssembly: FinalAssemblyService;
+  finalQc: FinalQcService;
   douyinPublish: DouyinPublishService;
   snapshots: ProjectSnapshotService;
   recovery: RecoveryService;
@@ -354,6 +356,14 @@ export function createDefaultDependencies(): WebDependencies {
     finalOutput,
     projectsRoot
   );
+  const finalQc = new FinalQcService(
+    productFlow,
+    artifacts,
+    finalOutput,
+    timeline,
+    review,
+    projectsRoot
+  );
   const douyinProvider = new OfficialDouyinOpenApiProvider();
   const publishProviders = new PublishProviderRegistry([
     new DouyinSdkHandoffProvider(),
@@ -471,6 +481,7 @@ export function createDefaultDependencies(): WebDependencies {
     renderEngine,
     publishBridge,
     finalAssembly,
+    finalQc,
     douyinPublish,
     snapshots,
     recovery,
@@ -3103,9 +3114,25 @@ export function createAppServer(
       );
       if (req.method === "POST" && finalAcceptMatch) {
         const projectId = finalAcceptMatch[1]!;
+        const qc = await deps.finalQc.assertPublishable(projectId);
         const assembly = await deps.finalAssembly.accept(projectId);
         await refreshProjectSnapshot(deps, projectId);
-        return json(res, 200, { assembly });
+        return json(res, 200, { assembly, qc });
+      }
+
+      const finalQcMatch = url.pathname.match(
+        /^\/api\/projects\/([^/]+)\/final\/qc$/
+      );
+      if (req.method === "GET" && finalQcMatch) {
+        const projectId = finalQcMatch[1]!;
+        return json(res, 200, {
+          report: await deps.finalQc.latest(projectId)
+        });
+      }
+      if (req.method === "POST" && finalQcMatch) {
+        const projectId = finalQcMatch[1]!;
+        const report = await deps.finalQc.run(projectId);
+        return json(res, 200, { report });
       }
 
       const publishProvidersMatch = url.pathname.match(
@@ -3140,6 +3167,7 @@ export function createAppServer(
       );
       if (req.method === "POST" && publishPackageCreateMatch) {
         const projectId = publishPackageCreateMatch[1]!;
+        const qc = await deps.finalQc.assertPublishable(projectId);
         const body = (await readJson(req)) as {
           title?: unknown;
           description?: unknown;
@@ -3161,7 +3189,8 @@ export function createAppServer(
         return json(res, 201, {
           package: created.package,
           claimUrl: created.claimUrl,
-          qrSvg: qrCodeSvg(created.claimUrl)
+          qrSvg: qrCodeSvg(created.claimUrl),
+          qc
         });
       }
 
@@ -3640,6 +3669,7 @@ export function createAppServer(
         let timeline;
         let renderJob;
         let finalAssembly;
+        let finalQcReport;
         let publishAttempts;
         let publishProbe;
         let publishBridge;
@@ -3702,6 +3732,7 @@ export function createAppServer(
           renderJob = (await deps.timeline.latestRenderJob(projectId)) ?? undefined;
           finalAssembly =
             (await deps.finalOutput.latestAssembly(projectId)) ?? undefined;
+          finalQcReport = (await deps.finalQc.latest(projectId)) ?? undefined;
           publishAttempts = await deps.finalOutput.listPublishAttempts(projectId);
           const [providerStatus, publishAudit] = await Promise.all([
             deps.publishBridge.providerStatus(projectId),
@@ -3743,6 +3774,7 @@ export function createAppServer(
             ...(timeline ? { timeline } : {}),
             ...(renderJob ? { renderJob } : {}),
             ...(finalAssembly ? { finalAssembly } : {}),
+            ...(finalQcReport ? { finalQc: finalQcReport } : {}),
             ...(publishAttempts ? { publishAttempts } : {}),
             ...(publishProbe ? { publishProbe } : {}),
             ...(publishBridge ? { publishBridge } : {})

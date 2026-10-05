@@ -14,6 +14,7 @@ import type {
   Timeline
 } from "../src/domain/schemas.js";
 import type { FinalAssembly } from "../src/application/ports/final-output-repository.js";
+import type { FinalQcReport } from "../src/domain/final-qc.js";
 import {
   renderMobilePublishPage,
   renderPublishCenter,
@@ -176,6 +177,33 @@ const finalArtifact: ArtifactRecord = {
   createdAt: ISO
 };
 
+function finalQc(overall: FinalQcReport["overall"] = "WARN"): FinalQcReport {
+  return {
+    id: "final-qc-publish-ui",
+    projectId: "project-publish-ui",
+    assemblyId: "assembly-publish-ui",
+    artifactId: "final-artifact",
+    artifactHash: H.c,
+    timelineId: "timeline-publish-ui",
+    timelineHash: H.b,
+    evaluatorVersion: "final-qc-v1",
+    overall,
+    checks: [
+      {
+        code: "VISUAL_PRODUCT_IDENTITY",
+        severity: overall,
+        label: "产品视觉一致性",
+        message:
+          overall === "BLOCK"
+            ? "产品身份检查阻止发布"
+            : "缺少部分视觉审片证据，请人工确认"
+      }
+    ],
+    createdAt: ISO,
+    contentHash: H.d
+  };
+}
+
 test("publish settings explains capability gating and always exposes Manual Export", () => {
   const html = renderPublishSettingsPage({
     workspace: workspace(),
@@ -294,6 +322,7 @@ test("final page uses P1 Publish Center and keeps manual MP4 download", () => {
     timeline: timeline(),
     renderJob: renderJob(),
     finalAssembly: assembly(),
+    finalQc: finalQc("WARN"),
     publishAttempts: [],
     publishBridge: {
       preference,
@@ -306,11 +335,44 @@ test("final page uses P1 Publish Center and keeps manual MP4 download", () => {
   assert.match(html, /最终交付状态/);
   assert.match(html, /最终 MP4：<b>可下载<\/b>/);
   assert.match(html, /成片确认：<b>已确认<\/b>/);
+  assert.match(html, /发布前 QC：<b>有警告<\/b>/);
+  assert.match(html, /发布前质检/);
+  assert.match(html, /产品视觉一致性/);
   assert.match(html, /外部发布资质或授权缺失不会阻断最终成片交付/);
   assert.match(html, /下载成片 MP4/);
   assert.match(html, /发布设置 \/ 切换发布方式/);
   assert.doesNotMatch(html, /OAuth \+ video\.create 发布链路/);
   assert.doesNotMatch(html, /id="publish-douyin"/);
+});
+
+test("accepted final without QC keeps publishing locked until QC runs", () => {
+  const html = renderProjectPage({
+    kind: "final",
+    workspace: workspace(),
+    blockers: [],
+    attempts: [],
+    generationRequests: [],
+    preflights: [],
+    approvals: [],
+    compiledPrompts: [],
+    artifacts: [finalArtifact],
+    reviewDecisions: [],
+    commandAttempts: [],
+    timeline: timeline(),
+    renderJob: renderJob(),
+    finalAssembly: assembly(),
+    publishAttempts: [],
+    publishBridge: {
+      preference,
+      probes: probes(),
+      packages: [],
+      receipts: []
+    }
+  });
+  assert.match(html, /发布前 QC：<b>尚未运行<\/b>/);
+  assert.match(html, /运行发布前质检/);
+  assert.match(html, /先生成或恢复一个可校验、可下载，并已确认的最终 MP4/);
+  assert.doesNotMatch(html, /发布设置 \/ 切换发布方式/);
 });
 
 test("accepted assembly with a missing final Artifact cannot create a publish package", () => {
