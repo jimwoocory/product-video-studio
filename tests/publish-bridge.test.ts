@@ -26,6 +26,7 @@ import type {
   PublishProvider,
   PublishProviderProbe
 } from "../src/application/ports/publish-provider.js";
+import { PublishSubmissionUnknownError } from "../src/application/ports/publish-provider.js";
 import { ProductFlowService } from "../src/application/services/product-flow.js";
 import { PublishProviderRegistry } from "../src/application/services/publish-provider-registry.js";
 import { PublishBridgeService } from "../src/application/services/publish-bridge-service.js";
@@ -68,6 +69,31 @@ class FakeHandoffProvider implements PublishProvider {
       instruction: "Open fake SDK",
       awaitingUserAction: true
     };
+  }
+}
+
+class FakeUnknownDirectProvider implements PublishProvider {
+  readonly type = "DOUYIN_BROWSER_AUTOMATION" as const;
+  readonly displayName = "Fake Browser";
+  readonly mode = "DIRECT" as const;
+
+  async probe(_projectId: string): Promise<PublishProviderProbe> {
+    return {
+      providerType: this.type,
+      displayName: this.displayName,
+      mode: this.mode,
+      code: "READY",
+      accountName: "jimwoo",
+      supportsTrustedFinalConfirmation: true,
+      requiresMobileDevice: false
+    };
+  }
+
+  async directPublish(_input: PublishDirectInput): Promise<PublishDirectResult> {
+    throw new PublishSubmissionUnknownError(
+      "抖音已接收发布动作，但管理页暂未确认",
+      "https://creator.douyin.com/creator-micro/content/manage"
+    );
   }
 }
 
@@ -579,6 +605,57 @@ test("only explicit trusted direct-publish receipt can move project to PUBLISHED
     assert.equal(
       (await f.productFlow.getProject(f.projectId))?.status,
       "PUBLISHED"
+    );
+  } finally {
+    await f.dispose();
+  }
+});
+
+
+
+
+test("browser submission unknown is recorded without marking project published or auto-retrying", async () => {
+  const browser = new FakeUnknownDirectProvider();
+  const f = await fixture([browser, new ManualExportProvider()]);
+  try {
+    await f.bridge.setPreference(f.projectId, browser.type);
+    const created = await f.bridge.createPackage({
+      projectId: f.projectId,
+      title: "Browser unknown",
+      publicBaseUrl: "https://studio.example.test"
+    });
+
+    await assert.rejects(
+      f.bridge.directPublish({
+        projectId: f.projectId,
+        packageId: created.package.id,
+        confirmed: true
+      }),
+      /管理页暂未确认|禁止自动重试/
+    );
+
+    const stored = await f.publishRepo.findPackageById(created.package.id);
+    assert.equal(stored?.status, "SUBMISSION_UNKNOWN");
+    assert.equal(stored?.errorCode, "SUBMISSION_UNKNOWN");
+    assert.equal(
+      (await f.productFlow.getProject(f.projectId))?.status,
+      "READY_TO_PUBLISH"
+    );
+
+    const receipts = await f.publishRepo.listReceiptsForPackage(
+      created.package.id
+    );
+    assert.equal(
+      receipts.some(
+        (receipt) =>
+          receipt.kind === "SUBMISSION_UNKNOWN" &&
+          receipt.trusted === false
+      ),
+      true
+    );
+    assert.equal(
+      receipts.some((receipt) => receipt.kind === "PUBLISHED_CONFIRMED"),
+      false
     );
   } finally {
     await f.dispose();

@@ -1,7 +1,7 @@
 # Third-Party Notices
 
 Policy baseline: P0 V0.2
-Last reviewed: 2026-09-28
+Last reviewed: 2026-10-05
 
 This file records third-party code, packages and external runtimes approved for Product Video Studio P0. Approval is default-deny and must match `dependency-allowlist.json`.
 
@@ -90,6 +90,17 @@ Purpose: concatenate already accepted generated clips into the final MP4. Produc
 Classification: external official service, not bundled.  
 Official platform: https://open.douyin.com/  
 Purpose: OAuth user authorization plus `video.create` upload/create APIs for explicit user-confirmed publishing to Douyin. Client secrets and user access tokens are kept outside project artifacts under `.runtime-secrets/` and are never exported into `project.json`.
+
+## social-auto-upload external publisher runtime
+
+Classification: external local runtime, not bundled into Product Video Studio.
+Upstream: https://github.com/dreammis/social-auto-upload
+Reviewed upstream baseline: commit `0012d2c355f88f683cc38dde2a2db209e14091bc`; PVS integration branch commit: `b900f625fda10f2b55736194867a40851751e9e0`.
+License: MIT, Copyright (c) 2023 dreammis. The reviewed license text is archived at `third_party/licenses/social-auto-upload-MIT-LICENSE`.
+
+Product Video Studio uses a separately maintained PVS integration branch of this runtime only behind the `DOUYIN_BROWSER_AUTOMATION` adapter. The application calls the machine-readable `sau-pvs` bridge as an external process; the Python source tree, Patchright/Playwright browser binaries and Python dependency environment are not copied into or redistributed with Product Video Studio by this integration.
+
+Douyin account cookies are stored only below Product Video Studio's ignored `.runtime-secrets/publishing/social-auto-upload/` runtime directory. They are not written to Prisma, project artifacts, `project.json`, normal application logs or Git. Use of Douyin remains subject to the platform's current account, content and publishing rules.
 
 ## Prohibited license classes
 

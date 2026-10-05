@@ -13,6 +13,7 @@ function esc(value: unknown): string {
 }
 
 function providerLabel(type: string): string {
+  if (type === "DOUYIN_BROWSER_AUTOMATION") return "抖音浏览器自动发布";
   if (type === "DOUYIN_SDK_HANDOFF") return "抖音 Open SDK 唤起发布";
   if (type === "DOUYIN_H5_HANDOFF") return "抖音 H5 扫码投稿";
   if (type === "DOUYIN_OPENAPI_DIRECT") return "抖音 OpenAPI 直发";
@@ -42,7 +43,7 @@ function capabilitySummary(probes: PublishProviderProbe[]): string {
   return `<section class="card"><h3>发布能力状态</h3>
     <p><b>当前可用：${ready.length}/${probes.length}</b> · 外部发布通道可用 ${externalReady.length} 个</p>
     <p class="muted">${manual?.code === "READY"
-      ? "最终 MP4 的下载 / 手动发布兜底已就绪；即使 SDK、H5 或 OpenAPI 暂不可用，也不会阻断成片交付。"
+      ? "最终 MP4 的下载 / 手动发布兜底已就绪；即使浏览器自动发布或官方发布通道暂不可用，也不会阻断成片交付。"
       : "手动导出异常，请先恢复最终 MP4 下载能力。"}</p>
   </section>`;
 }
@@ -51,7 +52,8 @@ function statusLabel(status: PublicPublishPackage["status"]): string {
   if (status === "PACKAGE_READY") return "等待手机领取";
   if (status === "HANDOFF_STARTED") return "交接已开始";
   if (status === "AWAITING_USER_ACTION") return "已交给抖音/移动端，等待用户完成发布";
-  if (status === "DIRECT_PUBLISHING") return "正在执行 OpenAPI 直发";
+  if (status === "DIRECT_PUBLISHING") return "正在执行平台发布";
+  if (status === "SUBMISSION_UNKNOWN") return "平台已接收，但结果暂未确认";
   if (status === "HANDOFF_COMPLETED") return "交接完成，未确认最终发布";
   if (status === "PUBLISHED_CONFIRMED") return "平台可信回执已确认发布";
   if (status === "FAILED") return "失败";
@@ -63,25 +65,40 @@ export function renderPublishSettingsPage(input: {
   preference: PublishPreference;
   probes: PublishProviderProbe[];
 }): string {
+  const browserProbe = input.probes.find(
+    (probe) => probe.providerType === "DOUYIN_BROWSER_AUTOMATION"
+  );
+  const browserLogin = browserProbe
+    ? "<section class=\"card\"><h3>抖音账号</h3><p><b>" +
+      esc(browserProbe.accountName ?? "default") +
+      "</b> · " +
+      esc(probeLabel(browserProbe.code)) +
+      "</p><p class=\"muted\">首次使用或登录过期时，点击按钮后会弹出 Chromium 浏览器，请用抖音扫码登录。</p><p><button class=\"secondary\" id=\"douyin-browser-login\">" +
+      (browserProbe.code === "READY" ? "重新登录抖音" : "登录抖音") +
+      "</button></p><div id=\"douyin-browser-login-status\" class=\"muted\"></div></section>"
+    : "";
   const cards = input.probes.map((probe) => {
     const selected = input.preference.providerType === probe.providerType;
     return "<label class=\"provider " + (selected ? "selected" : "") + "\">" +
       "<div><input type=\"radio\" name=\"provider\" value=\"" + esc(probe.providerType) + "\"" + (selected ? " checked" : "") + "> " +
       "<b>" + esc(probe.displayName) + "</b> <span class=\"badge\">" + esc(probeLabel(probe.code)) + "</span> <span class=\"badge\">" + esc(modeLabel(probe.mode)) + "</span></div>" +
+      (probe.accountName ? "<p class=\"muted\">账号：" + esc(probe.accountName) + "</p>" : "") +
       (probe.reason ? "<p class=\"danger\">" + esc(probe.reason) + "</p>" : "") +
       (probe.complianceNotice ? "<p class=\"muted\">" + esc(probe.complianceNotice) + "</p>" : "") +
       "<p class=\"muted\">" + (probe.supportsTrustedFinalConfirmation ? "可提供可信最终回执" : "交接本身不能证明最终发布") + "</p>" +
       "</label>";
   }).join("");
   const projectId = JSON.stringify(input.workspace.project.id);
+  const browserAccount = JSON.stringify(browserProbe?.accountName ?? "default");
   return "<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">" +
     "<title>发布设置</title><style>:root{font-family:Inter,\"Microsoft YaHei\",system-ui,sans-serif;background:#f5f5f3;color:#171717}*{box-sizing:border-box}body{margin:0}.wrap{max-width:920px;margin:auto;padding:24px}.card,.provider{display:block;background:white;border:1px solid #ddd;border-radius:12px;padding:16px;margin:12px 0}.provider.selected{border:2px solid #171717}.badge{background:#eee;border-radius:999px;padding:4px 8px;font-size:12px}.muted{color:#707070;font-size:13px}.danger{color:#8a1f11}.primary,.secondary{border-radius:9px;padding:10px 14px;font-weight:700}.primary{border:0;background:#171717;color:white}.secondary{border:1px solid #bbb;background:white;color:#171717;text-decoration:none}</style></head><body><main class=\"wrap\">" +
     "<p><a class=\"secondary\" href=\"/projects/" + esc(input.workspace.project.id) + "/final\">← 返回成片与发布</a></p>" +
-    "<section class=\"card\"><h2>发布方式</h2><p class=\"muted\">抖音 SDK 唤起是默认目标路径，但只有正式应用与投稿权限配置完成后才可用。下载 MP4 手动发布始终保留。</p><p class=\"muted\">唤起 SDK/H5、手机领取、完成交接都不等于“已发布”；只有可信平台回执才能确认发布。</p></section>" +
+    "<section class=\"card\"><h2>发布方式</h2><p class=\"muted\">当前主发布路径为“抖音浏览器自动发布”，使用本机已登录的抖音创作者中心，不依赖当前尚未取得的 SDK / H5 / OpenAPI 投稿权限。下载 MP4 手动发布始终保留。</p><p class=\"muted\">浏览器点击发布也不直接等于“已发布”；系统只有在作品管理页再次确认到本次作品时才写入可信发布结果。</p></section>" +
     capabilitySummary(input.probes) +
+    browserLogin +
     cards +
     "<p><button class=\"primary\" id=\"save\">保存发布方式</button></p><div id=\"error\" class=\"danger\"></div></main>" +
-    "<script>(()=>{const projectId=" + projectId + ";document.querySelector('#save').addEventListener('click',async()=>{const selected=document.querySelector('input[name=provider]:checked');if(!selected)return;const b=document.querySelector('#save'),e=document.querySelector('#error');b.disabled=true;e.textContent='';try{const r=await fetch('/api/projects/'+encodeURIComponent(projectId)+'/publish/provider',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({providerType:selected.value})});const j=await r.json();if(!r.ok)throw new Error(j.message||j.error);location.reload();}catch(err){e.textContent=err.message||String(err);b.disabled=false;}});})();</script></body></html>";
+    "<script>(()=>{const projectId=" + projectId + ",browserAccount=" + browserAccount + ";const login=document.querySelector('#douyin-browser-login');if(login)login.addEventListener('click',async()=>{const status=document.querySelector('#douyin-browser-login-status');login.disabled=true;status.textContent='正在打开抖音登录浏览器，请扫码完成登录…';try{const r=await fetch('/api/projects/'+encodeURIComponent(projectId)+'/publish/douyin-browser/login',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({account:browserAccount})});const j=await r.json();if(!r.ok)throw new Error(j.message||j.error||j.login?.message);status.textContent='登录成功，正在刷新状态…';location.reload();}catch(err){status.textContent=err.message||String(err);login.disabled=false;}});document.querySelector('#save').addEventListener('click',async()=>{const selected=document.querySelector('input[name=provider]:checked');if(!selected)return;const b=document.querySelector('#save'),e=document.querySelector('#error');b.disabled=true;e.textContent='';try{const r=await fetch('/api/projects/'+encodeURIComponent(projectId)+'/publish/provider',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({providerType:selected.value})});const j=await r.json();if(!r.ok)throw new Error(j.message||j.error);location.reload();}catch(err){e.textContent=err.message||String(err);b.disabled=false;}});})();</script></body></html>";
 }
 
 export function renderPublishCenter(input: {
@@ -98,7 +115,9 @@ export function renderPublishCenter(input: {
   }
   const selected = input.probes.find((probe) => probe.providerType === input.preference.providerType);
   const ready = selected?.code === "READY";
-  const direct = input.preference.providerType === "DOUYIN_OPENAPI_DIRECT";
+  const direct = selected?.mode === "DIRECT";
+  const browserSelected = input.preference.providerType === "DOUYIN_BROWSER_AUTOMATION";
+  const openApiSelected = input.preference.providerType === "DOUYIN_OPENAPI_DIRECT";
   const manualSelected = input.preference.providerType === "MANUAL_EXPORT";
   const manual = input.probes.find((probe) => probe.providerType === "MANUAL_EXPORT");
   const manualFallback =
@@ -107,8 +126,19 @@ export function renderPublishCenter(input: {
       : manualSelected
         ? "<p class=\"muted\">手动发布不需要平台 API。你可以直接使用上方“下载成片 MP4”；一次性发布包仅用于安全地把成片交给手机。</p>"
         : "";
-  const overview = input.probes.map((probe) =>
-    "<div class=\"clip\"><b>" + esc(probe.displayName) + "</b> · " + esc(probeLabel(probe.code)) +
+  const browserProbe = input.probes.find(
+    (probe) => probe.providerType === "DOUYIN_BROWSER_AUTOMATION"
+  );
+  const browserPanel = browserSelected && browserProbe
+    ? "<div class=\"clip\"><b>抖音账号：</b>" +
+      esc(browserProbe.accountName ?? "default") +
+      " · " +
+      esc(probeLabel(browserProbe.code)) +
+      "<p><button class=\"secondary\" id=\"p1-douyin-login\">" +
+      (browserProbe.code === "READY" ? "重新登录抖音" : "登录抖音") +
+      "</button></p><div id=\"p1-douyin-login-status\" class=\"muted\"></div></div>"
+    : "";
+  const overview = input.probes.map((probe) =>    "<div class=\"clip\"><b>" + esc(probe.displayName) + "</b> · " + esc(probeLabel(probe.code)) +
       " · " + esc(modeLabel(probe.mode)) +
       (probe.reason ? "<p class=\"muted\">" + esc(probe.reason) + "</p>" : "") +
     "</div>"
@@ -120,27 +150,33 @@ export function renderPublishCenter(input: {
       (pkg.errorMessage ? "<p class=\"danger\">" + esc(pkg.errorMessage) + "</p>" : "") +
       "<p class=\"technical hash\">package=" + esc(pkg.id) + "<br>receipts=" + count + "</p></div>";
   }).join("") : "<p class=\"muted\">还没有发布记录。</p>";
-  const oauth = direct && selected && (selected.code === "AUTH_REQUIRED" || selected.code === "NOT_CONFIGURED")
+  const oauth = openApiSelected && selected && (selected.code === "AUTH_REQUIRED" || selected.code === "NOT_CONFIGURED")
     ? "<p><a class=\"secondary\" href=\"/api/projects/" + esc(input.projectId) + "/publish/douyin/oauth/start\">连接 / 重新授权抖音 OpenAPI</a></p>"
     : "";
   const projectId = JSON.stringify(input.projectId);
   const directFlag = direct ? "true" : "false";
+  const browserFlag = browserSelected ? "true" : "false";
+  const browserAccount = JSON.stringify(browserProbe?.accountName ?? "default");
+  const directConfirmation = browserSelected
+    ? "<div id=\"p1-direct\" hidden><p class=\"danger\"><b>确认后将打开抖音创作者中心，自动上传成片、填写文案并提交发布。</b></p><p class=\"muted\">系统只有在作品管理页再次确认到本次作品时才标记为已发布；如果结果无法确认，会进入“结果未知”，禁止自动重试。</p><label><input id=\"p1-direct-confirm\" type=\"checkbox\"> 我明确确认本次发布到抖音</label><p><button class=\"primary\" id=\"p1-direct-go\">确认发布到抖音</button></p><div id=\"p1-direct-error\" class=\"danger\"></div></div>"
+    : "<div id=\"p1-direct\" hidden><p class=\"danger\"><b>抖音 OpenAPI 直发会直接提交平台。</b></p><label><input id=\"p1-direct-confirm\" type=\"checkbox\"> 我明确确认本次直发</label><p><button class=\"primary\" id=\"p1-direct-go\">确认直发</button></p><div id=\"p1-direct-error\" class=\"danger\"></div></div>";
   return capabilitySummary(input.probes) +
     "<section class=\"card\" id=\"publish-center\"><h3>发布中心</h3>" +
     "<p><b>当前发布方式：</b>" + esc(selected?.displayName ?? providerLabel(input.preference.providerType)) + " · " + esc(selected ? probeLabel(selected.code) : "未知") + "</p>" +
     (selected?.reason ? "<p class=\"danger\">" + esc(selected.reason) + "</p>" : "") +
     (selected?.complianceNotice ? "<p class=\"muted\">" + esc(selected.complianceNotice) + "</p>" : "") +
+    browserPanel +
     manualFallback +
     "<details><summary>查看全部发布能力</summary>" + overview + "</details>" +
     "<p><a class=\"secondary\" href=\"/projects/" + esc(input.projectId) + "/publish-settings\">发布设置 / 切换发布方式</a></p>" + oauth +
     "<div class=\"row\"><label class=\"field\">发布标题<input id=\"p1-title\" maxlength=\"100\" value=\"" + esc(input.projectName) + "\"></label></div>" +
     "<label class=\"field\">描述 / 话题<textarea id=\"p1-desc\" placeholder=\"可选\"></textarea></label>" +
-    "<p><button class=\"primary\" id=\"p1-create\" " + (ready ? "" : "disabled") + ">" + (direct ? "创建直发发布包" : manualSelected ? "创建手机领取包（可选）" : "创建一次性发布包 / 手机二维码") + "</button></p>" +
+    "<p><button class=\"primary\" id=\"p1-create\" " + (ready ? "" : "disabled") + ">" + (browserSelected ? "创建抖音发布任务" : direct ? "创建直发发布包" : manualSelected ? "创建手机领取包（可选）" : "创建一次性发布包 / 手机二维码") + "</button></p>" +
     "<div id=\"p1-error\" class=\"danger\"></div><div id=\"p1-result\"></div>" +
-    "<div id=\"p1-direct\" hidden><p class=\"danger\"><b>抖音 OpenAPI 直发会直接提交平台。</b></p><label><input id=\"p1-direct-confirm\" type=\"checkbox\"> 我明确确认本次直发</label><p><button class=\"primary\" id=\"p1-direct-go\">确认直发</button></p><div id=\"p1-direct-error\" class=\"danger\"></div></div>" +
+    directConfirmation +
     "<details><summary>发布记录（" + input.packages.length + "）</summary>" + history + "</details>" +
     "<p class=\"muted\">“交接完成”不等于“已发布”。只有可信平台回执才会把项目标记为已发布。</p></section>" +
-    "<script>(()=>{const projectId=" + projectId + ",direct=" + directFlag + ";let packageId='';const fallback=document.querySelector('#p1-manual-fallback');if(fallback)fallback.addEventListener('click',async()=>{fallback.disabled=true;try{const r=await fetch('/api/projects/'+encodeURIComponent(projectId)+'/publish/provider',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({providerType:'MANUAL_EXPORT'})});const j=await r.json();if(!r.ok)throw new Error(j.message||j.error);location.reload();}catch(err){document.querySelector('#p1-error').textContent=err.message||String(err);fallback.disabled=false;}});const create=document.querySelector('#p1-create');if(create)create.addEventListener('click',async()=>{const e=document.querySelector('#p1-error'),o=document.querySelector('#p1-result');create.disabled=true;e.textContent='';o.innerHTML='';try{const r=await fetch('/api/projects/'+encodeURIComponent(projectId)+'/publish/packages',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({title:document.querySelector('#p1-title').value,description:document.querySelector('#p1-desc').value})});const j=await r.json();if(!r.ok)throw new Error(j.message||j.error);packageId=j.package.id;if(direct){document.querySelector('#p1-direct').hidden=false;o.innerHTML='<div class=\"clip\"><b>直发发布包已创建</b><p class=\"muted\">还需要再次明确确认。</p></div>';}else{o.innerHTML='<div class=\"clip\"><b>一次性发布包已创建</b><p class=\"muted\">二维码只在本次创建后显示；刷新后需重新创建发布包。</p><div class=\"publish-qr\">'+j.qrSvg+'</div><p><a class=\"secondary\" target=\"_blank\" rel=\"noopener\" href=\"'+j.claimUrl+'\">打开手机领取页</a></p></div>';}}catch(err){e.textContent=err.message||String(err);create.disabled=false;}});const go=document.querySelector('#p1-direct-go');if(go)go.addEventListener('click',async()=>{if(!document.querySelector('#p1-direct-confirm').checked){alert('请先明确确认直发');return;}if(!packageId)return;go.disabled=true;const e=document.querySelector('#p1-direct-error');try{const r=await fetch('/api/projects/'+encodeURIComponent(projectId)+'/publish/packages/'+encodeURIComponent(packageId)+'/direct',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({confirmed:true})});const j=await r.json();if(!r.ok)throw new Error(j.message||j.error);location.reload();}catch(err){e.textContent=err.message||String(err);go.disabled=false;}});})();</script>";
+    "<script>(()=>{const projectId=" + projectId + ",direct=" + directFlag + ",browser=" + browserFlag + ",browserAccount=" + browserAccount + ";let packageId='';const login=document.querySelector('#p1-douyin-login');if(login)login.addEventListener('click',async()=>{const status=document.querySelector('#p1-douyin-login-status');login.disabled=true;status.textContent='正在打开抖音登录浏览器，请扫码完成登录…';try{const r=await fetch('/api/projects/'+encodeURIComponent(projectId)+'/publish/douyin-browser/login',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({account:browserAccount})});const j=await r.json();if(!r.ok)throw new Error(j.message||j.error||j.login?.message);status.textContent='登录成功，正在刷新状态…';location.reload();}catch(err){status.textContent=err.message||String(err);login.disabled=false;}});const fallback=document.querySelector('#p1-manual-fallback');if(fallback)fallback.addEventListener('click',async()=>{fallback.disabled=true;try{const r=await fetch('/api/projects/'+encodeURIComponent(projectId)+'/publish/provider',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({providerType:'MANUAL_EXPORT'})});const j=await r.json();if(!r.ok)throw new Error(j.message||j.error);location.reload();}catch(err){document.querySelector('#p1-error').textContent=err.message||String(err);fallback.disabled=false;}});const create=document.querySelector('#p1-create');if(create)create.addEventListener('click',async()=>{const e=document.querySelector('#p1-error'),o=document.querySelector('#p1-result');create.disabled=true;e.textContent='';o.innerHTML='';try{const r=await fetch('/api/projects/'+encodeURIComponent(projectId)+'/publish/packages',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({title:document.querySelector('#p1-title').value,description:document.querySelector('#p1-desc').value})});const j=await r.json();if(!r.ok)throw new Error(j.message||j.error);packageId=j.package.id;if(direct){document.querySelector('#p1-direct').hidden=false;o.innerHTML='<div class=\"clip\"><b>'+(browser?'抖音发布任务已准备':'直发发布包已创建')+'</b><p class=\"muted\">还需要再次明确确认，确认后才会真正提交平台。</p></div>';}else{o.innerHTML='<div class=\"clip\"><b>一次性发布包已创建</b><p class=\"muted\">二维码只在本次创建后显示；刷新后需重新创建发布包。</p><div class=\"publish-qr\">'+j.qrSvg+'</div><p><a class=\"secondary\" target=\"_blank\" rel=\"noopener\" href=\"'+j.claimUrl+'\">打开手机领取页</a></p></div>';}}catch(err){e.textContent=err.message||String(err);create.disabled=false;}});const go=document.querySelector('#p1-direct-go');if(go)go.addEventListener('click',async()=>{if(!document.querySelector('#p1-direct-confirm').checked){alert(browser?'请先确认本次抖音发布内容':'请先明确确认直发');return;}if(!packageId)return;go.disabled=true;const e=document.querySelector('#p1-direct-error');if(browser)e.textContent='正在打开 Chromium 并执行抖音发布，请不要关闭弹出的浏览器…';try{const r=await fetch('/api/projects/'+encodeURIComponent(projectId)+'/publish/packages/'+encodeURIComponent(packageId)+'/direct',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({confirmed:true})});const j=await r.json();if(!r.ok)throw new Error(j.message||j.error);location.reload();}catch(err){e.textContent=err.message||String(err);go.disabled=false;}});})();</script>";
 }
 
 export function renderMobilePublishPage(packageId: string): string {

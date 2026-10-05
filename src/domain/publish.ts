@@ -7,6 +7,7 @@ import {
 } from "./schemas.js";
 
 export const publishProviderTypeSchema = z.enum([
+  "DOUYIN_BROWSER_AUTOMATION",
   "DOUYIN_SDK_HANDOFF",
   "DOUYIN_H5_HANDOFF",
   "DOUYIN_OPENAPI_DIRECT",
@@ -32,6 +33,7 @@ export const publishPackageStatusSchema = z.enum([
   "HANDOFF_STARTED",
   "AWAITING_USER_ACTION",
   "DIRECT_PUBLISHING",
+  "SUBMISSION_UNKNOWN",
   "HANDOFF_COMPLETED",
   "PUBLISHED_CONFIRMED",
   "FAILED",
@@ -42,6 +44,7 @@ export const publishReceiptKindSchema = z.enum([
   "PACKAGE_CLAIMED",
   "HANDOFF_STARTED",
   "HANDOFF_COMPLETED",
+  "SUBMISSION_UNKNOWN",
   "PUBLISHED_CONFIRMED",
   "FAILED"
 ]);

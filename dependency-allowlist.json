@@ -750,6 +750,21 @@
       "serviceTermsStatus": "OFFICIAL_OPENAPI_NOT_BUNDLED",
       "noticeEntry": "THIRD_PARTY_NOTICES.md#douyin-openapi",
       "reviewedAt": "2026-09-28"
+    },
+    {
+      "name": "social-auto-upload",
+      "version": "b900f625fda10f2b55736194867a40851751e9e0",
+      "ecosystem": "external-runtime",
+      "usage": "Locally installed and separately maintained MIT-licensed browser publishing runtime used by the DOUYIN_BROWSER_AUTOMATION provider. Product Video Studio calls the structured sau-pvs bridge and does not vendor the Python source tree or browser binaries.",
+      "license": "MIT",
+      "sourceUrl": "https://github.com/dreammis/social-auto-upload",
+      "bundled": false,
+      "runtimeType": "external-runtime",
+      "approvedForP0": true,
+      "serviceTermsStatus": "LOCAL_EXTERNAL_RUNTIME_NOT_BUNDLED_DOUYIN_PLATFORM_TERMS_APPLY",
+      "licenseFile": "third_party/licenses/social-auto-upload-MIT-LICENSE",
+      "noticeEntry": "THIRD_PARTY_NOTICES.md#social-auto-upload-external-publisher-runtime",
+      "reviewedAt": "2026-10-05"
     }
   ]
 }

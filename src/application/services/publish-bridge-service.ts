@@ -19,8 +19,9 @@ import {
 import { sha256Bytes, sha256Text } from "../../domain/hashing.js";
 import { DomainValidationError } from "../../domain/validation.js";
 import { LocalArtifactStore } from "../../adapters/store/local-artifact-store.js";
+import { PublishSubmissionUnknownError } from "../ports/publish-provider.js";
 
-const DEFAULT_PROVIDER: PublishProviderType = "DOUYIN_SDK_HANDOFF";
+const DEFAULT_PROVIDER: PublishProviderType = "DOUYIN_BROWSER_AUTOMATION";
 const PACKAGE_TTL_MS = 10 * 60 * 1000;
 const SESSION_TTL_MS = 20 * 60 * 1000;
 const MEDIA_TTL_MS = 15 * 60 * 1000;
@@ -496,6 +497,38 @@ export class PublishBridgeService {
       return { package: publicPackage(updated), receipt };
     } catch (error) {
       const now = new Date().toISOString();
+      if (error instanceof PublishSubmissionUnknownError) {
+        const updated = await this.publishRepo.updatePackage(pkg.id, {
+          status: "SUBMISSION_UNKNOWN",
+          errorCode: "SUBMISSION_UNKNOWN",
+          errorMessage: error.message,
+          completedAt: now
+        });
+        await this.publishRepo.createReceipt(
+          publishReceiptSchema.parse({
+            id: randomUUID(),
+            projectId: pkg.projectId,
+            packageId: pkg.id,
+            providerType: pkg.providerType,
+            kind: "SUBMISSION_UNKNOWN",
+            trusted: false,
+            ...(error.externalReference
+              ? { externalReference: error.externalReference }
+              : {}),
+            note:
+              "平台已接受发布动作，但暂时无法可靠确认作品结果。为避免重复发布，禁止自动重试。",
+            createdAt: now
+          })
+        );
+        await this.productFlow.setProjectStatus(
+          pkg.projectId,
+          "READY_TO_PUBLISH"
+        );
+        throw new DomainValidationError(
+          updated.errorMessage ??
+            "发布结果暂时无法确认，请先到抖音作品管理页核对，禁止自动重试"
+        );
+      }
       const updated = await this.publishRepo.updatePackage(pkg.id, {
         status: "FAILED",
         errorCode: "DIRECT_PUBLISH_FAILED",

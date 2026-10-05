@@ -255,7 +255,9 @@ export class PrismaPublishRepository implements PublishRepository {
         ...(update.handoffReference !== undefined
           ? { handoffReference: update.handoffReference }
           : {}),
-        ...(update.status && update.status !== "FAILED"
+        ...(update.status &&
+        update.status !== "FAILED" &&
+        update.status !== "SUBMISSION_UNKNOWN"
           ? { errorCode: null, errorMessage: null }
           : {
               ...(update.errorCode !== undefined

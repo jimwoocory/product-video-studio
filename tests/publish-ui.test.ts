@@ -48,6 +48,16 @@ function workspace(status: Project["status"] = "READY_TO_PUBLISH"): ProjectWorks
 function probes(): PublishProviderProbe[] {
   return [
     {
+      providerType: "DOUYIN_BROWSER_AUTOMATION",
+      displayName: "抖音浏览器自动发布",
+      mode: "DIRECT",
+      code: "AUTH_REQUIRED",
+      reason: "抖音账号尚未登录或登录状态已经失效。",
+      accountName: "jimwoo",
+      supportsTrustedFinalConfirmation: true,
+      requiresMobileDevice: false
+    },
+    {
       providerType: "DOUYIN_SDK_HANDOFF",
       displayName: "抖音 Open SDK 唤起发布",
       mode: "HANDOFF",
@@ -212,12 +222,46 @@ test("publish settings explains capability gating and always exposes Manual Expo
   });
   assert.match(html, /发布方式/);
   assert.match(html, /发布能力状态/);
-  assert.match(html, /当前可用：1\/4/);
+  assert.match(html, /当前可用：1\/5/);
   assert.match(html, /外部发布通道可用 0 个/);
-  assert.match(html, /抖音 SDK 唤起是默认目标路径/);
+  assert.match(html, /当前主发布路径为“抖音浏览器自动发布”/);
+  assert.match(html, /登录抖音/);
+  assert.match(html, /账号：jimwoo/);
   assert.match(html, /下载 MP4 \/ 手动发布/);
-  assert.match(html, /只有可信平台回执才能确认发布/);
+  assert.match(html, /作品管理页再次确认到本次作品/);
   assert.match(html, /OpenAPI 直发默认关闭/);
+});
+
+test("browser publisher READY uses explicit direct-publish confirmation", () => {
+  const readyProbes = probes().map((probe) =>
+    probe.providerType === "DOUYIN_BROWSER_AUTOMATION"
+      ? {
+          ...probe,
+          code: "READY" as const,
+          reason: undefined
+        }
+      : probe
+  );
+  const html = renderPublishCenter({
+    projectId: "project-publish-ui",
+    projectName: "Publish UI",
+    acceptedFinal: true,
+    preference: {
+      projectId: "project-publish-ui",
+      providerType: "DOUYIN_BROWSER_AUTOMATION",
+      updatedAt: ISO
+    },
+    probes: readyProbes,
+    packages: [],
+    receipts: []
+  });
+  assert.match(html, /抖音浏览器自动发布/);
+  assert.match(html, /抖音账号：<\/b>jimwoo/);
+  assert.match(html, /创建抖音发布任务/);
+  assert.match(html, /我明确确认本次发布到抖音/);
+  assert.match(html, /确认发布到抖音/);
+  assert.match(html, /作品管理页再次确认/);
+  assert.match(html, /publish\/packages\/.*\/direct/);
 });
 
 test("publish center never equates handoff completion with published", () => {

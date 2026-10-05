@@ -32,6 +32,8 @@ import { OfficialDouyinOpenApiProvider } from "../adapters/publish/official-douy
 import { DouyinOpenApiDirectProviderAdapter } from "../adapters/publish/douyin-openapi-direct-provider.js";
 import { DouyinSdkHandoffProvider } from "../adapters/publish/douyin-sdk-handoff-provider.js";
 import { DouyinH5HandoffProvider } from "../adapters/publish/douyin-h5-handoff-provider.js";
+import { DouyinBrowserAutomationProvider } from "../adapters/publish/douyin-browser-automation-provider.js";
+import { SocialAutoUploadRuntime } from "../adapters/publish/social-auto-upload-runtime.js";
 import { ManualExportProvider } from "../adapters/publish/manual-export-provider.js";
 import { HttpWebResearchProvider } from "../adapters/research/http-web-research-provider.js";
 import { ExternalBrowserResearchProvider } from "../adapters/research/external-browser-research-provider.js";
@@ -101,6 +103,7 @@ import type { ProductInputStore } from "../application/ports/product-input-store
 import type { ReviewRepository } from "../application/ports/review-repository.js";
 import type { ProviderAuditRepository } from "../application/ports/provider-audit-repository.js";
 import type { FinalOutputRepository } from "../application/ports/final-output-repository.js";
+import type { DouyinBrowserPublisherRuntime } from "../application/ports/douyin-browser-publisher-runtime.js";
 import type { ProviderCommandEvidence } from "../application/ports/video-provider.js";
 import { DomainValidationError } from "../domain/validation.js";
 import {
@@ -162,6 +165,7 @@ export type WebDependencies = {
   timeline: TimelineService;
   renderEngine: RenderEngine;
   publishBridge: PublishBridgeService;
+  douyinBrowserRuntime?: DouyinBrowserPublisherRuntime;
   finalAssembly: FinalAssemblyService;
   finalQc: FinalQcService;
   douyinPublish: DouyinPublishService;
@@ -365,7 +369,9 @@ export function createDefaultDependencies(): WebDependencies {
     projectsRoot
   );
   const douyinProvider = new OfficialDouyinOpenApiProvider();
+  const douyinBrowserRuntime = new SocialAutoUploadRuntime();
   const publishProviders = new PublishProviderRegistry([
+    new DouyinBrowserAutomationProvider(douyinBrowserRuntime),
     new DouyinSdkHandoffProvider(),
     new DouyinH5HandoffProvider(),
     new DouyinOpenApiDirectProviderAdapter(douyinProvider),
@@ -480,6 +486,7 @@ export function createDefaultDependencies(): WebDependencies {
     timeline,
     renderEngine,
     publishBridge,
+    douyinBrowserRuntime,
     finalAssembly,
     finalQc,
     douyinPublish,
@@ -3145,6 +3152,66 @@ export function createAppServer(
           200,
           await deps.publishBridge.providerStatus(projectId)
         );
+      }
+
+      const douyinBrowserAccountMatch = url.pathname.match(
+        /^\/api\/projects\/([^/]+)\/publish\/douyin-browser\/account$/
+      );
+      if (req.method === "GET" && douyinBrowserAccountMatch) {
+        const projectId = douyinBrowserAccountMatch[1]!;
+        if (!(await deps.productFlow.getProject(projectId))) {
+          throw new DomainValidationError("Project not found");
+        }
+        if (!deps.douyinBrowserRuntime) {
+          throw new DomainValidationError(
+            "抖音浏览器发布引擎尚未配置"
+          );
+        }
+        const accountName =
+          await deps.douyinBrowserRuntime.resolveAccountName();
+        const account =
+          await deps.douyinBrowserRuntime.check(accountName);
+        return json(res, 200, { account });
+      }
+
+      const douyinBrowserLoginMatch = url.pathname.match(
+        /^\/api\/projects\/([^/]+)\/publish\/douyin-browser\/login$/
+      );
+      if (req.method === "POST" && douyinBrowserLoginMatch) {
+        const projectId = douyinBrowserLoginMatch[1]!;
+        if (!(await deps.productFlow.getProject(projectId))) {
+          throw new DomainValidationError("Project not found");
+        }
+        if (!deps.douyinBrowserRuntime) {
+          throw new DomainValidationError(
+            "抖音浏览器发布引擎尚未配置"
+          );
+        }
+        const body = (await readJson(req)) as { account?: unknown };
+        const accountName =
+          typeof body.account === "string" && body.account.trim()
+            ? body.account.trim()
+            : await deps.douyinBrowserRuntime.resolveAccountName();
+        const login = await deps.douyinBrowserRuntime.login(
+          accountName,
+          true
+        );
+        if (login.ok) {
+          await deps.publishBridge.setPreference(
+            projectId,
+            "DOUYIN_BROWSER_AUTOMATION"
+          );
+          await refreshProjectSnapshot(deps, projectId);
+        }
+        return json(res, login.ok ? 200 : 409, {
+          login,
+          ...(login.ok
+            ? {
+                providerStatus:
+                  await deps.publishBridge.providerStatus(projectId)
+              }
+            : {})
+        });
       }
 
       const publishProviderPreferenceMatch = url.pathname.match(

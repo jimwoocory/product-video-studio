@@ -10,6 +10,7 @@ export type PublishProviderProbe = {
   mode: PublishProviderMode;
   code: PublishProviderProbeCode;
   reason?: string;
+  accountName?: string;
   supportsTrustedFinalConfirmation: boolean;
   requiresMobileDevice: boolean;
   complianceNotice?: string;
@@ -45,6 +46,16 @@ export type PublishDirectResult = {
   videoId?: string;
   itemId?: string;
 };
+
+export class PublishSubmissionUnknownError extends Error {
+  readonly externalReference?: string;
+
+  constructor(message: string, externalReference?: string) {
+    super(message);
+    this.name = "PublishSubmissionUnknownError";
+    this.externalReference = externalReference;
+  }
+}
 
 export interface PublishProvider {
   readonly type: PublishProviderType;
