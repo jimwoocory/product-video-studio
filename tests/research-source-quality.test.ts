@@ -103,3 +103,47 @@ test("fetched document identity gate rejects unrelated page body", () => {
   assert.equal(relevant.matched, true);
   assert.ok(relevant.score >= 20);
 });
+
+
+test("strong identity keeps same-category competitor out of current-product evidence", () => {
+  const yaoIdentity = {
+    productName: "瑶药护颈枕",
+    category: "草本养生寝具 / 瑶药护颈枕",
+    modelTerms: ["KYTYYZ001"],
+    organizationTerms: ["广西金秀康瑶堂瑶药"]
+  };
+
+  const candidate = scoreResearchCandidate({
+    source: {
+      url: "https://example.com/yao-pillow",
+      sourceType: "PUBLIC_PRODUCT",
+      resultTitle: "瑶药护颈枕 草本助眠枕 商品详情",
+      resultSnippet: "广西金秀同类瑶药枕，未标注目标型号或公司主体"
+    },
+    identity: yaoIdentity
+  });
+
+  assert.notEqual(candidate.decision, "ACCEPT");
+  assert.ok(
+    candidate.reasons.some((item) => item.includes("保留为同类候选"))
+  );
+
+  const unrelatedProduct = fetchedDocumentMatchesIdentity({
+    finalUrl: "https://example.com/yao-pillow",
+    title: "瑶药护颈枕 商品详情",
+    text: "这是另一家商家的瑶药护颈枕，介绍草本填充与睡眠场景。",
+    identity: yaoIdentity
+  });
+  assert.equal(unrelatedProduct.matched, false);
+  assert.ok(
+    unrelatedProduct.reasons.some((item) => item.includes("不能确认是当前产品"))
+  );
+
+  const exactModel = fetchedDocumentMatchesIdentity({
+    finalUrl: "https://example.com/kyt-yyz001",
+    title: "KYTYYZ001 瑶药护颈枕",
+    text: "KYTYYZ001 瑶药护颈枕产品说明。",
+    identity: yaoIdentity
+  });
+  assert.equal(exactModel.matched, true);
+});

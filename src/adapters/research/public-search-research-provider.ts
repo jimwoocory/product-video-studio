@@ -101,6 +101,27 @@ function unsafeOrAdultHost(hostname: string): boolean {
 function classifySource(query: string, url: string): WebResearchSource["sourceType"] {
   const q = query.toLowerCase();
   const host = new URL(url).hostname.toLowerCase();
+
+  // Host identity is stronger than the wording of the search query. A query
+  // containing “官网” must never make Taobao/1688/etc. look official.
+  if (
+    /douyin\.com|tiktok\.com|youtube\.com|youtu\.be|bilibili\.com|xiaohongshu\.com/.test(
+      host
+    )
+  ) {
+    return "PLATFORM";
+  }
+  if (
+    /1688\.com|amazon\.|jd\.com$|tmall\.com$|taobao\.com$|pinduoduo\.com$|aliexpress\.|walmart\.|bestbuy\./.test(
+      host
+    )
+  ) {
+    return "PUBLIC_PRODUCT";
+  }
+
+  if (/竞品|竞争|competitor|对比|comparison/.test(q)) return "COMPETITOR";
+  if (/趋势|trend|市场|行业|industry/.test(q)) return "TREND";
+
   if (/官网|官方网站|official|说明书|manual|support/.test(q)) {
     const generic = new Set([
       "official",
@@ -118,22 +139,7 @@ function classifySource(query: string, url: string): WebResearchSource["sourceTy
     }
     return "INDUSTRY";
   }
-  if (/竞品|竞争|competitor|对比|comparison/.test(q)) return "COMPETITOR";
-  if (/趋势|trend|市场|行业|industry/.test(q)) return "TREND";
-  if (
-    /douyin\.com|tiktok\.com|youtube\.com|youtu\.be|bilibili\.com|xiaohongshu\.com/.test(
-      host
-    )
-  ) {
-    return "PLATFORM";
-  }
-  if (
-    /amazon\.|jd\.com|tmall\.com|taobao\.com|pinduoduo\.com|aliexpress\.|walmart\.|bestbuy\./.test(
-      host
-    )
-  ) {
-    return "PUBLIC_PRODUCT";
-  }
+
   if (/review|评测|tech|news|lab|测评/.test(q + " " + host)) return "INDUSTRY";
   return "PUBLIC_PRODUCT";
 }
@@ -255,13 +261,21 @@ export class PublicSearchResearchProvider implements BrowserResearchProvider {
   }): Promise<BrowserResearchResult> {
     const queries = [...new Set(input.queries.map((item) => item.trim()).filter(Boolean))].slice(
       0,
-      this.options.maxQueries ?? 8
+      this.options.maxQueries ?? 12
     );
     const maxEach = this.options.maxResultsPerQuery ?? 3;
     const maxTotal = this.options.maxTotalResults ?? 12;
     const seen = new Set<string>();
     const sources: WebResearchSource[] = [];
+    const queryBuckets: Array<{
+      query: string;
+      engine: "duck" | "bing";
+      candidates: SearchResultCandidate[];
+    }> = [];
 
+    // Search every selected query first. Do not let the first few generic
+    // queries consume the global result budget before strong model/SKU
+    // queries get a chance to run.
     for (const query of queries) {
       let engine: "duck" | "bing" = "duck";
       let candidates = await this.search(query, engine);
@@ -269,8 +283,20 @@ export class PublicSearchResearchProvider implements BrowserResearchProvider {
         engine = "bing";
         candidates = await this.search(query, engine);
       }
-      for (const candidate of candidates.slice(0, maxEach)) {
+      queryBuckets.push({
+        query,
+        engine,
+        candidates: candidates.slice(0, maxEach)
+      });
+    }
+
+    // Merge round-robin by rank: rank-1 from every query, then rank-2, etc.
+    // Only after that apply the global maxTotal budget.
+    for (let rankIndex = 0; rankIndex < maxEach; rankIndex += 1) {
+      for (const bucket of queryBuckets) {
         if (sources.length >= maxTotal) break;
+        const candidate = bucket.candidates[rankIndex];
+        if (!candidate) continue;
         let parsed: URL;
         try {
           parsed = new URL(candidate.url);
@@ -288,9 +314,9 @@ export class PublicSearchResearchProvider implements BrowserResearchProvider {
         seen.add(key);
         sources.push({
           url: key,
-          sourceType: classifySource(query, key),
-          discoveryQuery: query,
-          discoveryEngine: engine,
+          sourceType: classifySource(bucket.query, key),
+          discoveryQuery: bucket.query,
+          discoveryEngine: bucket.engine,
           discoveryRank: candidate.rank,
           ...(candidate.title ? { resultTitle: candidate.title } : {}),
           ...(candidate.snippet ? { resultSnippet: candidate.snippet } : {})

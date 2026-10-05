@@ -139,11 +139,25 @@ function discoveredSourceSelection(input: {
     if (score.decision === "ACCEPT" && host) {
       hostCounts.set(host, (hostCounts.get(host) ?? 0) + 1);
     }
-    return { source, score };
+    const pool: "PRODUCT_FACT" | "MARKET_REFERENCE" | "REJECTED" =
+      score.decision === "REJECT"
+        ? "REJECTED"
+        : source.sourceType === "COMPETITOR" ||
+            source.sourceType === "TREND" ||
+            score.reasons.some((reason) => reason.includes("保留为同类候选"))
+          ? "MARKET_REFERENCE"
+          : "PRODUCT_FACT";
+    return { source, score, pool };
   });
-  const accepted = scored.filter((item) => item.score.decision === "ACCEPT");
+  const accepted = scored.filter(
+    (item) =>
+      item.pool === "PRODUCT_FACT" && item.score.decision === "ACCEPT"
+  );
   const held = scored
-    .filter((item) => item.score.decision === "HOLD")
+    .filter(
+      (item) =>
+        item.pool === "PRODUCT_FACT" && item.score.decision === "HOLD"
+    )
     .sort((a, b) => b.score.finalScore - a.score.finalScore);
   const selected = [...accepted];
   const minFetch = 6;
@@ -163,8 +177,11 @@ function discoveredSourceSelection(input: {
       rejectedCount: scored.filter(
         (item) => item.score.decision === "REJECT"
       ).length,
+      marketReferenceCount: scored.filter(
+        (item) => item.pool === "MARKET_REFERENCE"
+      ).length,
       fetchedCount: selected.length,
-      candidates: scored.map(({ source, score }) => ({
+      candidates: scored.map(({ source, score, pool }) => ({
         url: source.url,
         ...(source.resultTitle ? { title: source.resultTitle } : {}),
         sourceType: source.sourceType,
@@ -179,6 +196,7 @@ function discoveredSourceSelection(input: {
           : {}),
         finalScore: score.finalScore,
         decision: score.decision,
+        pool,
         selectedForFetch: selectedUrls.has(source.url),
         reasons: [...score.reasons]
       }))
@@ -208,56 +226,161 @@ function evidenceSummary(text: string): string {
     .slice(0, 1200);
 }
 
+function extractModelTerms(
+  facts: Array<{ statement: string }> | undefined
+): string[] {
+  const models = new Set<string>();
+  for (const fact of facts ?? []) {
+    const text = fact.statement.trim();
+    for (const match of text.matchAll(
+      /(?:型号|货号|sku|model)\s*(?:为|是|[:：])?\s*["“']?([a-z0-9][a-z0-9._/-]{2,})/gi
+    )) {
+      const value = match[1]?.trim();
+      if (value) models.add(value);
+    }
+  }
+  return [...models];
+}
+
+function buildResearchIdentity(input: {
+  projectName?: string;
+  productTruth?: {
+    productName: string;
+    brand?: string;
+    category?: string;
+    confirmedFeatures?: Array<{ statement: string }>;
+    sellingPoints?: Array<{ statement: string }>;
+  };
+}): ResearchIdentity {
+  const truth = input.productTruth;
+  if (!truth) return {};
+  const modelTerms = extractModelTerms([
+    ...(truth.confirmedFeatures ?? []),
+    ...(truth.sellingPoints ?? [])
+  ]);
+  const projectName = input.projectName?.trim() ?? "";
+  const organizationTerms =
+    projectName &&
+    projectName !== truth.productName &&
+    /公司|集团|工厂|厂|店|堂|科技|药|生物|品牌|商贸|实业|健康/.test(projectName)
+      ? [projectName]
+      : [];
+  const aliasTerms = uniqueStrings(
+    (truth.category ?? "")
+      .split(/[\/／|｜、，,·]/)
+      .map((item) => item.trim())
+      .filter(
+        (item) =>
+          item.length >= 3 &&
+          item !== truth.productName &&
+          !/产品|商品|品类|类别/.test(item)
+      )
+  ).slice(0, 6);
+  return {
+    productName: truth.productName,
+    brand: truth.brand,
+    category: truth.category,
+    modelTerms,
+    organizationTerms,
+    aliasTerms
+  };
+}
+
 function automaticDeepQueries(input: {
   goal: string;
-  productName?: string;
-  brand?: string;
-  category?: string;
+  identity: ResearchIdentity;
 }): string[] {
-  const brand = input.brand?.trim() ?? "";
-  const productName = input.productName?.trim() ?? "";
-  const identity =
+  const productName = input.identity.productName?.trim() ?? "";
+  const brand = input.identity.brand?.trim() ?? "";
+  const category = input.identity.category?.trim() ?? "";
+  const models = input.identity.modelTerms ?? [];
+  const organizations = input.identity.organizationTerms ?? [];
+  const identitySubject =
     brand && productName.toLowerCase().includes(brand.toLowerCase())
       ? productName
       : [brand, productName].filter(Boolean).join(" ");
-  const subject = identity || input.productName?.trim() || input.goal.trim();
+  const subject = identitySubject || productName || models[0] || input.goal.trim();
   if (!subject) return [];
+
+  const strongQueries = uniqueStrings([
+    ...models,
+    ...models.map((model) => [productName, model].filter(Boolean).join(" ")),
+    ...organizations.map((organization) =>
+      [organization, productName].filter(Boolean).join(" ")
+    ),
+    ...organizations.flatMap((organization) =>
+      models.map((model) => organization + " " + model)
+    )
+  ]);
+
+  const categoryText = (category + " " + productName).toLowerCase();
+  const isElectronic =
+    /耳机|蓝牙|音箱|电子|数码|电器|可穿戴|手表|相机|充电|电池/.test(
+      categoryText
+    );
+  const isPillowOrBedding =
+    /枕|寝具|床品|睡眠|床垫|草本|瑶药|香囊/.test(categoryText);
+
+  const categoryQueries = isPillowOrBedding
+    ? [
+        subject + " 使用方法",
+        subject + " 材质 填充 配方 成分",
+        subject + " 清洗 保养 注意事项",
+        subject + " 规格 型号",
+        subject + " 功能 使用场景",
+        subject + " 商品详情"
+      ]
+    : isElectronic
+      ? [
+          subject + " 使用方法 操作方法",
+          subject + " 佩戴位置 佩戴方法 安装位置",
+          subject + " 注意事项 使用限制 防水 充电",
+          subject + " 功能 作用 使用场景",
+          subject + " 参数 规格",
+          subject + " 说明书 使用说明"
+        ]
+      : [
+          subject + " 使用方法",
+          subject + " 注意事项 使用限制",
+          subject + " 功能 使用场景",
+          subject + " 参数 规格",
+          subject + " 说明书 使用说明",
+          subject + " 商品详情"
+        ];
+
   return uniqueStrings([
-    `${subject} 官网`,
-    `${subject} 说明书 使用说明`,
-    `${subject} 使用方法 操作方法`,
-    `${subject} 佩戴位置 佩戴方法 安装位置`,
-    `${subject} 注意事项 使用限制 防水 充电`,
-    `${subject} 功能 作用 使用场景`,
-    `${subject} 参数 规格`,
-    `${subject} 评测 review`,
-    input.category ? `${input.category} 竞品 对比 使用场景` : "",
+    ...strongQueries,
+    subject + " 官网",
+    subject + " 官方 产品详情",
+    ...categoryQueries,
+    subject + " 评测 review",
+    category ? category + " 竞品 对比 使用场景" : "",
     input.goal
   ]).slice(0, 12);
 }
 
 function recoveryDeepQueries(input: {
   goal: string;
-  productName?: string;
-  brand?: string;
-  category?: string;
+  identity: ResearchIdentity;
 }): string[] {
-  const identity = [input.brand?.trim(), input.productName?.trim()]
-    .filter(Boolean)
-    .join(" ")
-    .trim();
-  const subject = identity || input.productName?.trim() || input.goal.trim();
+  const productName = input.identity.productName?.trim() ?? "";
+  const models = input.identity.modelTerms ?? [];
+  const organizations = input.identity.organizationTerms ?? [];
+  const subject = productName || models[0] || input.goal.trim();
   if (!subject) return [];
   return uniqueStrings([
-    subject + " 官方 产品详情",
+    ...models.map((model) => model + " 官方"),
+    ...models.map((model) => model + " 产品详情 说明书"),
+    ...organizations.map((organization) => organization + " " + subject),
+    ...organizations.flatMap((organization) =>
+      models.map((model) => organization + " " + model)
+    ),
     subject + " 官方 说明书 PDF",
     subject + " 售后 支持 使用说明",
-    subject + " 使用方法 注意事项",
     subject + " 型号 参数 规格",
     subject + " 商品详情",
-    input.category ? subject + " " + input.category : "",
     input.goal
-  ]).slice(0, 8);
+  ]).slice(0, 12);
 }
 
 function productIdentityTerms(input: {
@@ -416,11 +539,10 @@ export class ResearchService {
     let sourceUrls = input.sourceUrls.map(validateSourceUrl);
     const goal = input.goal.trim();
     const workspace = await this.productFlow.getWorkspace(input.projectId);
-    const identity: ResearchIdentity = {
-      productName: workspace?.productTruth?.productName,
-      brand: workspace?.productTruth?.brand,
-      category: workspace?.productTruth?.category
-    };
+    const identity = buildResearchIdentity({
+      projectName: workspace?.project.name,
+      productTruth: workspace?.productTruth
+    });
     if (mode === "DEEP") {
       const known = new Map(sourceUrls.map((item) => [item.url, item]));
       const previousRuns = await this.repo.listRuns(input.projectId);
@@ -446,9 +568,7 @@ export class ResearchService {
     }
     const automaticQueries = automaticDeepQueries({
       goal,
-      productName: workspace?.productTruth?.productName,
-      brand: workspace?.productTruth?.brand,
-      category: workspace?.productTruth?.category
+      identity
     });
     const queries =
       mode === "DEEP"
@@ -531,9 +651,7 @@ export class ResearchService {
         if (selection.audit.acceptedCount === 0) {
           const recoveryQueries = recoveryDeepQueries({
             goal,
-            productName: identity.productName,
-            brand: identity.brand,
-            category: identity.category
+            identity
           });
           if (recoveryQueries.length) {
             const retry = await this.browserProvider.discover({
@@ -780,13 +898,25 @@ export class ResearchService {
         requiredUserAction: undefined
       });
     } else {
+      const marketReferenceCount = discoveryRounds.reduce(
+        (count, round) =>
+          count +
+          round.candidates.filter(
+            (candidate) => candidate.pool === "MARKET_REFERENCE"
+          ).length,
+        0
+      );
+      const failureSuffix = fetchFailures.length
+        ? `；另有 ${fetchFailures.length} 个抓取或身份校验未通过`
+        : "";
       run = await this.repo.updateRun(run.id, {
         status: "FAILED",
         blockerCode: "NO_EVIDENCE",
-        blockerMessage:
-          fetchFailures.join("；") || "没有获取到可用证据",
+        blockerMessage: marketReferenceCount
+          ? `没有找到可确认属于当前产品的公开证据；已识别 ${marketReferenceCount} 条同类/竞品候选并隔离在市场参考池，未写入产品事实${failureSuffix}。`
+          : `没有找到可确认属于当前产品的公开证据${failureSuffix}。`,
         requiredUserAction:
-          "检查来源 URL 或研究关键词后重新运行。"
+          "系统已自动使用产品名、型号和公司主体做恢复搜索。若仍无结果，请补充官方/商品页 URL，或检查产品资料中的型号、品牌、公司主体后重新运行。"
       });
     }
 
@@ -849,11 +979,10 @@ export class ResearchService {
     }
 
     const workspace = await this.productFlow.getWorkspace(run.projectId);
-    const identity: ResearchIdentity = {
-      productName: workspace?.productTruth?.productName,
-      brand: workspace?.productTruth?.brand,
-      category: workspace?.productTruth?.category
-    };
+    const identity = buildResearchIdentity({
+      projectName: workspace?.project.name,
+      productTruth: workspace?.productTruth
+    });
     const semanticScores = await this.semanticRerankScores({
       projectId: run.projectId,
       sources: result.sources,
@@ -1035,7 +1164,9 @@ export class ResearchService {
     const evidence = latestRun
       ? await this.repo.listEvidence(latestRun.id)
       : [];
-    const brief = await this.repo.latestBrief(projectId);
+    const brief = latestRun
+      ? await this.repo.findBriefByRun(latestRun.id)
+      : null;
     return {
       runs,
       ...(latestRun ? { latestRun } : {}),
@@ -1358,6 +1489,9 @@ export class ResearchService {
       refs.some((id) => {
         const item = evidenceByIdForIdentity.get(id);
         if (!item) return false;
+        if (item.sourceType === "COMPETITOR" || item.sourceType === "TREND") {
+          return false;
+        }
         if (!item.mediaContext) return true;
         return item.mediaContext.productIdentityMatch === "CONFIRMED";
       });

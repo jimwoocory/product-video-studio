@@ -4,6 +4,9 @@ export type ResearchIdentity = {
   productName?: string;
   brand?: string;
   category?: string;
+  modelTerms?: string[];
+  organizationTerms?: string[];
+  aliasTerms?: string[];
 };
 
 export type ResearchCandidateDecision = "ACCEPT" | "HOLD" | "REJECT";
@@ -43,7 +46,13 @@ function normalize(value: string | undefined): string {
 }
 
 function identityTokens(identity: ResearchIdentity): string[] {
-  const values = [identity.productName, identity.brand]
+  const values = [
+    identity.productName,
+    identity.brand,
+    ...(identity.modelTerms ?? []),
+    ...(identity.organizationTerms ?? []),
+    ...(identity.aliasTerms ?? [])
+  ]
     .map(normalize)
     .filter(Boolean);
   const tokens = new Set<string>(values);
@@ -56,9 +65,21 @@ function identityTokens(identity: ResearchIdentity): string[] {
 }
 
 function modelLikeTokens(identity: ResearchIdentity): string[] {
-  return identityTokens(identity).filter(
-    (token) => /[a-z]/i.test(token) && /\d/.test(token)
-  );
+  const explicit = (identity.modelTerms ?? []).map(normalize).filter(Boolean);
+  return [...new Set([
+    ...explicit,
+    ...identityTokens(identity).filter(
+      (token) => /[a-z]/i.test(token) && /\d/.test(token)
+    )
+  ])];
+}
+
+function organizationTokens(identity: ResearchIdentity): string[] {
+  return [
+    ...new Set(
+      (identity.organizationTerms ?? []).map(normalize).filter(Boolean)
+    )
+  ];
 }
 
 function platformHost(host: string): boolean {
@@ -120,6 +141,7 @@ export function scoreResearchCandidate(input: {
   const category = normalize(input.identity.category);
   const tokens = identityTokens(input.identity);
   const models = modelLikeTokens(input.identity);
+  const organizations = organizationTokens(input.identity);
   const reasons: string[] = [];
   let score = 0;
 
@@ -151,6 +173,14 @@ export function scoreResearchCandidate(input: {
   if (matchedModels.length) {
     score += Math.min(24, 12 + matchedModels.length * 6);
     reasons.push("命中型号：" + matchedModels.join("、"));
+  }
+
+  const matchedOrganizations = organizations.filter((token) =>
+    includesTerm(combined, token)
+  );
+  if (matchedOrganizations.length) {
+    score += Math.min(28, 16 + matchedOrganizations.length * 6);
+    reasons.push("命中公司/主体身份：" + matchedOrganizations.join("、"));
   }
 
   const nonModelTokens = tokens
@@ -186,7 +216,16 @@ export function scoreResearchCandidate(input: {
     exactProductUrl ||
     (brand ? includesTerm(combined, brand) : false) ||
     matchedModels.length > 0 ||
+    matchedOrganizations.length > 0 ||
     matchedIdentityTokens.length > 0;
+  const strongIdentityAvailable = Boolean(
+    brand || models.length || organizations.length
+  );
+  const strongIdentityMatched = Boolean(
+    matchedModels.length ||
+      matchedOrganizations.length ||
+      (brand && includesTerm(combined, brand))
+  );
 
   const home = homepageLike(url);
   if (home) {
@@ -225,10 +264,18 @@ export function scoreResearchCandidate(input: {
   } else if (metadataSparse && clearIdentity && !identityMatched) {
     decision = "HOLD";
     reasons.push("发现 Provider 未提供标题/摘要，保留到正文身份门禁");
-  } else if (deterministicScore >= 55) {
+  } else if (
+    deterministicScore >= 55 &&
+    (!strongIdentityAvailable || strongIdentityMatched)
+  ) {
     decision = "ACCEPT";
   } else if (deterministicScore >= 22) {
     decision = "HOLD";
+    if (strongIdentityAvailable && !strongIdentityMatched) {
+      reasons.push(
+        "仅命中产品名/品类，尚未命中型号、品牌或公司主体，保留为同类候选"
+      );
+    }
   } else {
     decision = "REJECT";
   }
@@ -257,6 +304,7 @@ export function fetchedDocumentMatchesIdentity(input: {
   const brand = normalize(input.identity.brand);
   const category = normalize(input.identity.category);
   const models = modelLikeTokens(input.identity);
+  const organizations = organizationTokens(input.identity);
   const haystack = normalize(
     [input.finalUrl, input.title, input.text.slice(0, 24000)].join("\n")
   );
@@ -276,15 +324,46 @@ export function fetchedDocumentMatchesIdentity(input: {
     score += Math.min(30, modelHits.length * 15);
     reasons.push("正文/标题命中型号");
   }
+  const organizationHits = organizations.filter((token) =>
+    haystack.includes(token)
+  );
+  if (organizationHits.length) {
+    score += Math.min(45, organizationHits.length * 30);
+    reasons.push("正文/标题命中公司或主体身份");
+  }
   if (category && haystack.includes(category)) {
     score += 8;
     reasons.push("正文/标题命中产品类别");
   }
 
-  const clearIdentity = Boolean(productName || brand || models.length);
+  const clearIdentity = Boolean(
+    productName || brand || models.length || organizations.length
+  );
+  const strongIdentityAvailable = Boolean(
+    brand || models.length || organizations.length
+  );
+  const productNameMatched = Boolean(
+    productName && haystack.includes(productName)
+  );
+  const brandMatched = Boolean(brand && haystack.includes(brand));
+  const strongIdentityMatched = Boolean(
+    modelHits.length ||
+      (brandMatched && productNameMatched) ||
+      (organizationHits.length && productNameMatched)
+  );
   return {
-    matched: clearIdentity ? score >= 20 : true,
+    matched: clearIdentity
+      ? strongIdentityAvailable
+        ? strongIdentityMatched
+        : score >= 20
+      : true,
     score: clamp(score),
-    reasons
+    reasons:
+      strongIdentityAvailable && !strongIdentityMatched && productNameMatched
+        ? [
+            ...reasons,
+            "只命中通用产品名，未命中型号、品牌或公司主体，不能确认是当前产品"
+          ]
+        : reasons
   };
 }

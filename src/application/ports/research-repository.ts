@@ -114,6 +114,7 @@ export type ResearchBrowserState = {
     acceptedCount: number;
     heldCount: number;
     rejectedCount: number;
+    marketReferenceCount?: number;
     fetchedCount: number;
     candidates: Array<{
       url: string;
@@ -126,6 +127,7 @@ export type ResearchBrowserState = {
       semanticScore?: number;
       finalScore: number;
       decision: "ACCEPT" | "HOLD" | "REJECT";
+      pool?: "PRODUCT_FACT" | "MARKET_REFERENCE" | "REJECTED";
       selectedForFetch: boolean;
       reasons: string[];
       fetchedIdentityScore?: number;

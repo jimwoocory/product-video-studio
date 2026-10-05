@@ -381,10 +381,16 @@ class UsageRuleRuntime implements StructuredAiRuntime {
   }
 }
 
-function makeProductFlow(projectId: string) {
+function makeProductFlow(
+  projectId: string,
+  options: {
+    projectName?: string;
+    truthPatch?: Partial<ProductTruth>;
+  } = {}
+) {
   const project: Project = {
     id: projectId,
-    name: "Research Project",
+    name: options.projectName ?? "Research Project",
     status: "PRODUCT_TRUTH_REVIEW",
     targetPlatform: "douyin",
     targetDurationMs: 30000,
@@ -395,8 +401,9 @@ function makeProductFlow(projectId: string) {
   const initial = makeProductTruth();
   const truth: ProductTruth = {
     ...initial,
+    ...options.truthPatch,
     projectId,
-    uncertainClaims: []
+    uncertainClaims: options.truthPatch?.uncertainClaims ?? []
   };
   let currentTruth = structuredClone(truth);
   let savedDraft: ProductTruth | undefined;
@@ -577,8 +584,10 @@ test("deep Research persists Human Takeover blocker instead of pretending to kee
       status: "READY",
       sources: [
         {
-          url: "https://competitor.example.com/item",
-          sourceType: "COMPETITOR"
+          url: "https://example.com/test-product-review",
+          sourceType: "INDUSTRY",
+          resultTitle: "Test Product 使用评测",
+          resultSnippet: "Test Product 日常使用体验"
         }
       ],
       browserState: {
@@ -589,7 +598,10 @@ test("deep Research persists Human Takeover blocker instead of pretending to kee
   );
   const service = new ResearchService(
     repo,
-    new MemoryWebResearchProvider(),
+    new MemoryWebResearchProvider({
+      "https://example.com/test-product-review":
+        "Test Product 日常使用体验与公开说明。"
+    }),
     browser,
     new EvidenceBoundRuntime(),
     flow
@@ -696,7 +708,9 @@ test("Research candidate enters Product Truth only as UNVERIFIED, and becomes Pr
 test("deep Research automatically expands product usage, wearing and precaution queries", async () => {
   const projectId = "research-auto-queries";
   const repo = new MemoryResearchRepository();
-  const { flow } = makeProductFlow(projectId);
+  const { flow } = makeProductFlow(projectId, {
+    truthPatch: { category: "耳夹式蓝牙耳机" }
+  });
   const browser = new StaticBrowserProvider({
     status: "BLOCKED",
     blockerCode: "BROWSER_PROVIDER_NOT_CONFIGURED",
@@ -1005,4 +1019,117 @@ test("research usage rule enters Product Truth as UNVERIFIED and becomes a confi
   );
   assert.equal(confirmedRule?.status, "CONFIRMED");
   assert.equal(confirmedRule?.dispositionConfirmedByUser, true);
+});
+
+
+test("deep Research builds pillow-specific queries and strong identity terms for 瑶药护颈枕", async () => {
+  const projectId = "research-yao-pillow-queries";
+  const repo = new MemoryResearchRepository();
+  const { flow } = makeProductFlow(projectId, {
+    projectName: "广西金秀康瑶堂瑶药",
+    truthPatch: {
+      productName: "瑶药护颈枕",
+      category: "草本养生寝具 / 瑶药护颈枕",
+      confirmedFeatures: [
+        {
+          id: "yao-model-fact",
+          statement: "型号为 KYTYYZ001。",
+          sourceType: "user",
+          createdAt: "2026-10-04T00:00:00.000Z"
+        }
+      ]
+    }
+  });
+  const browser = new StaticBrowserProvider({
+    status: "BLOCKED",
+    blockerCode: "BROWSER_PROVIDER_NOT_CONFIGURED",
+    message: "not configured",
+    requiredUserAction: "connect browser"
+  });
+  const service = new ResearchService(
+    repo,
+    new MemoryWebResearchProvider(),
+    browser,
+    new EvidenceBoundRuntime(),
+    flow
+  );
+
+  await service.startRun({
+    projectId,
+    mode: "DEEP",
+    goal: "核实公开卖点",
+    sourceUrls: [],
+    queries: []
+  });
+
+  const queries = browser.inputs[0]?.queries.join("\n") ?? "";
+  assert.match(queries, /KYTYYZ001/);
+  assert.match(queries, /广西金秀康瑶堂瑶药 瑶药护颈枕/);
+  assert.match(queries, /材质 填充 配方 成分/);
+  assert.match(queries, /清洗 保养 注意事项/);
+  assert.doesNotMatch(queries, /防水 充电/);
+  assert.doesNotMatch(queries, /佩戴位置/);
+});
+
+test("Research page data never reuses an older brief for a newer failed run", async () => {
+  const projectId = "research-page-run-binding";
+  const repo = new MemoryResearchRepository();
+  const { flow } = makeProductFlow(projectId);
+  const oldRun: ResearchRun = {
+    id: "run-old-success",
+    projectId,
+    mode: "DEEP",
+    status: "COMPLETED",
+    goal: "旧研究",
+    sourceUrls: [],
+    queries: ["old"],
+    createdAt: "2026-10-04T00:00:00.000Z",
+    updatedAt: "2026-10-04T00:01:00.000Z"
+  };
+  const latestRun: ResearchRun = {
+    id: "run-new-failed",
+    projectId,
+    mode: "DEEP",
+    status: "FAILED",
+    goal: "新研究",
+    sourceUrls: [],
+    queries: ["new"],
+    blockerCode: "NO_EVIDENCE",
+    blockerMessage: "没有获取到可用证据",
+    createdAt: "2026-10-05T00:00:00.000Z",
+    updatedAt: "2026-10-05T00:01:00.000Z"
+  };
+  repo.runs.set(oldRun.id, oldRun);
+  repo.runs.set(latestRun.id, latestRun);
+  repo.briefs.set("brief-old", {
+    id: "brief-old",
+    projectId,
+    runId: oldRun.id,
+    status: "READY",
+    summary: "这是旧研究报告",
+    findings: [],
+    candidateClaims: [],
+    usageRules: [],
+    contentOpportunities: [],
+    uncertainties: [],
+    contentHash: "old-brief-hash",
+    createdAt: "2026-10-04T00:02:00.000Z"
+  });
+  const service = new ResearchService(
+    repo,
+    new MemoryWebResearchProvider(),
+    new StaticBrowserProvider({
+      status: "BLOCKED",
+      blockerCode: "BROWSER_PROVIDER_NOT_CONFIGURED",
+      message: "not configured",
+      requiredUserAction: "connect browser"
+    }),
+    new EvidenceBoundRuntime(),
+    flow
+  );
+
+  const page = await service.pageData(projectId);
+  assert.equal(page.latestRun?.id, latestRun.id);
+  assert.equal(page.brief, undefined);
+  assert.deepEqual(page.evidence, []);
 });

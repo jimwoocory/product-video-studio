@@ -605,6 +605,9 @@ export function renderResearchPage(input: {
   const evidenceDiscoveryCandidates = discoveryCandidates.filter(
     (candidate) => candidate.fetchOutcome === "EVIDENCE"
   );
+  const marketReferenceCandidates = discoveryCandidates.filter(
+    (candidate) => candidate.pool === "MARKET_REFERENCE"
+  );
   const discoveryFetchedCount = discoveryRounds.reduce(
     (sum, round) => sum + round.fetchedCount,
     0
@@ -617,9 +620,19 @@ export function renderResearchPage(input: {
       '<div class="card"><b>搜索候选</b><p>' + discoveryCandidates.length + '</p></div>' +
       '<div class="card"><b>进入抓取</b><p>' + discoveryFetchedCount + '</p></div>' +
       '<div class="card"><b>形成证据</b><p>' + evidenceDiscoveryCandidates.length + '</p></div>' +
+      '<div class="card"><b>市场 / 竞品候选</b><p>' + marketReferenceCandidates.length + '</p></div>' +
       '<div class="card"><b>淘汰 / 失败</b><p>' +
         (rejectedDiscoveryCandidates.length + failedDiscoveryCandidates.length) +
       '</p></div></div>' +
+      (marketReferenceCandidates.length
+        ? '<h4>市场 / 竞品候选（不会进入当前产品事实）</h4>' +
+          marketReferenceCandidates.slice(0, 6).map((candidate) =>
+            '<p><b>' + esc(candidate.title || candidate.url) + '</b><br>' +
+            '<span class="muted">' +
+              esc(candidate.reasons[candidate.reasons.length - 1] ?? "属于同类或市场参考") +
+            '</span></p>'
+          ).join("")
+        : '') +
       (rejectedDiscoveryCandidates.length
         ? '<h4>典型淘汰原因</h4>' +
           rejectedDiscoveryCandidates.slice(0, 8).map((candidate) =>
@@ -637,6 +650,7 @@ export function renderResearchPage(input: {
         '<p>第 ' + round.round + ' 轮 · 候选 ' + round.candidateCount +
         ' · ACCEPT ' + round.acceptedCount +
         ' · HOLD ' + round.heldCount +
+        ' · MARKET ' + (round.marketReferenceCount ?? 0) +
         ' · REJECT ' + round.rejectedCount +
         ' · 抓取 ' + round.fetchedCount +
         '<br>' + esc(round.queries.join(" / ")) + '</p>'
@@ -711,7 +725,9 @@ export function renderResearchPage(input: {
           : "<p>没有候选事实或产品使用规则。</p>"}
         <p class="technical hash">brief=${esc(brief.id)}<br>contentHash=${esc(brief.contentHash)}${brief.aiExecution ? "<br>provider="+esc(brief.aiExecution.providerId)+" · model="+esc(brief.aiExecution.modelId)+" · config=v"+brief.aiExecution.configVersion : ""}</p>
       </section>`
-    : '<section class="card"><p>还没有研究报告。</p></section>';
+    : latestRun?.status === "FAILED"
+      ? '<section class="card"><p><b>本轮未生成研究报告。</b> 当前轮次没有形成可用产品证据；历史成功报告不会在这里冒充本轮结果。</p></section>'
+      : '<section class="card"><p>还没有研究报告。</p></section>';
 
   const historyHtml = runs.length
     ? `<details class="card technical"><summary>研究任务历史（${runs.length}）</summary>${runs
