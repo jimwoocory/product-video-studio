@@ -36,7 +36,7 @@ export type AiModelConfig = {
   modelId: string;
   displayName?: string;
   enabled: boolean;
-  source: "DISCOVERED" | "MANUAL";
+  source: "DISCOVERED" | "MANUAL" | "USER_DISABLED";
   capabilities: AiModelCapability[];
   discoveredAt: string;
 };

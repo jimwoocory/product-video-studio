@@ -97,7 +97,12 @@ export class PrismaAiSettingsRepository implements AiSettingsRepository {
       modelId: record.modelId,
       ...(record.displayName ? { displayName: record.displayName } : {}),
       enabled: record.enabled,
-      source: record.source === "MANUAL" ? "MANUAL" : "DISCOVERED",
+      source:
+        record.source === "MANUAL"
+          ? "MANUAL"
+          : record.source === "USER_DISABLED"
+            ? "USER_DISABLED"
+            : "DISCOVERED",
       capabilities,
       discoveredAt: iso(record.discoveredAt)
     };
@@ -242,12 +247,12 @@ export class PrismaAiSettingsRepository implements AiSettingsRepository {
   ): Promise<AiModelConfig[]> {
     const discoveredAt = new Date();
     const incomingIds = [...new Set(models.map((model) => model.modelId))];
-    const existingManual = new Set(
+    const protectedExisting = new Set(
       (
         await this.prisma.aiModelRecord.findMany({
           where: {
             providerId,
-            source: "MANUAL",
+            source: { in: ["MANUAL", "USER_DISABLED"] },
             modelId: { in: incomingIds }
           },
           select: { modelId: true }
@@ -267,7 +272,7 @@ export class PrismaAiSettingsRepository implements AiSettingsRepository {
         data: { enabled: false }
       }),
       ...models.map((model) =>
-        existingManual.has(model.modelId)
+        protectedExisting.has(model.modelId)
           ? this.prisma.aiModelRecord.update({
               where: {
                 providerId_modelId: {

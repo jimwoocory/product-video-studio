@@ -144,7 +144,10 @@ class MemoryAiSettingsRepository implements AiSettingsRepository {
     for (const model of models) {
       const key = providerId + "::" + model.modelId;
       const current = this.models.get(key);
-      if (current?.source === "MANUAL") {
+      if (
+        current?.source === "MANUAL" ||
+        current?.source === "USER_DISABLED"
+      ) {
         this.models.set(key, {
           ...current,
           ...(model.displayName ? { displayName: model.displayName } : {}),
@@ -390,7 +393,8 @@ test("P1 AI settings discover models and router records actual provider/model", 
 test("refreshModels disables stale DISCOVERED models, preserves MANUAL models, and excludes stale capability fallback", async () => {
   const mock = await startMockOpenAi([
     { id: "remote-a", name: "Remote A" },
-    { id: "remote-b", name: "Remote B" }
+    { id: "remote-b", name: "Remote B" },
+    { id: "remote-disabled", name: "Remote Disabled" }
   ]);
   const repo = new MemoryAiSettingsRepository();
   const secrets = new MemorySecretStore();
@@ -413,7 +417,7 @@ test("refreshModels disables stale DISCOVERED models, preserves MANUAL models, a
     const first = await settings.refreshModels(provider.id);
     assert.deepEqual(
       first.map((model) => model.modelId).sort(),
-      ["remote-a", "remote-b"]
+      ["remote-a", "remote-b", "remote-disabled"]
     );
     await settings.setModelCapabilities(
       provider.id,
@@ -426,8 +430,19 @@ test("refreshModels disables stale DISCOVERED models, preserves MANUAL models, a
       "Manual Only",
       ["TEXT"]
     );
+    const disabledKey = provider.id + "::remote-disabled";
+    const toDisable = repo.models.get(disabledKey);
+    assert.ok(toDisable);
+    repo.models.set(disabledKey, {
+      ...toDisable!,
+      enabled: false,
+      source: "USER_DISABLED"
+    });
 
-    mock.setModels([{ id: "remote-a", name: "Remote A" }]);
+    mock.setModels([
+      { id: "remote-a", name: "Remote A" },
+      { id: "remote-disabled", name: "Remote Disabled" }
+    ]);
     const refreshed = await settings.refreshModels(provider.id);
     assert.deepEqual(
       refreshed.map((model) => model.modelId),
@@ -441,6 +456,13 @@ test("refreshModels disables stale DISCOVERED models, preserves MANUAL models, a
     const manual = await repo.getModel(provider.id, "manual-only");
     assert.equal(manual?.enabled, true);
     assert.equal(manual?.source, "MANUAL");
+
+    const userDisabled = await repo.getModel(
+      provider.id,
+      "remote-disabled"
+    );
+    assert.equal(userDisabled?.enabled, false);
+    assert.equal(userDisabled?.source, "USER_DISABLED");
 
     const visibleProvider = (await settings.listProviders()).find(
       (item) => item.id === provider.id
