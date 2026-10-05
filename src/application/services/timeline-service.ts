@@ -732,6 +732,10 @@ export class TimelineService {
     return this.timelines.latestRenderJob(projectId);
   }
 
+  async listRenderJobs(projectId: string) {
+    return this.timelines.listRenderJobs(projectId);
+  }
+
   async latestTimeline(projectId: string) {
     return this.timelines.latestTimeline(projectId);
   }

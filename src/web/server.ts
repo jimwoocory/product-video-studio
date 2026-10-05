@@ -60,6 +60,7 @@ import { VisualEditAssessmentService } from "../application/services/visual-edit
 import { WindowsSpeechSynthesis } from "../adapters/media/windows-speech-synthesis.js";
 import { ReferenceVideoAnalysisService } from "../application/services/reference-video-analysis.js";
 import { ResearchService } from "../application/services/research-service.js";
+import { TaskCenterService } from "../application/services/task-center-service.js";
 import { ProductDirectorService } from "../application/services/product-director.js";
 import { GenerationPreflightService } from "../application/services/generation-preflight.js";
 import { ApprovalService } from "../application/services/approval-service.js";
@@ -107,9 +108,11 @@ import {
 } from "../domain/schemas.js";
 import { sha256Bytes } from "../domain/hashing.js";
 import { publishProviderTypeSchema } from "../domain/publish.js";
+import type { TaskCenterStatus } from "../domain/task-center.js";
 import { qrCodeSvg } from "./qr-code.js";
 import { canServeArtifactContent } from "./artifact-media-policy.js";
 import { renderBlockedStepPage, renderSafeRequestErrorPage } from "./blocked-step-ui.js";
+import { renderTaskCenterPage } from "./task-center-ui.js";
 import {
   renderMobilePublishPage,
   renderPublishSettingsPage
@@ -144,6 +147,7 @@ export type WebDependencies = {
   visualEditAssessment?: VisualEditAssessmentService;
   referenceVideo: ReferenceVideoAnalysisService;
   research: ResearchService;
+  taskCenter: TaskCenterService;
   productInput: ProductInputStore;
   aiGeneration: AiGenerationService;
   productDirector: ProductDirectorService;
@@ -408,6 +412,18 @@ export function createDefaultDependencies(): WebDependencies {
     },
     preflightAudit: async (projectId, result) => { await persistPreflightProviderAudit(dependencies, projectId, result.probe); }
   }));
+  const taskCenter = new TaskCenterService({
+    productFlow,
+    research,
+    agentMode,
+    smartGeneration,
+    workflow,
+    generation,
+    review,
+    timeline,
+    finalOutput,
+    publishBridge
+  });
   const dependencies: WebDependencies = {
     creativeReferences,
     visualEditAssessment,
@@ -424,6 +440,7 @@ export function createDefaultDependencies(): WebDependencies {
     agentMode,
     referenceVideo,
     research,
+    taskCenter,
     productInput,
     aiGeneration,
     productDirector,
@@ -732,6 +749,48 @@ export function createAppServer(
           service: "product-video-studio",
           specVersion: "P1-0.3.0-p1-final"
         });
+      }
+
+      if (req.method === "GET" && url.pathname === "/api/tasks") {
+        return json(res, 200, { items: await deps.taskCenter.listAll() });
+      }
+
+      const projectTasksApiMatch = url.pathname.match(
+        /^\/api\/projects\/([^/]+)\/tasks$/
+      );
+      if (req.method === "GET" && projectTasksApiMatch) {
+        const projectId = decodeURIComponent(projectTasksApiMatch[1]!);
+        return json(res, 200, {
+          items: await deps.taskCenter.listProject(projectId)
+        });
+      }
+
+      if (req.method === "GET" && url.pathname === "/tasks") {
+        const allowedStatuses = new Set<TaskCenterStatus>([
+          "WAITING",
+          "RUNNING",
+          "NEEDS_USER",
+          "SUCCEEDED",
+          "FAILED",
+          "CANCELLED",
+          "UNKNOWN"
+        ]);
+        const requestedStatus = url.searchParams.get("status");
+        const status =
+          requestedStatus &&
+          allowedStatuses.has(requestedStatus as TaskCenterStatus)
+            ? (requestedStatus as TaskCenterStatus)
+            : undefined;
+        const projectId = url.searchParams.get("projectId") ?? undefined;
+        return html(
+          res,
+          200,
+          renderTaskCenterPage({
+            items: await deps.taskCenter.listAll(),
+            ...(status ? { status } : {}),
+            ...(projectId ? { projectId } : {})
+          })
+        );
       }
 
       if (req.method === "GET" && url.pathname === "/api/provider/probe") {

@@ -168,6 +168,28 @@ await prisma.researchRunRecord.create({
   }
 });
 
+await prisma.researchRunRecord.create({
+  data: {
+    id: "e2e-research-blocked",
+    projectId: "e2e-ready",
+    mode: "DEEP",
+    status: "BLOCKED",
+    goal: "登录后继续深度研究",
+    sourceUrlsJson: "[]",
+    queriesJson: JSON.stringify(["E2E Product 抖音 高点赞"]),
+    browserStateJson: JSON.stringify({
+      provider: "external-browser",
+      resumeToken: "e2e-resume",
+      lastCheckedAt: "2026-10-04T00:05:00.000Z"
+    }),
+    blockerCode: "LOGIN_REQUIRED",
+    blockerMessage: "需要登录平台后继续研究",
+    requiredUserAction: "完成登录后点击继续深度研究",
+    createdAt: new Date("2026-10-04T00:05:00.000Z"),
+    updatedAt: new Date("2026-10-04T00:05:00.000Z")
+  }
+});
+
 const deps = createDefaultDependencies();
 const blockedExternalCall = async () => {
   throw new Error("E2E_EXTERNAL_CALL_BLOCKED");
