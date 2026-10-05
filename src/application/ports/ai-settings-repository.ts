@@ -125,6 +125,13 @@ export interface AiSettingsRepository {
       capabilities?: AiModelCapability[];
     }>
   ): Promise<AiModelConfig[]>;
+  syncDiscoveredModels(
+    providerId: string,
+    models: Array<{
+      modelId: string;
+      displayName?: string;
+    }>
+  ): Promise<AiModelConfig[]>;
   getModel(providerId: string, modelId: string): Promise<AiModelConfig | null>;
   setModelCapabilities(
     providerId: string,

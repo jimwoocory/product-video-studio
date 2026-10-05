@@ -88,7 +88,9 @@ export class AiSettingsService {
     return Promise.all(
       providers.map(async (provider) => ({
         ...provider,
-        models: await this.repo.listModels(provider.id)
+        models: (await this.repo.listModels(provider.id)).filter(
+          (model) => model.enabled
+        )
       }))
     );
   }
@@ -165,12 +167,9 @@ export class AiSettingsService {
         "CONNECTED",
         testedAt
       );
-      return this.repo.upsertModels(
+      return this.repo.syncDiscoveredModels(
         provider.id,
-        models.map((model) => ({
-          ...model,
-          source: "DISCOVERED" as const
-        }))
+        models
       );
     } catch (error) {
       await this.repo.updateProviderConnectionStatus(

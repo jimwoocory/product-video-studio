@@ -233,6 +233,88 @@ export class PrismaAiSettingsRepository implements AiSettingsRepository {
     return this.listModels(providerId);
   }
 
+  async syncDiscoveredModels(
+    providerId: string,
+    models: Array<{
+      modelId: string;
+      displayName?: string;
+    }>
+  ): Promise<AiModelConfig[]> {
+    const discoveredAt = new Date();
+    const incomingIds = [...new Set(models.map((model) => model.modelId))];
+    const existingManual = new Set(
+      (
+        await this.prisma.aiModelRecord.findMany({
+          where: {
+            providerId,
+            source: "MANUAL",
+            modelId: { in: incomingIds }
+          },
+          select: { modelId: true }
+        })
+      ).map((row) => row.modelId)
+    );
+
+    await this.prisma.$transaction([
+      this.prisma.aiModelRecord.updateMany({
+        where: {
+          providerId,
+          source: "DISCOVERED",
+          ...(incomingIds.length
+            ? { modelId: { notIn: incomingIds } }
+            : {})
+        },
+        data: { enabled: false }
+      }),
+      ...models.map((model) =>
+        existingManual.has(model.modelId)
+          ? this.prisma.aiModelRecord.update({
+              where: {
+                providerId_modelId: {
+                  providerId,
+                  modelId: model.modelId
+                }
+              },
+              data: {
+                ...(model.displayName
+                  ? { displayName: model.displayName }
+                  : {}),
+                discoveredAt
+              }
+            })
+          : this.prisma.aiModelRecord.upsert({
+              where: {
+                providerId_modelId: {
+                  providerId,
+                  modelId: model.modelId
+                }
+              },
+              create: {
+                id: randomUUID(),
+                providerId,
+                modelId: model.modelId,
+                displayName: model.displayName ?? null,
+                enabled: true,
+                source: "DISCOVERED",
+                capabilitiesJson: JSON.stringify(["TEXT"]),
+                discoveredAt
+              },
+              update: {
+                displayName: model.displayName ?? null,
+                enabled: true,
+                source: "DISCOVERED",
+                discoveredAt
+              }
+            })
+      )
+    ]);
+
+    const incoming = new Set(incomingIds);
+    return (await this.listModels(providerId)).filter(
+      (model) => model.enabled && incoming.has(model.modelId)
+    );
+  }
+
   async getModel(
     providerId: string,
     modelId: string

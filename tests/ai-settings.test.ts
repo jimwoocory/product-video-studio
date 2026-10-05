@@ -126,6 +126,47 @@ class MemoryAiSettingsRepository implements AiSettingsRepository {
     }
     return this.listModels(providerId);
   }
+  async syncDiscoveredModels(
+    providerId: string,
+    models: Array<{ modelId: string; displayName?: string }>
+  ) {
+    const now = new Date().toISOString();
+    const incoming = new Set(models.map((model) => model.modelId));
+    for (const [key, current] of this.models.entries()) {
+      if (
+        current.providerId === providerId &&
+        current.source === "DISCOVERED" &&
+        !incoming.has(current.modelId)
+      ) {
+        this.models.set(key, { ...current, enabled: false });
+      }
+    }
+    for (const model of models) {
+      const key = providerId + "::" + model.modelId;
+      const current = this.models.get(key);
+      if (current?.source === "MANUAL") {
+        this.models.set(key, {
+          ...current,
+          ...(model.displayName ? { displayName: model.displayName } : {}),
+          discoveredAt: now
+        });
+        continue;
+      }
+      this.models.set(key, {
+        id: current?.id ?? "model-" + key,
+        providerId,
+        modelId: model.modelId,
+        ...(model.displayName ? { displayName: model.displayName } : {}),
+        enabled: true,
+        source: "DISCOVERED",
+        capabilities: current?.capabilities ?? ["TEXT"],
+        discoveredAt: now
+      });
+    }
+    return (await this.listModels(providerId)).filter(
+      (model) => model.enabled && incoming.has(model.modelId)
+    );
+  }
   async getModel(providerId: string, modelId: string) {
     return this.models.get(providerId + "::" + modelId) ?? null;
   }
@@ -235,7 +276,12 @@ class FallbackRuntime implements StructuredAiRuntime {
   }
 }
 
-async function startMockOpenAi() {
+async function startMockOpenAi(
+  initialModels: Array<{ id: string; name?: string }> = [
+    { id: "model-a", name: "Model A" }
+  ]
+) {
+  let models = [...initialModels];
   const requests: Array<{
     path: string;
     authorization?: string;
@@ -255,7 +301,7 @@ async function startMockOpenAi() {
     requests.push(record);
     if (req.url === "/v1/models") {
       res.writeHead(200, { "content-type": "application/json" });
-      res.end(JSON.stringify({ data: [{ id: "model-a", name: "Model A" }] }));
+      res.end(JSON.stringify({ data: models }));
       return;
     }
     if (req.url === "/v1/chat/completions") {
@@ -283,7 +329,10 @@ async function startMockOpenAi() {
   return {
     server,
     requests,
-    baseUrl: `http://127.0.0.1:${address.port}/v1`
+    baseUrl: `http://127.0.0.1:${address.port}/v1`,
+    setModels(next: Array<{ id: string; name?: string }>) {
+      models = [...next];
+    }
   };
 }
 
@@ -333,6 +382,82 @@ test("P1 AI settings discover models and router records actual provider/model", 
     assert.equal(repo.executions[0]?.modelId, "model-a");
     assert.equal(JSON.stringify(repo.executions).includes("only-in-secret-store"), false);
     assert.equal(mock.requests.every((x) => x.authorization === "Bearer only-in-secret-store"), true);
+  } finally {
+    await new Promise<void>((resolve) => mock.server.close(() => resolve()));
+  }
+});
+
+test("refreshModels disables stale DISCOVERED models, preserves MANUAL models, and excludes stale capability fallback", async () => {
+  const mock = await startMockOpenAi([
+    { id: "remote-a", name: "Remote A" },
+    { id: "remote-b", name: "Remote B" }
+  ]);
+  const repo = new MemoryAiSettingsRepository();
+  const secrets = new MemorySecretStore();
+  const settings = new AiSettingsService(
+    repo,
+    secrets,
+    new OpenAiCompatibleClient()
+  );
+  try {
+    const provider = await settings.saveProvider({
+      id: "provider-sync",
+      name: "Sync Provider",
+      baseUrl: mock.baseUrl,
+      apiKey: "sync-secret",
+      enabled: true,
+      timeoutMs: 5000,
+      maxRetries: 0
+    });
+
+    const first = await settings.refreshModels(provider.id);
+    assert.deepEqual(
+      first.map((model) => model.modelId).sort(),
+      ["remote-a", "remote-b"]
+    );
+    await settings.setModelCapabilities(
+      provider.id,
+      "remote-b",
+      ["TEXT", "VISION"]
+    );
+    await settings.addManualModel(
+      provider.id,
+      "manual-only",
+      "Manual Only",
+      ["TEXT"]
+    );
+
+    mock.setModels([{ id: "remote-a", name: "Remote A" }]);
+    const refreshed = await settings.refreshModels(provider.id);
+    assert.deepEqual(
+      refreshed.map((model) => model.modelId),
+      ["remote-a"]
+    );
+
+    const stale = await repo.getModel(provider.id, "remote-b");
+    assert.equal(stale?.enabled, false);
+    assert.equal(stale?.source, "DISCOVERED");
+
+    const manual = await repo.getModel(provider.id, "manual-only");
+    assert.equal(manual?.enabled, true);
+    assert.equal(manual?.source, "MANUAL");
+
+    const visibleProvider = (await settings.listProviders()).find(
+      (item) => item.id === provider.id
+    );
+    assert.deepEqual(
+      visibleProvider?.models.map((model) => model.modelId).sort(),
+      ["manual-only", "remote-a"]
+    );
+
+    await assert.rejects(
+      settings.resolveForCapabilities(
+        "project-sync",
+        "RESEARCH",
+        ["VISION"]
+      ),
+      /当前没有配置支持 VISION 的可用模型/
+    );
   } finally {
     await new Promise<void>((resolve) => mock.server.close(() => resolve()));
   }
