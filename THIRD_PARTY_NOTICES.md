@@ -13,7 +13,7 @@ The allowlist retains its legacy `approvedForP0` field name for gate compatibili
 
 ## Bundled npm dependency inventory
 
-The lockfile currently resolves 35 exact npm package versions. Installation is allowed only while `npm run license:gate` passes against the exact lockfile.
+The lockfile currently resolves 38 exact npm package versions. Installation is allowed only while `npm run license:gate` passes against the exact lockfile.
 
 | Package | Version | License | Scope |
 | --- | --- | --- | --- |
@@ -24,6 +24,7 @@ The lockfile currently resolves 35 exact npm package versions. Installation is a
 | @prisma/engines | 6.12.0 | Apache-2.0 | transitive |
 | @prisma/fetch-engine | 6.12.0 | Apache-2.0 | transitive |
 | @prisma/get-platform | 6.12.0 | Apache-2.0 | transitive |
+| @playwright/test | 1.63.0 | Apache-2.0 | development |
 | @types/node | 26.6.3 | MIT | development |
 | @typescript/typescript-aix-ppc64 | 7.0.2 | Apache-2.0 | transitive |
 | @typescript/typescript-darwin-arm64 | 7.0.2 | Apache-2.0 | transitive |
@@ -48,6 +49,8 @@ The lockfile currently resolves 35 exact npm package versions. Installation is a
 | image-size | 2.0.4 | MIT | production |
 | jiti | 2.4.2 | MIT | transitive |
 | prisma | 6.12.0 | Apache-2.0 | development |
+| playwright | 1.63.0 | Apache-2.0 | transitive |
+| playwright-core | 1.63.0 | Apache-2.0 | transitive |
 | qrcode-svg | 1.1.0 | MIT | production |
 | typescript | 7.0.2 | Apache-2.0 | development |
 | undici-types | 8.9.0 | MIT | transitive |
