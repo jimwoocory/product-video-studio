@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import path from "node:path";
 import { z } from "zod";
 import type {
   BrowserResearchProvider,
@@ -6,6 +7,13 @@ import type {
   WebResearchProvider,
   WebResearchSource
 } from "../ports/research-provider.js";
+import type { ArtifactRepository } from "../ports/artifact-repository.js";
+import type {
+  MarketVideoMediaFetcher,
+  MarketVideoSearchProvider,
+  MarketVideoSort,
+  MarketVideoTimeRange
+} from "../ports/market-video-provider.js";
 import type {
   ResearchBrief,
   ResearchBrowserState,
@@ -24,6 +32,8 @@ import type { ProductFlowService } from "./product-flow.js";
 import { productTruthSchema } from "../../domain/schemas.js";
 import { hashValue } from "../../domain/hashing.js";
 import { DomainValidationError } from "../../domain/validation.js";
+import { LocalArtifactStore } from "../../adapters/store/local-artifact-store.js";
+import type { ReferenceVideoAnalysisService } from "./reference-video-analysis.js";
 import {
   fetchedDocumentMatchesIdentity,
   scoreResearchCandidate,
@@ -383,6 +393,37 @@ function recoveryDeepQueries(input: {
   ]).slice(0, 12);
 }
 
+function marketVideoQueries(input: {
+  goal: string;
+  identity: ResearchIdentity;
+  userQueries: string[];
+}): string[] {
+  const clean = (value: string): string =>
+    value
+      .replace(/(?:抖音|高点赞|爆款|竞品|同类|视频|评测|测评|对比|研究|分析)/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  const category = clean(input.identity.category?.trim() ?? "");
+  const productName = clean(input.identity.productName?.trim() ?? "");
+  const aliases = (input.identity.aliasTerms ?? []).map(clean);
+  const userMarketQueries = input.userQueries
+    .filter((value) => /竞品|同类|爆款|视频|抖音|评测|测评|对比/.test(value))
+    .map(clean);
+  return uniqueStrings([
+    category,
+    ...aliases,
+    ...userMarketQueries,
+    productName
+  ])
+    .filter(
+      (value) =>
+        value.length >= 2 &&
+        !/^(?:产品|商品|官网|说明书)$/i.test(value) &&
+        !/^[a-z0-9._/-]{3,}$/i.test(value)
+    )
+    .slice(0, 4);
+}
+
 function productIdentityTerms(input: {
   productName?: string;
   brand?: string;
@@ -442,8 +483,163 @@ export class ResearchService {
     private readonly browserProvider: BrowserResearchProvider,
     private readonly runtime: StructuredAiRuntime,
     private readonly productFlow: ProductFlowService,
-    private readonly mediaAnalyzer?: ResearchMediaAnalyzer
+    private readonly mediaAnalyzer?: ResearchMediaAnalyzer,
+    private readonly marketVideo?: {
+      searchProvider: MarketVideoSearchProvider;
+      mediaFetcher: MarketVideoMediaFetcher;
+      artifacts: ArtifactRepository;
+      referenceVideo: ReferenceVideoAnalysisService;
+      projectsRoot: string;
+    }
   ) {}
+
+  private async discoverMarketVideos(input: {
+    projectId: string;
+    goal: string;
+    identity: ResearchIdentity;
+    userQueries: string[];
+    sort?: MarketVideoSort;
+    timeRange?: MarketVideoTimeRange;
+    count?: number;
+  }): Promise<ResearchBrowserState["marketVideoResearch"] | undefined> {
+    if (!this.marketVideo) return undefined;
+    const queries = marketVideoQueries({
+      goal: input.goal,
+      identity: input.identity,
+      userQueries: input.userQueries
+    });
+    const sort = input.sort ?? "MOST_LIKED";
+    const timeRange = input.timeRange ?? "ANY";
+    const result = await this.marketVideo.searchProvider.search({
+      projectId: input.projectId,
+      queries,
+      sort,
+      timeRange,
+      count: input.count ?? 12
+    });
+    if (result.status === "READY") {
+      return {
+        status: "READY",
+        provider: result.provider,
+        sort,
+        timeRange,
+        searchedQueries: result.searchedQueries,
+        checkedAt: result.checkedAt,
+        candidates: result.candidates,
+        ...(result.note ? { note: result.note } : {})
+      };
+    }
+    return {
+      status: "BLOCKED",
+      provider: result.provider,
+      sort,
+      timeRange,
+      searchedQueries: result.searchedQueries,
+      checkedAt: result.checkedAt,
+      candidates: [],
+      blockerCode: result.code,
+      message: result.message,
+      requiredUserAction: result.requiredUserAction
+    };
+  }
+
+  async analyzeMarketVideo(input: {
+    projectId: string;
+    runId: string;
+    candidateId: string;
+  }): Promise<{
+    run: ResearchRun;
+    profile: Awaited<ReturnType<ReferenceVideoAnalysisService["analyzeUpload"]>>;
+  }> {
+    if (!this.marketVideo) {
+      throw new DomainValidationError("竞品视频分析 Provider 未配置");
+    }
+    let run = await this.repo.findRun(input.runId);
+    if (!run || run.projectId !== input.projectId) {
+      throw new DomainValidationError("研究任务不存在");
+    }
+    const state = run.browserState?.marketVideoResearch;
+    const candidate = state?.candidates.find(
+      (item) => item.id === input.candidateId
+    );
+    if (!state || !candidate) {
+      throw new DomainValidationError("竞品视频候选不存在或已失效");
+    }
+    if (candidate.status === "ANALYZED") {
+      throw new DomainValidationError("该竞品视频已经完成拆解");
+    }
+    let currentRun: ResearchRun = run;
+
+    const updateCandidate = async (
+      patch: Partial<(typeof state.candidates)[number]>
+    ): Promise<ResearchRun> => {
+      const nextCandidates = state.candidates.map((item) =>
+        item.id === candidate.id ? { ...item, ...patch } : item
+      );
+      currentRun = await this.repo.updateRun(currentRun.id, {
+        browserState: {
+          ...currentRun.browserState!,
+          marketVideoResearch: {
+            ...state,
+            candidates: nextCandidates,
+            checkedAt: new Date().toISOString()
+          }
+        }
+      });
+      return currentRun;
+    };
+
+    try {
+      const media = await this.marketVideo.mediaFetcher.fetch({
+        projectId: input.projectId,
+        candidate
+      });
+      const store = new LocalArtifactStore(
+        path.resolve(this.marketVideo.projectsRoot, input.projectId),
+        this.marketVideo.artifacts
+      );
+      const artifact = await store.writeImmutable({
+        id: randomUUID(),
+        projectId: input.projectId,
+        kind: "OTHER",
+        relativePath:
+          "research/market-videos/" +
+          candidate.videoId +
+          "-" +
+          randomUUID() +
+          ".mp4",
+        immutable: true,
+        bytes: media.bytes,
+        mimeType: media.mimeType
+      });
+      const profile = await this.marketVideo.referenceVideo.analyzeUpload({
+        projectId: input.projectId,
+        artifactId: artifact.id,
+        originalFilename: media.originalFilename,
+        sourceUrl: candidate.url
+      });
+      currentRun = await updateCandidate({
+        status: "ANALYZED",
+        analysisError: undefined,
+        referenceVideoProfileId: profile.id,
+        referenceVideoProfileVersion: profile.version,
+        fetchedArtifactId: artifact.id
+      });
+      return { run: currentRun, profile };
+    } catch (error) {
+      const raw = error instanceof Error ? error.message : String(error);
+      const message = raw.includes("DOUYIN_LOGIN_REQUIRED")
+        ? "抖音登录状态已失效，请重新登录后再分析该视频。"
+        : raw.includes("DOUYIN_RISK_CONTROL")
+          ? "抖音触发验证码或风控，请人工处理后再重试。"
+          : raw.slice(0, 800);
+      await updateCandidate({
+        status: "FAILED",
+        analysisError: message
+      });
+      throw new DomainValidationError(message);
+    }
+  }
 
   private async semanticRerankScores(input: {
     projectId: string;
@@ -527,6 +723,12 @@ export class ResearchService {
       sourceType: ResearchEvidenceSourceType;
     }>;
     queries: string[];
+    marketVideo?: {
+      enabled?: boolean;
+      sort?: MarketVideoSort;
+      timeRange?: MarketVideoTimeRange;
+      count?: number;
+    };
   }): Promise<{
     run: ResearchRun;
     evidence: ResearchEvidence[];
@@ -725,6 +927,40 @@ export class ResearchService {
       }
     }
 
+    if (
+      mode === "DEEP" &&
+      this.marketVideo &&
+      input.marketVideo?.enabled !== false
+    ) {
+      const marketVideoResearch = await this.discoverMarketVideos({
+        projectId: input.projectId,
+        goal,
+        identity,
+        userQueries: input.queries,
+        ...(input.marketVideo?.sort
+          ? { sort: input.marketVideo.sort }
+          : {}),
+        ...(input.marketVideo?.timeRange
+          ? { timeRange: input.marketVideo.timeRange }
+          : {}),
+        ...(input.marketVideo?.count
+          ? { count: input.marketVideo.count }
+          : {})
+      });
+      if (marketVideoResearch) {
+        run = await this.repo.updateRun(run.id, {
+          browserState: {
+            ...(run.browserState ?? {
+              provider: this.browserProvider.id,
+              lastCheckedAt: new Date().toISOString()
+            }),
+            marketVideoResearch,
+            lastCheckedAt: new Date().toISOString()
+          }
+        });
+      }
+    }
+
     const fetchFailures: string[] = [];
     const evidence: ResearchEvidence[] = [];
     const deduped = new Map<string, WebResearchSource>();
@@ -886,9 +1122,18 @@ export class ResearchService {
         blockerCode: browserBlocked.blockerCode,
         blockerMessage: browserBlocked.message,
         requiredUserAction: browserBlocked.requiredUserAction,
-        ...(browserBlocked.browserState
-          ? { browserState: browserBlocked.browserState }
-          : {})
+        browserState: {
+          ...(run.browserState ?? {
+            provider: this.browserProvider.id,
+            lastCheckedAt: new Date().toISOString()
+          }),
+          ...(browserBlocked.browserState ?? {}),
+          provider:
+            browserBlocked.browserState?.provider ??
+            run.browserState?.provider ??
+            this.browserProvider.id,
+          lastCheckedAt: new Date().toISOString()
+        }
       });
     } else if (evidence.length) {
       run = await this.repo.updateRun(run.id, {
@@ -954,6 +1199,10 @@ export class ResearchService {
         blockerMessage: result.message,
         requiredUserAction: result.requiredUserAction,
         browserState: {
+          ...(run.browserState ?? {
+            provider: this.browserProvider.id,
+            lastCheckedAt: new Date().toISOString()
+          }),
           provider:
             result.browserState?.provider ??
             run.browserState?.provider ??
@@ -1136,8 +1385,13 @@ export class ResearchService {
       blockerMessage: undefined,
       requiredUserAction: undefined,
       browserState: {
+        ...(run.browserState ?? {
+          provider: this.browserProvider.id,
+          lastCheckedAt: new Date().toISOString()
+        }),
         provider:
           result.browserState?.provider ??
+          run.browserState?.provider ??
           this.browserProvider.id,
         ...(result.browserState?.resumeToken
           ? { resumeToken: result.browserState.resumeToken }

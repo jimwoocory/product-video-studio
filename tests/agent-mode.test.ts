@@ -176,6 +176,28 @@ test("Agent smart selection chooses Dreamina mode from materials and request sem
     }).operation,
     "multimodal2video"
   );
+  assert.equal(
+    selectAgentOperation({
+      requestedMethod: "AUTO",
+      requestText: "用这张产品图生成有声广告",
+      materials: [material("image", 0)],
+      nativeAudioOutputRequested: true
+    }).operation,
+    "multimodal2video"
+  );
+  assert.equal(
+    selectAgentOperation({
+      requestedMethod: "AUTO",
+      requestText: "按顺序做一个有声故事",
+      materials: [
+        material("image", 0),
+        material("image", 1),
+        material("image", 2)
+      ],
+      nativeAudioOutputRequested: true
+    }).operation,
+    "multimodal2video"
+  );
 });
 
 test("Agent missing direct-reference Artifact fails closed before any paid submit", async () => {
@@ -273,10 +295,14 @@ test("Dreamina Agent capability reads official Skill and current subcommand help
     }
   } as unknown as DomesticJimengCliProvider;
   try {
-    const snapshot = await new DreaminaAgentCapabilityService(
+    const capabilityService = new DreaminaAgentCapabilityService(
       provider,
       skillPath
-    ).inspect("multimodal2video", "seedance2.0mini");
+    );
+    const snapshot = await capabilityService.inspect(
+      "multimodal2video",
+      "seedance2.0mini"
+    );
     assert.equal(snapshot.command.maxImages, 9);
     assert.equal(snapshot.command.maxVideos, 3);
     assert.equal(snapshot.command.maxAudio, 3);
@@ -291,6 +317,25 @@ test("Dreamina Agent capability reads official Skill and current subcommand help
     );
     assert.equal(snapshot.skillSha256.length, 64);
     assert.equal(snapshot.command.helpSha256.length, 64);
+    const registry = await capabilityService.registry();
+    assert.equal(
+      registry.operations.find(
+        (item) => item.operation === "text2video"
+      )?.supportsNativeAudioOutput,
+      true
+    );
+    assert.equal(
+      registry.operations.find(
+        (item) => item.operation === "multimodal2video"
+      )?.supportsNativeAudioOutput,
+      true
+    );
+    assert.equal(
+      registry.operations.find(
+        (item) => item.operation === "multiframe2video"
+      )?.supportsNativeAudioOutput,
+      false
+    );
   } finally {
     await fs.rm(temp, { recursive: true, force: true });
   }

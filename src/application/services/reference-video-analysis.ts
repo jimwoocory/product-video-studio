@@ -77,6 +77,7 @@ export class ReferenceVideoAnalysisService {
     projectId: string;
     artifactId: string;
     originalFilename?: string;
+    sourceUrl?: string;
   }): Promise<ReferenceVideoProfile> {
     const artifact = await this.artifacts.findById(input.artifactId);
     if (
@@ -127,6 +128,7 @@ export class ReferenceVideoAnalysisService {
         task:
           "Analyze a reference marketing video into a reusable ReferenceVideoProfile for a new, original product video.",
         instructions: [
+          "所有可读分析字段必须使用简体中文输出；只有无法自然翻译的必要技术名词可保留英文。",
           "Analyze structure and production method only.",
           "Do not reproduce or quote source dialogue, captions, slogans, shot descriptions, character identity, brand-specific expression, or copyrighted creative wording.",
           "Describe the first-three-second hook by function and pattern, not by copying its content.",
@@ -211,7 +213,8 @@ export class ReferenceVideoAnalysisService {
         projectId: input.projectId,
         version,
         status: "ACTIVE",
-        sourceType: "UPLOAD",
+        sourceType: input.sourceUrl ? "URL" : "UPLOAD",
+        ...(input.sourceUrl ? { sourceUrl: input.sourceUrl } : {}),
         videoArtifactId: artifact.id,
         videoArtifactHash: artifact.sha256,
         ...(input.originalFilename

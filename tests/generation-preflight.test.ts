@@ -429,7 +429,7 @@ test("standard Preflight uses Registry GenerationProfile instead of legacy probe
   assert.equal(result.reports[0]?.blockers.includes("CAPABILITY_UNSUPPORTED:seedance2.5"), false);
 });
 
-test("standard Preflight rejects native audio when current CLI Registry does not expose an output-audio switch", async () => {
+test("standard Preflight rejects native audio when the selected generation route cannot guarantee an audio track", async () => {
   const generation = new MemoryGenerationRepository();
   const workflow = new MemoryWorkflowRepository();
   const provider = new ReadyLegacyProbeProvider();
@@ -460,7 +460,7 @@ test("standard Preflight rejects native audio when current CLI Registry does not
         nativeAudioOutputRequested: true
       }
     }),
-    /未暴露原生声音输出开关|native audio output was requested/
+    /不能保证返回原生音轨|native audio output was requested/
   );
   assert.equal(generation.requests.length, 0);
 });

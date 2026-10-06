@@ -765,6 +765,21 @@
       "licenseFile": "third_party/licenses/social-auto-upload-MIT-LICENSE",
       "noticeEntry": "THIRD_PARTY_NOTICES.md#social-auto-upload-external-publisher-runtime",
       "reviewedAt": "2026-10-05"
+    },
+    {
+      "name": "dy-cli",
+      "version": "0.2.2+15d5818d3d75edf19b266263539bcd0b7fb46423",
+      "ecosystem": "external-runtime",
+      "usage": "Locally installed, separately maintained MIT-licensed Douyin research runtime used by the DOUYIN market-video provider for user-initiated public video search and selected-video media retrieval. Product Video Studio invokes its CLI as an external process and does not vendor its Python source tree, virtual environment, browser binaries, account cookies, or other runtime state.",
+      "license": "MIT",
+      "sourceUrl": "https://github.com/Youhai020616/douyin/tree/v0.2.2",
+      "bundled": false,
+      "runtimeType": "external-runtime",
+      "approvedForP0": true,
+      "serviceTermsStatus": "LOCAL_EXTERNAL_RUNTIME_NOT_BUNDLED_DOUYIN_PLATFORM_TERMS_APPLY",
+      "licenseFile": "third_party/licenses/dy-cli-MIT-LICENSE",
+      "noticeEntry": "THIRD_PARTY_NOTICES.md#dy-cli-external-research-runtime",
+      "reviewedAt": "2026-10-05"
     }
   ]
 }

@@ -171,6 +171,7 @@ test("reconcile matrix plus poll/download failures preserve durable Attempt sema
       id: `request-${randomUUID()}`,
       projectId,
       clipId,
+      generateAudio: false,
       compiledPromptId: `prompt-${randomUUID()}`,
       compiledPromptHash: hash(`prompt-${label}`),
       requestHash

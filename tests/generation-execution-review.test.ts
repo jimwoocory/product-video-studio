@@ -265,6 +265,7 @@ test("submit unknown -> reconcile -> download -> ACCEPT persists full recovery/r
       id: `request-${randomUUID()}`,
       projectId,
       clipId,
+      generateAudio: false,
       compiledPromptId: `prompt-${randomUUID()}`,
       requestHash: H.d
     };

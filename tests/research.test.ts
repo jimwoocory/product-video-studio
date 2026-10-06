@@ -1,6 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import http from "node:http";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import type {
   BrowserResearchProvider,
   BrowserResearchResult,
@@ -8,6 +11,15 @@ import type {
   WebResearchProvider,
   WebResearchSource
 } from "../src/application/ports/research-provider.js";
+import type {
+  MarketVideoMediaFetcher,
+  MarketVideoSearchProvider,
+  MarketVideoSearchResult
+} from "../src/application/ports/market-video-provider.js";
+import type {
+  ArtifactRepository,
+  PendingArtifactInput
+} from "../src/application/ports/artifact-repository.js";
 import type {
   ResearchBrief,
   ResearchCandidateClaim,
@@ -23,9 +35,15 @@ import type {
 import type { ProductFlowService } from "../src/application/services/product-flow.js";
 import { ResearchService } from "../src/application/services/research-service.js";
 import { HttpWebResearchProvider } from "../src/adapters/research/http-web-research-provider.js";
+import { marketVideoCandidateWithinTimeRange } from "../src/adapters/research/douyin-cli-market-video-provider.js";
 import { confirmProductTruthDraft } from "../src/application/services/review-actions.js";
 import { makeProductTruth } from "./fixtures.js";
-import type { ProductTruth, Project } from "../src/domain/schemas.js";
+import type {
+  ArtifactRecord,
+  ProductTruth,
+  Project,
+  ReferenceVideoProfile
+} from "../src/domain/schemas.js";
 import { hashValue } from "../src/domain/hashing.js";
 
 class MemoryResearchRepository implements ResearchRepository {
@@ -176,6 +194,81 @@ class MemoryResearchRepository implements ResearchRepository {
     return [...this.briefs.values()]
       .filter((item) => item.projectId === projectId)
       .map((item) => structuredClone(item));
+  }
+}
+
+class MemoryArtifactRepository implements ArtifactRepository {
+  readonly rows = new Map<string, ArtifactRecord>();
+
+  async createPending(input: PendingArtifactInput): Promise<ArtifactRecord> {
+    const row: ArtifactRecord = {
+      ...input,
+      integrityStatus: "PENDING",
+      immutable: true,
+      createdAt: new Date().toISOString()
+    };
+    this.rows.set(row.id, row);
+    return structuredClone(row);
+  }
+
+  async markReady(
+    id: string,
+    fields: { sha256: string; sizeBytes: number; mimeType?: string }
+  ): Promise<ArtifactRecord> {
+    const row = this.rows.get(id);
+    if (!row) throw new Error("missing artifact");
+    const next: ArtifactRecord = {
+      ...row,
+      ...fields,
+      integrityStatus: "READY"
+    };
+    this.rows.set(id, next);
+    return structuredClone(next);
+  }
+
+  async markMissing(id: string): Promise<ArtifactRecord> {
+    const row = this.rows.get(id);
+    if (!row) throw new Error("missing artifact");
+    const next: ArtifactRecord = {
+      ...row,
+      integrityStatus: "MISSING"
+    };
+    this.rows.set(id, next);
+    return structuredClone(next);
+  }
+
+  async markCorrupt(id: string): Promise<ArtifactRecord> {
+    const row = this.rows.get(id);
+    if (!row) throw new Error("missing artifact");
+    const next: ArtifactRecord = {
+      ...row,
+      integrityStatus: "CORRUPT"
+    };
+    this.rows.set(id, next);
+    return structuredClone(next);
+  }
+
+  async findById(id: string): Promise<ArtifactRecord | null> {
+    const row = this.rows.get(id);
+    return row ? structuredClone(row) : null;
+  }
+
+  async listByProject(
+    projectId: string,
+    kind?: ArtifactRecord["kind"]
+  ): Promise<ArtifactRecord[]> {
+    return [...this.rows.values()]
+      .filter(
+        (row) =>
+          row.projectId === projectId && (!kind || row.kind === kind)
+      )
+      .map((row) => structuredClone(row));
+  }
+
+  async listPending(): Promise<ArtifactRecord[]> {
+    return [...this.rows.values()]
+      .filter((row) => row.integrityStatus === "PENDING")
+      .map((row) => structuredClone(row));
   }
 }
 
@@ -354,6 +447,43 @@ class StaticBrowserProvider implements BrowserResearchProvider {
   }
 }
 
+class StaticMarketVideoSearchProvider implements MarketVideoSearchProvider {
+  readonly id = "market-video-test";
+  readonly inputs: Array<Parameters<MarketVideoSearchProvider["search"]>[0]> = [];
+  constructor(private readonly result: MarketVideoSearchResult) {}
+  async search(
+    input: Parameters<MarketVideoSearchProvider["search"]>[0]
+  ): Promise<MarketVideoSearchResult> {
+    this.inputs.push(structuredClone(input));
+    return structuredClone(this.result);
+  }
+}
+
+class NeverMarketVideoMediaFetcher implements MarketVideoMediaFetcher {
+  readonly id = "market-video-fetch-never";
+  async fetch(
+    _input: Parameters<MarketVideoMediaFetcher["fetch"]>[0]
+  ): ReturnType<MarketVideoMediaFetcher["fetch"]> {
+    throw new Error("market video fetch should not run in this test");
+  }
+}
+
+class StaticMarketVideoMediaFetcher implements MarketVideoMediaFetcher {
+  readonly id = "market-video-fetch-test";
+  readonly inputs: Array<Parameters<MarketVideoMediaFetcher["fetch"]>[0]> = [];
+  async fetch(
+    input: Parameters<MarketVideoMediaFetcher["fetch"]>[0]
+  ): ReturnType<MarketVideoMediaFetcher["fetch"]> {
+    this.inputs.push(structuredClone(input));
+    return {
+      sourceUrl: input.candidate.url,
+      originalFilename: "douyin-" + input.candidate.videoId + ".mp4",
+      mimeType: "video/mp4",
+      bytes: new Uint8Array([0, 0, 0, 24, 102, 116, 121, 112])
+    };
+  }
+}
+
 class UsageRuleRuntime implements StructuredAiRuntime {
   readonly id = "usage-rule-runtime";
   readonly version = "1";
@@ -475,6 +605,51 @@ test("HttpWebResearchProvider blocks loopback/private addresses by default", asy
   );
 });
 
+test("Douyin market-video time filter is enforced locally even when upstream returns old videos", () => {
+  const now = Date.parse("2026-10-05T00:00:00.000Z");
+  const base = {
+    id: "7600000000000000000",
+    platform: "DOUYIN" as const,
+    videoId: "7600000000000000000",
+    url: "https://www.douyin.com/video/7600000000000000000",
+    title: "fixture",
+    query: "护颈枕",
+    rank: 1,
+    metrics: { likes: 100 },
+    metricsAvailability: "PLATFORM_PUBLIC" as const,
+    sourceProvider: "fixture",
+    status: "DISCOVERED" as const
+  };
+  assert.equal(
+    marketVideoCandidateWithinTimeRange(
+      { ...base, publishedAt: "2026-07-16T00:00:00.000Z" },
+      "HALF_YEAR",
+      now
+    ),
+    true
+  );
+  assert.equal(
+    marketVideoCandidateWithinTimeRange(
+      { ...base, publishedAt: "2025-10-26T00:00:00.000Z" },
+      "HALF_YEAR",
+      now
+    ),
+    false
+  );
+  assert.equal(
+    marketVideoCandidateWithinTimeRange(
+      { ...base, publishedAt: "2023-07-30T00:00:00.000Z" },
+      "ANY",
+      now
+    ),
+    true
+  );
+  assert.equal(
+    marketVideoCandidateWithinTimeRange(base, "WEEK", now),
+    false
+  );
+});
+
 test("basic Research persists Evidence, produces a sourced ResearchBrief, and records actual AI model metadata", async () => {
   const projectId = "research-basic";
   const repo = new MemoryResearchRepository();
@@ -563,6 +738,224 @@ test("ResearchBrief generation fails closed when AI cites a nonexistent Evidence
     /不存在的 Evidence/
   );
   assert.equal(repo.briefs.size, 0);
+});
+
+test("deep Research preserves Douyin market-video candidates when current-product evidence is zero", async () => {
+  const projectId = "research-market-video";
+  const repo = new MemoryResearchRepository();
+  const { flow } = makeProductFlow(projectId, {
+    truthPatch: {
+      productName: "康瑶堂护颈枕",
+      brand: "康瑶堂",
+      category: "瑶药护颈枕"
+    }
+  });
+  const browser = new StaticBrowserProvider({
+    status: "READY",
+    sources: [],
+    browserState: { provider: "browser-test" }
+  });
+  const market = new StaticMarketVideoSearchProvider({
+    status: "READY",
+    provider: "market-video-test",
+    searchedQueries: ["瑶药护颈枕"],
+    checkedAt: "2026-10-05T08:00:00.000Z",
+    candidates: [
+      {
+        id: "7599999999999999999",
+        platform: "DOUYIN",
+        videoId: "7599999999999999999",
+        url: "https://www.douyin.com/video/7599999999999999999",
+        title: "护颈枕使用场景演示",
+        authorName: "测试作者",
+        publishedAt: "2026-10-01T00:00:00.000Z",
+        query: "瑶药护颈枕",
+        rank: 1,
+        metrics: {
+          likes: 120000,
+          comments: 3200,
+          shares: 800
+        },
+        metricsAvailability: "PLATFORM_PUBLIC",
+        sourceProvider: "market-video-test",
+        status: "DISCOVERED"
+      }
+    ]
+  });
+  const service = new ResearchService(
+    repo,
+    new MemoryWebResearchProvider(),
+    browser,
+    new RerankAwareRuntime(),
+    flow,
+    undefined,
+    {
+      searchProvider: market,
+      mediaFetcher: new NeverMarketVideoMediaFetcher(),
+      artifacts: {} as never,
+      referenceVideo: {} as never,
+      projectsRoot: "."
+    }
+  );
+
+  const result = await service.startRun({
+    projectId,
+    mode: "DEEP",
+    goal: "核实产品事实，并研究同类爆款视频结构",
+    sourceUrls: [],
+    queries: [],
+    marketVideo: {
+      enabled: true,
+      sort: "MOST_LIKED",
+      timeRange: "ANY",
+      count: 12
+    }
+  });
+
+  assert.equal(result.evidence.length, 0);
+  assert.equal(result.run.status, "FAILED");
+  assert.equal(
+    result.run.browserState?.marketVideoResearch?.status,
+    "READY"
+  );
+  assert.equal(
+    result.run.browserState?.marketVideoResearch?.candidates[0]?.videoId,
+    "7599999999999999999"
+  );
+  assert.equal(market.inputs.length, 1);
+  assert.equal(market.inputs[0]?.sort, "MOST_LIKED");
+  assert.equal(market.inputs[0]?.timeRange, "ANY");
+  assert.equal(
+    market.inputs[0]?.queries.some((query) => query.includes("护颈枕")),
+    true
+  );
+});
+
+test("selected market video is fetched only on explicit analysis and reuses ReferenceVideoProfile flow", async () => {
+  const projectId = "research-market-video-analysis";
+  const runId = "research-market-video-run";
+  const candidateId = "7599999999999999998";
+  const repo = new MemoryResearchRepository();
+  await repo.createRun({
+    id: runId,
+    projectId,
+    mode: "DEEP",
+    status: "FAILED",
+    goal: "研究同类爆款视频",
+    sourceUrls: [],
+    queries: ["护颈枕"],
+    browserState: {
+      provider: "browser-test",
+      lastCheckedAt: "2026-10-05T08:00:00.000Z",
+      marketVideoResearch: {
+        status: "READY",
+        provider: "market-video-test",
+        sort: "MOST_LIKED",
+        timeRange: "ANY",
+        searchedQueries: ["护颈枕"],
+        checkedAt: "2026-10-05T08:00:00.000Z",
+        candidates: [
+          {
+            id: candidateId,
+            platform: "DOUYIN",
+            videoId: candidateId,
+            url: "https://www.douyin.com/video/" + candidateId,
+            title: "待拆解高赞视频",
+            query: "护颈枕",
+            rank: 1,
+            metrics: { likes: 88000 },
+            metricsAvailability: "PLATFORM_PUBLIC",
+            sourceProvider: "market-video-test",
+            status: "DISCOVERED"
+          }
+        ]
+      }
+    },
+    createdAt: "2026-10-05T08:00:00.000Z",
+    updatedAt: "2026-10-05T08:00:00.000Z"
+  });
+  const artifactRepo = new MemoryArtifactRepository();
+  const mediaFetcher = new StaticMarketVideoMediaFetcher();
+  const referenceCalls: Array<{
+    projectId: string;
+    artifactId: string;
+    originalFilename?: string;
+    sourceUrl?: string;
+  }> = [];
+  const referenceVideo = {
+    async analyzeUpload(input: {
+      projectId: string;
+      artifactId: string;
+      originalFilename?: string;
+      sourceUrl?: string;
+    }): Promise<ReferenceVideoProfile> {
+      referenceCalls.push(structuredClone(input));
+      return {
+        id: "market-reference-profile",
+        projectId,
+        version: 7
+      } as ReferenceVideoProfile;
+    }
+  };
+  const temp = await fs.mkdtemp(path.join(os.tmpdir(), "pvs-market-video-"));
+  try {
+    const { flow } = makeProductFlow(projectId);
+    const service = new ResearchService(
+      repo,
+      new MemoryWebResearchProvider(),
+      new StaticBrowserProvider({
+        status: "READY",
+        sources: [],
+        browserState: { provider: "browser-test" }
+      }),
+      new RerankAwareRuntime(),
+      flow,
+      undefined,
+      {
+        searchProvider: new StaticMarketVideoSearchProvider({
+          status: "READY",
+          provider: "market-video-test",
+          searchedQueries: [],
+          checkedAt: "2026-10-05T08:00:00.000Z",
+          candidates: []
+        }),
+        mediaFetcher,
+        artifacts: artifactRepo,
+        referenceVideo: referenceVideo as never,
+        projectsRoot: temp
+      }
+    );
+
+    assert.equal(mediaFetcher.inputs.length, 0);
+    const result = await service.analyzeMarketVideo({
+      projectId,
+      runId,
+      candidateId
+    });
+
+    assert.equal(mediaFetcher.inputs.length, 1);
+    assert.equal(referenceCalls.length, 1);
+    assert.equal(
+      referenceCalls[0]?.sourceUrl,
+      "https://www.douyin.com/video/" + candidateId
+    );
+    assert.equal(result.profile.id, "market-reference-profile");
+    const updated = await repo.findRun(runId);
+    const candidate =
+      updated?.browserState?.marketVideoResearch?.candidates[0];
+    assert.equal(candidate?.status, "ANALYZED");
+    assert.equal(
+      candidate?.referenceVideoProfileId,
+      "market-reference-profile"
+    );
+    assert.equal(candidate?.referenceVideoProfileVersion, 7);
+    assert.equal(
+      artifactRepo.rows.get(candidate?.fetchedArtifactId ?? "")?.integrityStatus,
+      "READY"
+    );
+  } finally {
+    await fs.rm(temp, { recursive: true, force: true });
+  }
 });
 
 test("deep Research persists Human Takeover blocker instead of pretending to keep processing, then resumes", async () => {

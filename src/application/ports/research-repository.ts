@@ -1,4 +1,5 @@
 import type { StructuredAiExecutionMetadata } from "./structured-ai-runtime.js";
+import type { MarketVideoCandidate, MarketVideoSort, MarketVideoTimeRange } from "./market-video-provider.js";
 
 export type ResearchMode = "OFF" | "BASIC" | "DEEP";
 export type ResearchRunStatus =
@@ -135,6 +136,19 @@ export type ResearchBrowserState = {
       fetchOutcome?: "EVIDENCE" | "REJECTED" | "FAILED";
     }>;
   }>;
+  marketVideoResearch?: {
+    status: "READY" | "BLOCKED";
+    provider: string;
+    sort: MarketVideoSort;
+    timeRange: MarketVideoTimeRange;
+    searchedQueries: string[];
+    checkedAt: string;
+    candidates: MarketVideoCandidate[];
+    blockerCode?: "LOGIN_REQUIRED" | "PROVIDER_NOT_AVAILABLE" | "RISK_CONTROL" | "PROVIDER_ERROR";
+    message?: string;
+    requiredUserAction?: string;
+    note?: string;
+  };
 };
 
 export type ResearchRun = {

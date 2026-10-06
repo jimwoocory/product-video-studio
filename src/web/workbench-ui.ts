@@ -571,6 +571,10 @@ export function renderResearchPage(input: {
       .map((item) => item.url)
       .join("\n") ?? "";
   const queryText = latestRun?.queries.join("\n") ?? "";
+  const marketVideoResearch = latestRun?.browserState?.marketVideoResearch;
+  const hasMarketVideoCandidates =
+    marketVideoResearch?.status === "READY" &&
+    marketVideoResearch.candidates.length > 0;
   const blockerHtml =
     latestRun?.status === "BLOCKED"
       ? `<section class="blocker">
@@ -582,12 +586,18 @@ export function renderResearchPage(input: {
           <p class="technical">code=${esc(latestRun.blockerCode ?? "UNKNOWN")}${latestRun.browserState ? " · provider="+esc(latestRun.browserState.provider) : ""}</p>
         </section>`
       : latestRun?.status === "FAILED"
-        ? `<section class="blocker">
-            <h3>研究失败</h3>
-            <p>${esc(latestRun.blockerMessage ?? "没有获取到可用研究证据。")}</p>
-            <p><b>下一步：</b>${esc(latestRun.requiredUserAction ?? "检查来源后重新运行。")}</p>
-            <p class="technical">code=${esc(latestRun.blockerCode ?? "UNKNOWN")}</p>
-          </section>`
+        ? hasMarketVideoCandidates
+          ? `<section class="card">
+              <h3>当前产品公开证据暂未找到</h3>
+              <p>产品事实研究本轮没有形成可确认的证据，但抖音竞品 / 爆款视频研究已经独立取得候选，可以继续做视频拆解并作为创意结构参考。</p>
+              <p class="muted">竞品视频不会进入当前产品事实，也不会替代产品身份校验。</p>
+            </section>`
+          : `<section class="blocker">
+              <h3>研究失败</h3>
+              <p>${esc(latestRun.blockerMessage ?? "没有获取到可用研究证据。")}</p>
+              <p><b>下一步：</b>${esc(latestRun.requiredUserAction ?? "检查来源后重新运行。")}</p>
+              <p class="technical">code=${esc(latestRun.blockerCode ?? "UNKNOWN")}</p>
+            </section>`
       : "";
 
   const discoveryRounds = latestRun?.browserState?.discoveryRounds ?? [];
@@ -657,6 +667,45 @@ export function renderResearchPage(input: {
       ).join("") +
       '</details></section>'
     : "";
+
+  const formatMarketMetric = (value?: number): string => {
+    if (value === undefined) return "—";
+    if (value >= 10000) return (value / 10000).toFixed(1) + "万";
+    return String(value);
+  };
+  const marketVideoHtml = marketVideoResearch
+    ? marketVideoResearch.status === "BLOCKED"
+      ? `<section class="card">
+          <div class="head"><div><h3>抖音爆款 / 竞品视频</h3><p class="muted">与产品事实研究独立运行，只用于学习结构、节奏、镜头、卖点组织和 CTA，不会写入 Product Truth。</p></div><span class="status">需要处理</span></div>
+          <div class="blocker">
+            <p><b>${esc(marketVideoResearch.message ?? "抖音视频搜索暂时不可用。")}</b></p>
+            <p>下一步：${esc(marketVideoResearch.requiredUserAction ?? "检查抖音搜索运行时后重新运行深度研究。")}</p>
+          </div>
+          <p class="muted">本轮搜索词：${esc(marketVideoResearch.searchedQueries.join(" / ") || "未生成")}</p>
+          <p class="technical">provider=${esc(marketVideoResearch.provider)} · code=${esc(marketVideoResearch.blockerCode ?? "UNKNOWN")}</p>
+        </section>`
+      : `<section class="card">
+          <div class="head"><div><h3>抖音爆款 / 竞品视频</h3><p class="muted">这条链与当前产品证据独立：优先发现高点赞同类视频，只有你点击“拆解为创作参考”后才会获取素材并生成 ReferenceVideoProfile。</p></div><span class="status">${marketVideoResearch.candidates.length} 条候选</span></div>
+          <p class="muted">搜索词：${esc(marketVideoResearch.searchedQueries.join(" / ") || "未生成")} · ${marketVideoResearch.sort === "MOST_LIKED" ? "高点赞优先" : marketVideoResearch.sort === "LATEST" ? "最新优先" : "综合相关"} · ${marketVideoResearch.timeRange === "DAY" ? "一天内" : marketVideoResearch.timeRange === "WEEK" ? "一周内" : marketVideoResearch.timeRange === "HALF_YEAR" ? "半年内" : "时间不限"}</p>
+          ${marketVideoResearch.note ? `<p class="muted">${esc(marketVideoResearch.note)}</p>` : ""}
+          ${marketVideoResearch.candidates.length
+            ? `<div class="grid">${marketVideoResearch.candidates.map((candidate) => `<article class="card">
+                <div class="head"><div><h4>${esc(candidate.title)}</h4><p class="muted">${candidate.authorName ? esc(candidate.authorName) : "作者未提供"}${candidate.publishedAt ? " · " + esc(candidate.publishedAt.slice(0, 10)) : ""}</p></div><span class="status">${candidate.status === "ANALYZED" ? "已拆解" : candidate.status === "FAILED" ? "拆解失败" : "待选择"}</span></div>
+                <p><b>点赞 ${formatMarketMetric(candidate.metrics.likes)}</b> · 评论 ${formatMarketMetric(candidate.metrics.comments)} · 分享 ${formatMarketMetric(candidate.metrics.shares)} · 播放 ${formatMarketMetric(candidate.metrics.plays)}</p>
+                <p class="muted">命中词：${esc(candidate.query)} · 搜索排名：${candidate.rank}</p>
+                ${candidate.analysisError ? `<p class="danger">${esc(candidate.analysisError)}</p>` : ""}
+                <p><a class="secondary" href="${esc(candidate.url)}" target="_blank" rel="noopener noreferrer">打开抖音原视频</a>
+                ${candidate.status === "ANALYZED"
+                  ? ` <a class="secondary" href="/projects/${encodeURIComponent(workspace.project.id)}/reference-video">查看拆解结果 v${candidate.referenceVideoProfileVersion ?? ""}</a>`
+                  : ` <button class="primary" type="button" data-market-video-analyze data-run="${esc(latestRun?.id ?? "")}" data-candidate="${esc(candidate.id)}">拆解为创作参考</button>`}</p>
+                <div class="danger" data-market-video-error="${esc(candidate.id)}"></div>
+                <p class="technical">video=${esc(candidate.videoId)} · provider=${esc(candidate.sourceProvider)}</p>
+              </article>`).join("")}</div>`
+            : '<p>本轮没有发现可用的抖音竞品视频候选。可以调整品类关键词、时间范围后重新研究。</p>'}
+        </section>`
+    : mode === "DEEP"
+      ? `<section class="card"><h3>抖音爆款 / 竞品视频</h3><p>本轮还没有抖音视频研究结果。</p><p class="muted">该能力与产品事实搜索独立，不会因为当前产品公开证据不足而停止竞品视频研究。</p></section>`
+      : "";
 
   const evidenceHtml = evidence.length
     ? evidence
@@ -776,6 +825,28 @@ export function renderResearchPage(input: {
           <textarea name="queries" placeholder="只在深度模式使用；例如：Tonemay Q8 耳夹式蓝牙耳机">${esc(queryText)}</textarea>
           <span class="muted">需要登录、验证码或平台风控时，系统会明确暂停并要求人工接管，不会假装仍在处理中。</span>
         </label>
+        <section class="card">
+          <h4>抖音爆款 / 竞品视频研究</h4>
+          <p class="muted">深度研究时独立搜索同类公开视频。默认高点赞优先；这条链只用于创作结构参考，不会把竞品卖点写入当前产品事实。</p>
+          <div class="row">
+            <label class="field"><span><input type="checkbox" name="marketVideoEnabled" checked> 同时搜索抖音竞品视频</span></label>
+            <label class="field">排序
+              <select name="marketVideoSort">
+                <option value="MOST_LIKED" ${marketVideoResearch?.sort==="MOST_LIKED" || !marketVideoResearch ? "selected" : ""}>高点赞优先</option>
+                <option value="LATEST" ${marketVideoResearch?.sort==="LATEST" ? "selected" : ""}>最新发布</option>
+                <option value="RELEVANCE" ${marketVideoResearch?.sort==="RELEVANCE" ? "selected" : ""}>综合相关</option>
+              </select>
+            </label>
+            <label class="field">发布时间
+              <select name="marketVideoTimeRange">
+                <option value="ANY" ${marketVideoResearch?.timeRange==="ANY" || !marketVideoResearch ? "selected" : ""}>不限</option>
+                <option value="DAY" ${marketVideoResearch?.timeRange==="DAY" ? "selected" : ""}>一天内</option>
+                <option value="WEEK" ${marketVideoResearch?.timeRange==="WEEK" ? "selected" : ""}>一周内</option>
+                <option value="HALF_YEAR" ${marketVideoResearch?.timeRange==="HALF_YEAR" ? "selected" : ""}>半年内</option>
+              </select>
+            </label>
+          </div>
+        </section>
         <p><button class="primary" type="submit">开始研究</button></p>
         <div id="research-progress" class="muted"></div>
         <div id="research-error" class="danger"></div>
@@ -783,6 +854,7 @@ export function renderResearchPage(input: {
     </section>
     ${blockerHtml}
     ${discoveryQualityHtml}
+    ${marketVideoHtml}
     <section><h2>研究证据</h2><div class="grid">${evidenceHtml}</div></section>
     ${briefHtml}
     ${historyHtml}
@@ -803,7 +875,13 @@ document.querySelector('#research-form')?.addEventListener('submit',async(e)=>{
   error.textContent=''; progress.textContent='正在获取来源并生成带证据的研究报告…';
   try{
     await researchPost('/api/projects/${workspace.project.id}/research/run',{
-      mode:f.get('mode'),goal:f.get('goal'),sourceUrls:sources,queries:researchLines(f.get('queries'))
+      mode:f.get('mode'),goal:f.get('goal'),sourceUrls:sources,queries:researchLines(f.get('queries')),
+      marketVideo:{
+        enabled:f.get('marketVideoEnabled')==='on',
+        sort:f.get('marketVideoSort'),
+        timeRange:f.get('marketVideoTimeRange'),
+        count:12
+      }
     });
     location.reload();
   }catch(err){error.textContent=err.message||String(err);progress.textContent='';}
@@ -813,6 +891,18 @@ document.querySelector('#research-resume')?.addEventListener('click',async(e)=>{
   try{await researchPost('/api/projects/${workspace.project.id}/research/runs/'+encodeURIComponent(button.dataset.run)+'/resume',{});location.reload();}
   catch(err){error.textContent=err.message||String(err);button.disabled=false;}
 });
+document.querySelectorAll('[data-market-video-analyze]').forEach(button=>button.addEventListener('click',async()=>{
+  const run=button.dataset.run,candidate=button.dataset.candidate;
+  const error=document.querySelector('[data-market-video-error="'+CSS.escape(candidate||'')+'"]');
+  button.disabled=true;if(error)error.textContent='';button.textContent='正在获取并拆解…';
+  try{
+    await researchPost('/api/projects/${workspace.project.id}/research/runs/'+encodeURIComponent(run)+'/market-videos/'+encodeURIComponent(candidate)+'/analyze',{});
+    location.reload();
+  }catch(err){
+    if(error)error.textContent=err.message||String(err);
+    button.disabled=false;button.textContent='重新拆解';
+  }
+}));
 document.querySelector('#research-claims-form')?.addEventListener('submit',async(e)=>{
   e.preventDefault(); const f=new FormData(e.currentTarget),error=document.querySelector('#research-claims-error');
   const claimIds=f.getAll('claimId').map(String);
@@ -1129,7 +1219,7 @@ export function renderAgentProjectPage(input: {
             : "";
         return `<section class="card agent-task" data-task-id="${esc(task.id)}" data-polling="${polling ? "1" : "0"}">
           <div class="head"><div><h3>${esc(task.requestText)}</h3><p class="muted">${esc(task.createdAt)}</p></div><span class="status">${esc(agentTaskStatusLabel[task.status])}</span></div>
-          <p>生成能力：<b>Dreamina 官方能力</b> · 方式：${esc(plan?.operationLabel ?? task.requestedMethod)} · 模型：${esc(plan?.model ?? task.model)} · ${task.durationMs / 1000}s · ${esc(task.aspectRatio)} · ${esc(task.videoResolution)} · 原生声音：${task.nativeAudioOutputRequested ? "请求" : "关闭"}</p>
+          <p>生成能力：<b>Dreamina / Seedance</b> · 方式：${esc(plan?.operationLabel ?? task.requestedMethod)} · 模型：${esc(plan?.model ?? task.model)} · ${task.durationMs / 1000}s · ${esc(task.aspectRatio)} · ${esc(task.videoResolution)} · 原生声音：${task.nativeAudioOutputRequested ? "请求" : "关闭"}</p>
           ${plan ? `<p class="muted">${esc(plan.reason)}</p>` : ""}
           ${missing.length
             ? `<div class="blocker"><b>还不能提交生成</b>${missing.map((item) => `<p>${esc(item)}</p>`).join("")}<p><button class="secondary agent-recheck" data-task="${esc(task.id)}">重新检查生成能力 / 命令 / 登录状态</button></p></div>`
@@ -1184,8 +1274,8 @@ export function renderAgentProjectPage(input: {
         </div>
         <section class="card">
           <h4>声音</h4>
-          <label><input type="checkbox" id="agent-native-audio"> 让模型原生输出声音</label>
-          <p id="agent-native-audio-help" class="muted">正在检查当前 CLI 是否暴露原生声音输出能力…</p>
+          <label><input type="checkbox" id="agent-native-audio" checked> 让模型原生输出声音</label>
+          <p id="agent-native-audio-help" class="muted">正在检查当前 Seedance 生成方式是否能稳定返回音轨…</p>
           <p class="muted"><b>参考音频输入</b>与“模型原生输出声音”是两回事：需要参考音频时，请在下方参考素材中上传音频；BGM / 旁白 / 音效仍可在后期剪辑阶段补齐。</p>
         </section>
         <section class="card">
@@ -1332,14 +1422,14 @@ function refreshAgentGenerationControls(){
   const maxs=modelCaps.map(item=>item.durationMaxSeconds).filter(value=>Number.isFinite(value));
   agentDurationInput.min=String(mins.length?Math.min(...mins):2);
   agentDurationInput.max=String(maxs.length?Math.max(...maxs):120);
-  const nativeSupported=candidateOps.length
-    ? candidateOps.every(item=>item.supportsNativeAudioOutput===true)
-    : false;
+  const nativeSupported=operation
+    ? operation.supportsNativeAudioOutput===true
+    : agentCapabilityRegistry.nativeAudioOutputSupported===true;
   agentNativeAudio.disabled=!nativeSupported;
   if(!nativeSupported)agentNativeAudio.checked=false;
   agentNativeAudioHelp.textContent=nativeSupported
-    ? '当前命令 help 已暴露原生声音输出能力；勾选后 GenerationProfile 会记录并传递真实声音参数。'
-    : '当前 CLI help 未暴露原生声音输出开关；不会把参考音频 --audio 误当成“生成声音”。旁白 / BGM / 音效请在后期轨道补齐。';
+    ? 'Seedance 当前链路会直接生成原生音轨；程序下载结果后还会检查音轨是否真实存在。'
+    : '当前生成方式不能保证返回原生音轨；如需声音，请使用文生视频或全能参考。';
   agentCreateSubmit.disabled=!agentModelSelect.value||!agentResolutionSelect.value;
 }
 async function loadAgentCapabilityRegistry(){
@@ -2402,7 +2492,7 @@ function renderGenerate(
     aspectRatio: directorTarget?.aspectRatio ?? latestProfile?.aspectRatio ?? "AUTO",
     videoResolution: directorTarget?.videoResolution ?? latestProfile?.videoResolution ?? "720p",
     nativeAudioOutputRequested:
-      directorTarget?.nativeAudioOutputRequested ?? latestProfile?.nativeAudioOutputRequested ?? false
+      directorTarget?.nativeAudioOutputRequested ?? latestProfile?.nativeAudioOutputRequested ?? true
   };
   const clipHashById = new Map(
     currentClips.map((clip) => [clip.id, clip.contentHash] as const)
@@ -2774,7 +2864,7 @@ const standardNativeAudio=document.querySelector('#standard-native-audio');
 const standardNativeAudioHelp=document.querySelector('#standard-native-audio-help');
 const standardCapabilityStatus=document.querySelector('#standard-capability-status');
 let standardRegistry=null;
-let standardState={requiredOperations:[],model:'AUTO',aspectRatio:'AUTO',videoResolution:'720p',nativeAudioOutputRequested:false};
+let standardState={requiredOperations:[],model:'AUTO',aspectRatio:'AUTO',videoResolution:'720p',nativeAudioOutputRequested:true};
 try{standardState=JSON.parse(standardConfig?.dataset.state||JSON.stringify(standardState));}catch{}
 const standardUniq=values=>[...new Set(values.filter(Boolean))];
 const standardIntersection=arrays=>arrays.length?arrays.reduce((acc,next)=>acc.filter(value=>next.includes(value))):[];
@@ -2814,7 +2904,7 @@ function refreshStandardGenerationControls(){
   const nativeSupported=ops.every(op=>op.supportsNativeAudioOutput===true);
   standardNativeAudio.disabled=!nativeSupported;
   standardNativeAudio.checked=nativeSupported&&Boolean(standardState.nativeAudioOutputRequested);
-  standardNativeAudioHelp.textContent=nativeSupported?'当前所需命令都支持模型原生声音输出；勾选后会绑定进 GenerationProfile。':'当前计划所需命令未全部暴露原生声音输出开关；参考音频输入不等于生成声音，旁白 / BGM / 音效请由后期轨道补齐。';
+  standardNativeAudioHelp.textContent=nativeSupported?'Seedance 当前链路会直接生成原生音轨；下载后程序会再次检查音轨是否真实存在。':'当前计划包含不能保证音轨的生成方式；请返回导演分镜重新适配。';
   const pfButton=document.querySelector('#run-preflight');
   if(pfButton)pfButton.disabled=!modelItems.length||!resolutionIntersection.length||pfButton.dataset.planConfirmed==='0';
   standardCapabilityStatus.textContent='当前计划命令：'+ops.map(op=>op.operationLabel).join(' / ')+' · 共同模型：'+(explicitModels.join(' / ')||'无')+' · 能力来源：官方 SKILL.md + 当前 dreamina --help · '+standardRegistry.checkedAt;

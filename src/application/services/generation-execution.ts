@@ -20,6 +20,7 @@ import {
 } from "../../domain/schemas.js";
 import { DomainValidationError } from "../../domain/validation.js";
 import { LocalArtifactStore } from "../../adapters/store/local-artifact-store.js";
+import { inspectMedia } from "../../adapters/media/inspect-media.js";
 import { sha256Bytes } from "../../domain/hashing.js";
 import { withSerialOperation } from "./serial-operation.js";
 import { assertAttemptBinding } from "./submission-service.js";
@@ -38,7 +39,8 @@ export class GenerationExecutionService {
     private readonly provider: VideoProvider,
     private readonly projectsRoot: string,
     private readonly review?: Pick<ReviewRepository, "listDecisions">,
-    private readonly references?: CreativeReferenceGuard
+    private readonly references?: CreativeReferenceGuard,
+    private readonly inspectOutputMedia: typeof inspectMedia = inspectMedia
   ) {}
 
   private async requireAttempt(id: string): Promise<GenerationAttempt> {
@@ -626,6 +628,14 @@ export class GenerationExecutionService {
     if (!attempt.providerHandle) {
       throw new DomainValidationError("Attempt has no provider handle");
     }
+    const request = await this.generation.getGenerationRequest(
+      attempt.generationRequestId
+    );
+    if (!request) {
+      throw new DomainValidationError(
+        "Attempt has no GenerationRequest"
+      );
+    }
 
     const command = await this.beginCommand(attempt, "DOWNLOAD");
     const projectRoot = path.join(this.projectsRoot, attempt.projectId);
@@ -644,6 +654,24 @@ export class GenerationExecutionService {
         command,
         "DOWNLOAD"
       );
+      if (
+        request.generateAudio &&
+        !(await this.inspectOutputMedia(downloaded.path)).hasAudio
+      ) {
+        await this.finishCommand(attempt.id, command, {
+          ...evidence,
+          completedAt: new Date().toISOString(),
+          exitCode: evidence.exitCode ?? 1,
+          errorCode: "OUTPUT_AUDIO_MISSING"
+        });
+        return this.workflow.updateGenerationAttemptStatus(attempt.id, {
+          status: "FAILED",
+          completedAt: new Date().toISOString(),
+          errorCode: "OUTPUT_AUDIO_MISSING",
+          errorMessage:
+            "已要求模型原生声音，但下载的视频没有音轨；该结果不会进入审片或剪辑。"
+        });
+      }
       const bytes = await fs.readFile(downloaded.path);
       const artifact = await new LocalArtifactStore(
         projectRoot,

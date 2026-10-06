@@ -221,9 +221,24 @@ function explicitRatioAllowedForModel(
   return true;
 }
 
-function supportsNativeAudioOutput(help: string): boolean {
-  return /--(?:generate[_-]?audio|audio[_-]?output|with[_-]?audio|sound[_-]?output)\b/i.test(
-    help
+function supportsNativeAudioOutput(
+  operation: DreaminaVideoOperation,
+  help: string
+): boolean {
+  if (
+    /--(?:generate[_-]?audio|audio[_-]?output|with[_-]?audio|sound[_-]?output)\b/i.test(
+      help
+    )
+  ) {
+    return true;
+  }
+  // Current Dreamina Seedance text/all-around-reference outputs already carry
+  // model-native audio without a separate CLI switch. Local production
+  // artifacts confirm AAC audio on both commands. Multi-frame fixed-model
+  // output is excluded because existing outputs are silent.
+  return (
+    operation === "text2video" ||
+    operation === "multimodal2video"
   );
 }
 
@@ -476,7 +491,10 @@ export class DreaminaAgentCapabilityService {
           helpText.includes("--image") || helpText.includes("--images"),
         supportsVideos: helpText.includes("--video"),
         supportsReferenceAudio: helpText.includes("--audio"),
-        supportsNativeAudioOutput: supportsNativeAudioOutput(helpText),
+        supportsNativeAudioOutput: supportsNativeAudioOutput(
+          operation,
+          helpText
+        ),
         ...(operation === "multiframe2video"
           ? { minImages: 2, maxImages: 20 }
           : {}),
@@ -832,7 +850,7 @@ export function resolveGenerationProfile(
     throw new DomainValidationError(
       "当前 Dreamina " +
         operation.operationLabel +
-        " help 未暴露原生声音输出开关；请使用后期旁白/BGM/音效"
+        " 不能保证返回原生音轨；请选择文生视频/全能参考，或关闭原生声音要求"
     );
   }
 

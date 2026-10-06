@@ -119,7 +119,7 @@ test("director refuses unknown duration capabilities, unsupported native audio, 
   const settings = { requestedModelVersion: c.target.requestedModelVersion, aspectRatio: "16:9", videoResolution: "720p", nativeAudioOutputRequested: false };
   assert.throws(() => resolveDirectorGenerationTarget(c.registry, { ...settings, requestedModelVersion: "AUTO" }), /明确选择/);
   assert.throws(() => resolveDirectorGenerationTarget(c.registry, { ...settings, requestedModelVersion: "missing-model" }), /无法验证/);
-  assert.throws(() => resolveDirectorGenerationTarget(c.registry, { ...settings, nativeAudioOutputRequested: true }), /声音输出/);
+  assert.throws(() => resolveDirectorGenerationTarget(c.registry, { ...settings, nativeAudioOutputRequested: true }), /原生音轨|声音输出/);
   delete c.registry.operations[0]!.models[0]!.durationMaxSeconds;
   assert.throws(() => resolveDirectorGenerationTarget(c.registry, settings), /无法验证/);
 });

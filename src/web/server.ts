@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { ZodError } from "zod";
-import { DomesticJimengCliProvider } from "../adapters/video/domestic-jimeng-cli-provider.js";
+import { DomesticJimengCliProvider, type ResolveGenerationAssets } from "../adapters/video/domestic-jimeng-cli-provider.js";
 import { createConfiguredDomesticJimengProvider } from "../adapters/video/verified-dreamina-runtime-loader.js";
 import { blockerFromProviderProbe } from "../application/services/provider-blocker.js";
 import { PrismaProductFlowRepository } from "../adapters/db/prisma-product-flow-repository.js";
@@ -39,6 +39,7 @@ import { HttpWebResearchProvider } from "../adapters/research/http-web-research-
 import { ExternalBrowserResearchProvider } from "../adapters/research/external-browser-research-provider.js";
 import { HybridBrowserResearchProvider } from "../adapters/research/public-search-research-provider.js";
 import { DefaultResearchMediaAnalyzer } from "../adapters/research/research-media-analyzer.js";
+import { DouyinCliMarketVideoMediaFetcher, DouyinCliMarketVideoSearchProvider } from "../adapters/research/douyin-cli-market-video-provider.js";
 import { ProductFlowService } from "../application/services/product-flow.js";
 import { loadGenerationConfig } from "../application/config/generation-config.js";
 import { AiGenerationService } from "../application/services/ai-generation.js";
@@ -197,72 +198,73 @@ export function createDefaultDependencies(): WebDependencies {
   );
   const projectsRoot = path.resolve(process.env.PROJECTS_ROOT ?? "projects");
   const productInput = new LocalProductInputStore(projectsRoot, artifacts);
-  const provider = createConfiguredDomesticJimengProvider({
-    resolveGenerationAssets: async (request) => {
-      const snapshot = await productInput.latest(request.projectId);
-      const referenceSet=request.agentTaskId?null:await creativeReferences.assertExpected(request.projectId,request.inputVersionRefs.find(r=>r.entityType==="CreativeReferenceSet"));
-      const availableAssets=[...(snapshot?.assets??[]),...CreativeReferenceService.assets(referenceSet)];
-      const projectRoot = path.resolve(projectsRoot, request.projectId);
-      const resolved = [];
-      for (const manifest of [...request.assetManifest].sort(
-        (a, b) =>
-          a.priority - b.priority ||
-          a.assetId.localeCompare(b.assetId)
-      )) {
-        const asset = availableAssets.find(
-          (item) => item.id === manifest.assetId
-        );
-        const artifact = asset
-          ? await artifacts.findById(asset.artifactId)
-          : await artifacts.findById(manifest.assetId);
-        if (!artifact && !manifest.required) {
-          continue;
-        }
-        if (
-          !artifact ||
-          artifact.projectId !== request.projectId ||
-          artifact.integrityStatus !== "READY" ||
-          !artifact.sha256 ||
-          (asset ? artifact.sha256 !== asset.sha256 : false) ||
-          artifact.sha256 !== manifest.artifactHash
-        ) {
-          throw new DomainValidationError(
-            `dreamina asset integrity mismatch: ${manifest.assetId}`
-          );
-        }
-        const absolutePath = path.resolve(
-          projectRoot,
-          artifact.relativePath
-        );
-        const prefix = projectRoot.endsWith(path.sep)
-          ? projectRoot
-          : projectRoot + path.sep;
-        if (
-          absolutePath !== projectRoot &&
-          !absolutePath.startsWith(prefix)
-        ) {
-          throw new DomainValidationError(
-            `dreamina asset path escapes project root: ${manifest.assetId}`
-          );
-        }
-        const bytes = await fs.readFile(absolutePath);
-        if (sha256Bytes(bytes) !== manifest.artifactHash) {
-          throw new DomainValidationError(
-            `dreamina asset bytes changed after approval: ${manifest.assetId}`
-          );
-        }
-        resolved.push({
-          assetId: manifest.assetId,
-          absolutePath,
-          artifactHash: manifest.artifactHash,
-          role: manifest.role,
-          priority: manifest.priority,
-          required: manifest.required,
-          ...(manifest.inputType ? { inputType: manifest.inputType } : {})
-        });
+  const resolveGenerationAssets: ResolveGenerationAssets = async (request) => {
+    const snapshot = await productInput.latest(request.projectId);
+    const referenceSet=request.agentTaskId?null:await creativeReferences.assertExpected(request.projectId,request.inputVersionRefs.find(r=>r.entityType==="CreativeReferenceSet"));
+    const availableAssets=[...(snapshot?.assets??[]),...CreativeReferenceService.assets(referenceSet)];
+    const projectRoot = path.resolve(projectsRoot, request.projectId);
+    const resolved = [];
+    for (const manifest of [...request.assetManifest].sort(
+      (a, b) =>
+        a.priority - b.priority ||
+        a.assetId.localeCompare(b.assetId)
+    )) {
+      const asset = availableAssets.find(
+        (item) => item.id === manifest.assetId
+      );
+      const artifact = asset
+        ? await artifacts.findById(asset.artifactId)
+        : await artifacts.findById(manifest.assetId);
+      if (!artifact && !manifest.required) {
+        continue;
       }
-      return resolved;
+      if (
+        !artifact ||
+        artifact.projectId !== request.projectId ||
+        artifact.integrityStatus !== "READY" ||
+        !artifact.sha256 ||
+        (asset ? artifact.sha256 !== asset.sha256 : false) ||
+        artifact.sha256 !== manifest.artifactHash
+      ) {
+        throw new DomainValidationError(
+          `video asset integrity mismatch: ${manifest.assetId}`
+        );
+      }
+      const absolutePath = path.resolve(
+        projectRoot,
+        artifact.relativePath
+      );
+      const prefix = projectRoot.endsWith(path.sep)
+        ? projectRoot
+        : projectRoot + path.sep;
+      if (
+        absolutePath !== projectRoot &&
+        !absolutePath.startsWith(prefix)
+      ) {
+        throw new DomainValidationError(
+          `video asset path escapes project root: ${manifest.assetId}`
+        );
+      }
+      const bytes = await fs.readFile(absolutePath);
+      if (sha256Bytes(bytes) !== manifest.artifactHash) {
+        throw new DomainValidationError(
+          `video asset bytes changed after approval: ${manifest.assetId}`
+        );
+      }
+      resolved.push({
+        assetId: manifest.assetId,
+        absolutePath,
+        artifactHash: manifest.artifactHash,
+        role: manifest.role,
+        priority: manifest.priority,
+        required: manifest.required,
+        ...(manifest.inputType ? { inputType: manifest.inputType } : {})
+      });
     }
+    return resolved;
+  };
+  const provider = createConfiguredDomesticJimengProvider({
+    resolveGenerationAssets
   });
   const hermesRuntime = new HermesStructuredAiRuntime(process.cwd());
   const aiRuntime = new AiRuntimeRouter(aiSettings, aiSettingsRepo, hermesRuntime);
@@ -291,7 +293,14 @@ export function createDefaultDependencies(): WebDependencies {
     ),
     aiRuntime,
     productFlow,
-    researchMediaAnalyzer
+    researchMediaAnalyzer,
+    {
+      searchProvider: new DouyinCliMarketVideoSearchProvider(),
+      mediaFetcher: new DouyinCliMarketVideoMediaFetcher(),
+      artifacts,
+      referenceVideo,
+      projectsRoot
+    }
   );
   const generationConfig = loadGenerationConfig();
   const dreaminaCapability = new DreaminaAgentCapabilityService(provider);
@@ -1658,6 +1667,7 @@ export function createAppServer(
           goal?: unknown;
           sourceUrls?: unknown;
           queries?: unknown;
+          marketVideo?: unknown;
         };
         if (
           body.mode !== "OFF" &&
@@ -1710,6 +1720,30 @@ export function createAppServer(
               requireString(item, "research.query")
             )
           : [];
+        const marketVideoRaw =
+          body.marketVideo && typeof body.marketVideo === "object"
+            ? (body.marketVideo as Record<string, unknown>)
+            : {};
+        const marketSort =
+          marketVideoRaw.sort === "RELEVANCE" ||
+          marketVideoRaw.sort === "LATEST" ||
+          marketVideoRaw.sort === "MOST_LIKED"
+            ? marketVideoRaw.sort
+            : "MOST_LIKED";
+        const marketTimeRange =
+          marketVideoRaw.timeRange === "DAY" ||
+          marketVideoRaw.timeRange === "WEEK" ||
+          marketVideoRaw.timeRange === "HALF_YEAR" ||
+          marketVideoRaw.timeRange === "ANY"
+            ? marketVideoRaw.timeRange
+            : "ANY";
+        const marketCount =
+          typeof marketVideoRaw.count === "number" &&
+          Number.isInteger(marketVideoRaw.count) &&
+          marketVideoRaw.count >= 1 &&
+          marketVideoRaw.count <= 30
+            ? marketVideoRaw.count
+            : 12;
         const result = await deps.research.startRun({
           projectId,
           mode: body.mode,
@@ -1718,7 +1752,32 @@ export function createAppServer(
               ? body.goal
               : "",
           sourceUrls,
-          queries
+          queries,
+          marketVideo: {
+            enabled: marketVideoRaw.enabled !== false,
+            sort: marketSort,
+            timeRange: marketTimeRange,
+            count: marketCount
+          }
+        });
+        await refreshProjectSnapshot(deps, projectId);
+        return json(res, 201, result);
+      }
+
+      const marketVideoAnalyzeMatch = url.pathname.match(
+        /^\/api\/projects\/([^/]+)\/research\/runs\/([^/]+)\/market-videos\/([^/]+)\/analyze$/
+      );
+      if (req.method === "POST" && marketVideoAnalyzeMatch) {
+        const projectId = marketVideoAnalyzeMatch[1]!;
+        const runId = marketVideoAnalyzeMatch[2]!;
+        const candidateId = marketVideoAnalyzeMatch[3]!;
+        if (!(await deps.productFlow.getProject(projectId))) {
+          return json(res, 404, { error: "PROJECT_NOT_FOUND" });
+        }
+        const result = await deps.research.analyzeMarketVideo({
+          projectId,
+          runId,
+          candidateId
         });
         await refreshProjectSnapshot(deps, projectId);
         return json(res, 201, result);

@@ -126,3 +126,53 @@ test("Research UI shows discovery quality summary and human-readable rejection r
   assert.match(html, /class="technical"/);
   assert.match(html, /score=0/);
 });
+
+test("Research UI shows independent Douyin market-video candidates and explicit analysis action", () => {
+  const latestRun = run();
+  latestRun.status = "FAILED";
+  latestRun.browserState = {
+    ...latestRun.browserState!,
+    marketVideoResearch: {
+      status: "READY",
+      provider: "douyin-cli-search",
+      sort: "MOST_LIKED",
+      timeRange: "HALF_YEAR",
+      searchedQueries: ["瑶药护颈枕"],
+      checkedAt: ISO,
+      candidates: [
+        {
+          id: "7599999999999999999",
+          platform: "DOUYIN",
+          videoId: "7599999999999999999",
+          url: "https://www.douyin.com/video/7599999999999999999",
+          title: "高赞护颈枕演示",
+          authorName: "公开视频作者",
+          query: "瑶药护颈枕",
+          rank: 1,
+          metrics: {
+            likes: 128000,
+            comments: 4300,
+            shares: 900
+          },
+          metricsAvailability: "PLATFORM_PUBLIC",
+          sourceProvider: "douyin-cli-search",
+          status: "DISCOVERED"
+        }
+      ]
+    }
+  };
+  const html = renderResearchPage({
+    workspace: workspace(),
+    runs: [latestRun],
+    latestRun,
+    evidence: []
+  });
+
+  assert.match(html, /抖音爆款 \/ 竞品视频/);
+  assert.match(html, /高赞护颈枕演示/);
+  assert.match(html, /点赞 12\.8万/);
+  assert.match(html, /拆解为创作参考/);
+  assert.match(html, /market-videos/);
+  assert.match(html, /当前产品公开证据暂未找到/);
+  assert.doesNotMatch(html, /<h3>研究失败<\/h3>/);
+});

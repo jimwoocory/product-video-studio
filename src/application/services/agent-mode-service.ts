@@ -54,8 +54,12 @@ function summary(materials: AgentMaterial[]) {
 }
 
 export function selectAgentOperation(
-  task: Pick<AgentTask, "requestedMethod" | "requestText" | "materials"> & {
+  task: Pick<
+    AgentTask,
+    "requestedMethod" | "requestText" | "materials"
+  > & {
     model?: string;
+    nativeAudioOutputRequested?: boolean;
   }
 ): {
   operation: DreaminaVideoOperation;
@@ -69,6 +73,8 @@ export function selectAgentOperation(
   }
   const counts = summary(task.materials);
   const imageLike = counts.images + counts.logos;
+  const nativeAudioRequired =
+    task.nativeAudioOutputRequested === true;
   if (counts.videos > 0 || counts.audios > 0) {
     return {
       operation: "multimodal2video",
@@ -79,6 +85,13 @@ export function selectAgentOperation(
     return {
       operation: "text2video",
       reason: "没有图片/视频/音频素材，自动选择“文生视频”。"
+    };
+  }
+  if (nativeAudioRequired) {
+    return {
+      operation: "multimodal2video",
+      reason:
+        "已要求模型原生声音；多图/单图素材统一走已验证会返回音轨的“全能参考视频”，避免静音的多图固定模型链。"
     };
   }
   if (imageLike === 1) {
