@@ -61,6 +61,8 @@ model Project {
   publishPreference PublishPreferenceRecord?
   publishPackages PublishPackageRecord[]
   publishReceipts PublishReceiptRecord[]
+  douyinWorkBindings DouyinWorkBindingRecord[]
+  douyinMetricSnapshots DouyinMetricSnapshotRecord[]
 }
 
 model SmartGenerationRunRecord {
@@ -679,6 +681,55 @@ model PublishReceiptRecord {
   @@index([projectId, createdAt])
   @@index([packageId, createdAt])
   @@index([kind, trusted])
+}
+
+model DouyinWorkBindingRecord {
+  id               String   @id
+  projectId        String
+  packageId        String   @unique
+  publishReceiptId String?
+  awemeId          String?  @unique
+  source           String?
+  confidence       String
+  status           String
+  publishedAt      DateTime?
+  boundAt          DateTime?
+  externalUrl      String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  snapshots DouyinMetricSnapshotRecord[]
+
+  @@index([projectId, createdAt])
+  @@index([projectId, status])
+  @@index([awemeId])
+}
+
+model DouyinMetricSnapshotRecord {
+  id          String   @id
+  projectId   String
+  bindingId   String
+  awemeId     String
+  captureKey  String
+  capturedAt  DateTime
+  plays       Int
+  likes       Int
+  comments    Int
+  shares      Int
+  collects    Int?
+  durationMs  Int?
+  rawJson     String
+  contentHash String
+  createdAt   DateTime @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  binding DouyinWorkBindingRecord @relation(fields: [bindingId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, captureKey])
+  @@index([projectId, awemeId, capturedAt])
+  @@index([bindingId, capturedAt])
+  @@index([contentHash])
 }
 
 model ResearchMediaCandidateRecord {
