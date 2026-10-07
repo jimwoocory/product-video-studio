@@ -20,7 +20,9 @@ class FakeRuntime implements DouyinBrowserPublisherRuntime {
     account: "50805615998",
     status: "PUBLISHED_CONFIRMED",
     verified: true,
-    externalReference: "https://creator.douyin.com/creator-micro/content/manage"
+    externalReference:
+      "https://www.douyin.com/video/7685693367372964337",
+    videoId: "7685693367372964337"
   };
 
   async resolveAccountName(): Promise<string> {
@@ -85,6 +87,11 @@ test("Douyin browser provider exposes valid account and publishes only verified 
   });
 
   assert.equal(result.trusted, true);
+  assert.equal(result.videoId, "7685693367372964337");
+  assert.equal(
+    result.externalReference,
+    "https://www.douyin.com/video/7685693367372964337"
+  );
   assert.equal(runtime.publishRequest?.description, "正文内容");
   assert.deepEqual(runtime.publishRequest?.tags, ["AI", "产品视频"]);
   assert.equal(runtime.publishRequest?.declaration, "内容由AI生成");

@@ -32,6 +32,7 @@ export type DouyinBrowserPublishResult = {
   status: string;
   verified: boolean;
   externalReference?: string;
+  videoId?: string;
   currentUrl?: string;
   verificationMessage?: string;
   message?: string;

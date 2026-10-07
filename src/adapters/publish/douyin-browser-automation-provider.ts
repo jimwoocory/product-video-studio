@@ -158,7 +158,10 @@ export class DouyinBrowserAutomationProvider implements PublishProvider {
 
     return {
       trusted: true,
-      externalReference
+      externalReference,
+      ...(result.videoId?.trim()
+        ? { videoId: result.videoId.trim() }
+        : {})
     };
   }
 }
