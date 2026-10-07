@@ -202,7 +202,20 @@ function retrospectiveBlock(view: DouyinOpsProjectView): string {
   if (!insight) {
     return '<p class="muted">还没有发布后 AI 复盘。至少保存一条作品指标快照后即可生成。</p>';
   }
-  return `<div class="notice"><p><b>复盘摘要</b></p><p>${esc(insight.summary)}</p><div class="comment-meta"><span>生成时间：${time(insight.createdAt)}</span><span>指标证据 ${insight.metricSnapshotIds.length} 条</span><span>评论证据 ${insight.commentIds.length} 条</span></div></div>${insightItems("已验证优势", insight.strengths)}${insightItems("需要改进", insight.weaknesses)}${insightItems("用户真实关注", insight.audienceQuestions)}${insightItems("下一条创意建议", insight.nextCreativeActions)}`;
+  const feedbackByAction = new Map(
+    view.creativeFeedback
+      .filter((item) => item.insightId === insight.id && item.active)
+      .map((item) => [item.actionIndex, item])
+  );
+  const creativeActions = insight.nextCreativeActions.length
+    ? `<h4>下一条创意建议</h4><ul>${insight.nextCreativeActions
+        .map((item, index) => {
+          const feedback = feedbackByAction.get(index);
+          return `<li>${esc(item.text)}<div class="technical">证据：${esc(item.evidenceRefs.join(" / "))}</div><div class="actions">${feedback ? `<span class="status status-ok">已加入下一轮创意</span><button class="secondary deactivate-creative-feedback" data-feedback-id="${esc(feedback.id)}">停用</button>` : `<button class="secondary promote-creative-feedback" data-insight-id="${esc(insight.id)}" data-action-index="${index}">加入下一轮创意</button>`}</div></li>`;
+        })
+        .join("")}</ul>`
+    : '<p class="muted">这次复盘没有生成下一条创意建议。</p>';
+  return `<div class="notice"><p><b>复盘摘要</b></p><p>${esc(insight.summary)}</p><div class="comment-meta"><span>生成时间：${time(insight.createdAt)}</span><span>指标证据 ${insight.metricSnapshotIds.length} 条</span><span>评论证据 ${insight.commentIds.length} 条</span></div></div>${insightItems("已验证优势", insight.strengths)}${insightItems("需要改进", insight.weaknesses)}${insightItems("用户真实关注", insight.audienceQuestions)}${creativeActions}`;
 }
 
 function commentsBlock(view: DouyinOpsProjectView) {
@@ -244,6 +257,8 @@ export function renderDouyinOpsProjectPage(
 const call=async(url,body)=>{const r=await fetch(url,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body||{})});let data={};try{data=await r.json();}catch{}if(!r.ok)throw new Error(data.message||'操作失败');return data;};
 document.querySelector('#refresh-metrics')?.addEventListener('click',async(e)=>{const b=e.currentTarget,m=document.querySelector('#metric-message');b.disabled=true;m.textContent='正在读取抖音作品数据…';try{await call('/api/projects/'+encodeURIComponent(projectId)+'/douyin/metrics/refresh');location.reload();}catch(err){m.textContent=err.message;b.disabled=false;}});
 document.querySelector('#generate-retrospective')?.addEventListener('click',async(e)=>{const b=e.currentTarget,m=document.querySelector('#retrospective-message');b.disabled=true;m.textContent='正在基于已保存指标和评论生成 AI 复盘…';try{await call('/api/projects/'+encodeURIComponent(projectId)+'/douyin/retrospective/generate',{});location.reload();}catch(err){m.textContent=err.message;b.disabled=false;}});
+document.querySelectorAll('.promote-creative-feedback').forEach(b=>b.addEventListener('click',async()=>{const m=document.querySelector('#retrospective-message');if(!confirm('确认把这条有证据支持的复盘建议加入下一轮创意？它会影响下一次创意生成，但不会改变产品事实。'))return;b.disabled=true;m.textContent='正在加入下一轮创意…';try{await call('/api/projects/'+encodeURIComponent(projectId)+'/douyin/creative-feedback/promote',{insightId:b.dataset.insightId,actionIndex:Number(b.dataset.actionIndex),confirmed:true});location.reload();}catch(err){m.textContent=err.message;b.disabled=false;}}));
+document.querySelectorAll('.deactivate-creative-feedback').forEach(b=>b.addEventListener('click',async()=>{const m=document.querySelector('#retrospective-message');if(!confirm('确认停用这条创意反馈？后续创意将不再使用它。'))return;b.disabled=true;m.textContent='正在停用创意反馈…';try{await call('/api/projects/'+encodeURIComponent(projectId)+'/douyin/creative-feedback/'+encodeURIComponent(b.dataset.feedbackId)+'/deactivate',{confirmed:true});location.reload();}catch(err){m.textContent=err.message;b.disabled=false;}}));
 document.querySelector('#sync-comments')?.addEventListener('click',async(e)=>{const b=e.currentTarget,m=document.querySelector('#comment-message');b.disabled=true;m.textContent='正在同步评论…';try{await call('/api/projects/'+encodeURIComponent(projectId)+'/douyin/comments/sync');location.reload();}catch(err){m.textContent=err.message;b.disabled=false;}});
 document.querySelector('#classify-comments')?.addEventListener('click',async(e)=>{const b=e.currentTarget,m=document.querySelector('#comment-message');b.disabled=true;m.textContent='正在用当前项目的大模型设置分析评论…';try{const data=await call('/api/projects/'+encodeURIComponent(projectId)+'/douyin/comments/classify',{});const result=data.result||{};m.textContent='AI 分类完成：本次分类 '+(result.classifiedCount||0)+' 条，跳过 '+(result.skippedCount||0)+' 条。';setTimeout(()=>location.reload(),900);}catch(err){m.textContent=err.message;b.disabled=false;}});
 document.querySelectorAll('.generate-reply-draft').forEach(b=>b.addEventListener('click',async()=>{const m=document.querySelector('#comment-message');b.disabled=true;m.textContent='正在生成 AI 回复草稿（只保存到 PVS，不会发布）…';try{await call('/api/projects/'+encodeURIComponent(projectId)+'/douyin/comments/'+encodeURIComponent(b.dataset.cid)+'/reply-draft',{});location.reload();}catch(err){m.textContent=err.message;b.disabled=false;}}));

@@ -68,6 +68,7 @@ model Project {
   douyinReplyDrafts DouyinReplyDraftRecord[]
   douyinReplyDraftRevisions DouyinReplyDraftRevisionRecord[]
   douyinInsights DouyinInsightRecord[]
+  douyinCreativeFeedback DouyinCreativeFeedbackRecord[]
 }
 
 model SmartGenerationRunRecord {
@@ -884,10 +885,33 @@ model DouyinInsightRecord {
 
   project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
   binding DouyinWorkBindingRecord @relation(fields: [bindingId], references: [id], onDelete: Cascade)
+  creativeFeedback DouyinCreativeFeedbackRecord[]
 
   @@index([projectId, awemeId, createdAt])
   @@index([bindingId, createdAt])
   @@index([evidenceHash])
+}
+
+model DouyinCreativeFeedbackRecord {
+  id               String   @id
+  projectId        String
+  insightId        String
+  actionIndex      Int
+  actionHash       String
+  actionText       String
+  evidenceRefsJson String
+  active           Boolean  @default(true)
+  confirmedAt      DateTime
+  deactivatedAt    DateTime?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  insight DouyinInsightRecord @relation(fields: [insightId], references: [id], onDelete: Cascade)
+
+  @@unique([insightId, actionHash])
+  @@index([projectId, active, confirmedAt])
+  @@index([insightId, actionIndex])
 }
 
 model ResearchMediaCandidateRecord {

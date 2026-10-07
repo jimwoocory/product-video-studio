@@ -1,6 +1,7 @@
 import type {
   DouyinComment,
   DouyinCommentClassification,
+  DouyinCreativeFeedback,
   DouyinInsight,
   DouyinMetricSnapshot,
   DouyinReplyDraft,
@@ -126,5 +127,28 @@ export interface DouyinOpsRepository {
     awemeId?: string;
     limit?: number;
   }): Promise<DouyinInsight[]>;
+
+  findInsightById(
+    insightId: string
+  ): Promise<DouyinInsight | null>;
+
+  upsertCreativeFeedback(
+    input: DouyinCreativeFeedback
+  ): Promise<DouyinCreativeFeedback>;
+
+  findCreativeFeedbackById(
+    feedbackId: string
+  ): Promise<DouyinCreativeFeedback | null>;
+
+  listCreativeFeedback(input: {
+    projectId: string;
+    active?: boolean;
+  }): Promise<DouyinCreativeFeedback[]>;
+
+  deactivateCreativeFeedback(input: {
+    feedbackId: string;
+    projectId: string;
+    deactivatedAt: string;
+  }): Promise<DouyinCreativeFeedback | null>;
 
 }

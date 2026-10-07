@@ -94,6 +94,7 @@ import { DouyinCommentService } from "../application/services/douyin-comment-ser
 import { DouyinCommentClassificationService } from "../application/services/douyin-comment-classification-service.js";
 import { DouyinReplyDraftService } from "../application/services/douyin-reply-draft-service.js";
 import { DouyinRetrospectiveService } from "../application/services/douyin-retrospective-service.js";
+import { DouyinCreativeFeedbackService } from "../application/services/douyin-creative-feedback-service.js";
 import { DouyinOpsDashboardService } from "../application/services/douyin-ops-dashboard-service.js";
 import { DouyinPublishService } from "../application/services/douyin-publish-service.js";
 import {
@@ -424,6 +425,10 @@ export function createDefaultDependencies(): WebDependencies {
       productFlow,
       aiRuntime
     );
+  const douyinCreativeFeedbackService =
+    new DouyinCreativeFeedbackService(
+      douyinOpsRepo
+    );
   const douyinOpsDashboard = new DouyinOpsDashboardService(
     productFlow,
     publishRepo,
@@ -436,6 +441,7 @@ export function createDefaultDependencies(): WebDependencies {
     douyinCommentClassifier,
     douyinReplyDraftService,
     douyinRetrospectiveService,
+    douyinCreativeFeedbackService,
     new WindowsDouyinOpsLauncher()
   );
   const publishProviders = new PublishProviderRegistry([
@@ -494,7 +500,14 @@ export function createDefaultDependencies(): WebDependencies {
     workflow,
     snapshots
   );
-  const aiGeneration = new AiGenerationService(aiRuntime,creativeReferences);
+  const aiGeneration = new AiGenerationService(
+    aiRuntime,
+    creativeReferences,
+    (projectId) =>
+      douyinCreativeFeedbackService.context(
+        projectId
+      )
+  );
   const productDirector = new ProductDirectorService(new HermesProductDirectorGenerator(aiRuntime), aiRuntime,creativeReferences);
   const batchGeneration = new BatchGenerationService(productFlow, generation, workflow, review, execution);
   const autoEdit = new AutoEditService({ productFlow, workflow, review, artifacts, timelines: timelineRepo, projectsRoot, speech: new WindowsSpeechSynthesis(), visualReview: visualEditAssessment });

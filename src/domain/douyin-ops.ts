@@ -299,3 +299,22 @@ export type DouyinInsightEvidenceItem = z.infer<
 export type DouyinInsight = z.infer<
   typeof douyinInsightSchema
 >;
+
+export const douyinCreativeFeedbackSchema = z.object({
+  id: entityIdSchema,
+  projectId: entityIdSchema,
+  insightId: entityIdSchema,
+  actionIndex: z.number().int().nonnegative(),
+  actionHash: sha256Schema,
+  actionText: z.string().trim().min(1).max(500),
+  evidenceRefs: z.array(nonEmptyStringSchema).min(1).max(12),
+  active: z.boolean(),
+  confirmedAt: isoDateTimeSchema,
+  deactivatedAt: isoDateTimeSchema.optional(),
+  createdAt: isoDateTimeSchema,
+  updatedAt: isoDateTimeSchema
+});
+
+export type DouyinCreativeFeedback = z.infer<
+  typeof douyinCreativeFeedbackSchema
+>;

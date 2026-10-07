@@ -3,6 +3,7 @@ import type { DouyinOpsRepository } from "../../application/ports/douyin-ops-rep
 import {
   douyinCommentClassificationSchema,
   douyinCommentSchema,
+  douyinCreativeFeedbackSchema,
   douyinInsightSchema,
   douyinMetricSnapshotSchema,
   douyinReplyDraftRevisionSchema,
@@ -10,6 +11,7 @@ import {
   douyinWorkBindingSchema,
   type DouyinComment,
   type DouyinCommentClassification,
+  type DouyinCreativeFeedback,
   type DouyinInsight,
   type DouyinMetricSnapshot,
   type DouyinReplyDraft,
@@ -158,6 +160,21 @@ type InsightRow = {
   executionId: string | null;
   configVersion: number | null;
   createdAt: Date;
+};
+
+type CreativeFeedbackRow = {
+  id: string;
+  projectId: string;
+  insightId: string;
+  actionIndex: number;
+  actionHash: string;
+  actionText: string;
+  evidenceRefsJson: string;
+  active: boolean;
+  confirmedAt: Date;
+  deactivatedAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
 };
 
 function bindingToDomain(
@@ -354,6 +371,28 @@ function insightToDomain(
       ? { configVersion: row.configVersion }
       : {}),
     createdAt: row.createdAt.toISOString()
+  });
+}
+
+function creativeFeedbackToDomain(
+  row: CreativeFeedbackRow
+): DouyinCreativeFeedback {
+  return douyinCreativeFeedbackSchema.parse({
+    id: row.id,
+    projectId: row.projectId,
+    insightId: row.insightId,
+    actionIndex: row.actionIndex,
+    actionHash: row.actionHash,
+    actionText: row.actionText,
+    evidenceRefs:
+      JSON.parse(row.evidenceRefsJson) as string[],
+    active: row.active,
+    confirmedAt: row.confirmedAt.toISOString(),
+    ...(row.deactivatedAt
+      ? { deactivatedAt: row.deactivatedAt.toISOString() }
+      : {}),
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString()
   });
 }
 
@@ -984,5 +1023,117 @@ export class PrismaDouyinOpsRepository
         ...(limit ? { take: limit } : {})
       });
     return rows.map(insightToDomain);
+  }
+
+  async findInsightById(
+    insightId: string
+  ): Promise<DouyinInsight | null> {
+    const row =
+      await this.db.douyinInsightRecord.findUnique({
+        where: { id: insightId }
+      });
+    return row ? insightToDomain(row) : null;
+  }
+
+  async upsertCreativeFeedback(
+    input: DouyinCreativeFeedback
+  ): Promise<DouyinCreativeFeedback> {
+    const value =
+      douyinCreativeFeedbackSchema.parse(input);
+    const row =
+      await this.db.douyinCreativeFeedbackRecord.upsert({
+        where: {
+          insightId_actionHash: {
+            insightId: value.insightId,
+            actionHash: value.actionHash
+          }
+        },
+        create: {
+          id: value.id,
+          projectId: value.projectId,
+          insightId: value.insightId,
+          actionIndex: value.actionIndex,
+          actionHash: value.actionHash,
+          actionText: value.actionText,
+          evidenceRefsJson:
+            JSON.stringify(value.evidenceRefs),
+          active: value.active,
+          confirmedAt: new Date(value.confirmedAt),
+          deactivatedAt: value.deactivatedAt
+            ? new Date(value.deactivatedAt)
+            : null,
+          createdAt: new Date(value.createdAt),
+          updatedAt: new Date(value.updatedAt)
+        },
+        update: {
+          actionIndex: value.actionIndex,
+          actionText: value.actionText,
+          evidenceRefsJson:
+            JSON.stringify(value.evidenceRefs),
+          active: value.active,
+          confirmedAt: new Date(value.confirmedAt),
+          deactivatedAt: value.deactivatedAt
+            ? new Date(value.deactivatedAt)
+            : null,
+          updatedAt: new Date(value.updatedAt)
+        }
+      });
+    return creativeFeedbackToDomain(row);
+  }
+
+  async findCreativeFeedbackById(
+    feedbackId: string
+  ): Promise<DouyinCreativeFeedback | null> {
+    const row =
+      await this.db.douyinCreativeFeedbackRecord.findUnique({
+        where: { id: feedbackId }
+      });
+    return row ? creativeFeedbackToDomain(row) : null;
+  }
+
+  async listCreativeFeedback(input: {
+    projectId: string;
+    active?: boolean;
+  }): Promise<DouyinCreativeFeedback[]> {
+    const rows =
+      await this.db.douyinCreativeFeedbackRecord.findMany({
+        where: {
+          projectId: input.projectId,
+          ...(input.active !== undefined
+            ? { active: input.active }
+            : {})
+        },
+        orderBy: [
+          { confirmedAt: "asc" },
+          { createdAt: "asc" }
+        ]
+      });
+    return rows.map(creativeFeedbackToDomain);
+  }
+
+  async deactivateCreativeFeedback(input: {
+    feedbackId: string;
+    projectId: string;
+    deactivatedAt: string;
+  }): Promise<DouyinCreativeFeedback | null> {
+    const updated =
+      await this.db.douyinCreativeFeedbackRecord.updateMany({
+        where: {
+          id: input.feedbackId,
+          projectId: input.projectId,
+          active: true
+        },
+        data: {
+          active: false,
+          deactivatedAt: new Date(input.deactivatedAt),
+          updatedAt: new Date(input.deactivatedAt)
+        }
+      });
+    if (updated.count !== 1) return null;
+    const row =
+      await this.db.douyinCreativeFeedbackRecord.findUnique({
+        where: { id: input.feedbackId }
+      });
+    return row ? creativeFeedbackToDomain(row) : null;
   }
 }

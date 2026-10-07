@@ -197,6 +197,7 @@ const projectView: DouyinOpsProjectView = {
       updatedAt: "2026-10-07T05:31:00.000Z"
     }
   ],
+  creativeFeedback: [],
   latestInsight: {
     id: "insight-1",
     projectId: "project-1",
@@ -279,6 +280,7 @@ test("project page keeps persisted metrics/comments visible while runtime is off
   assert.match(html, /播放增长，用户评论主要是正向互动/);
   assert.match(html, /证据：metric:snapshot-1 \/ metric:snapshot-2/);
   assert.match(html, /下一条创意建议/);
+  assert.match(html, /加入下一轮创意/);
   assert.match(html, /同步这条评论的回复/);
   assert.match(html, /AI 分类和回复草稿只保存在 PVS 本地，本阶段不会发送回复/);
   assert.doesNotMatch(html, /确认回复|发布回复|发送私信|自动点赞/);
@@ -438,6 +440,75 @@ test("Douyin ops HTTP exposes only P0 local/read actions", async () => {
     async generateRetrospective(projectId: string) {
       calls.push("retrospective:" + projectId);
       return projectView.latestInsight!;
+    },
+    async promoteCreativeFeedback(input: {
+      projectId: string;
+      insightId: string;
+      actionIndex: number;
+      confirmed: boolean;
+    }) {
+      calls.push(
+        "promote-feedback:" +
+          input.insightId +
+          ":" +
+          input.actionIndex
+      );
+      return {
+        id: "feedback-1",
+        projectId: input.projectId,
+        insightId: input.insightId,
+        actionIndex: input.actionIndex,
+        actionHash:
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        actionText:
+          projectView.latestInsight!.nextCreativeActions[
+            input.actionIndex
+          ]!.text,
+        evidenceRefs:
+          projectView.latestInsight!.nextCreativeActions[
+            input.actionIndex
+          ]!.evidenceRefs,
+        active: true,
+        confirmedAt:
+          "2026-10-07T05:35:00.000Z",
+        createdAt:
+          "2026-10-07T05:35:00.000Z",
+        updatedAt:
+          "2026-10-07T05:35:00.000Z"
+      };
+    },
+    async deactivateCreativeFeedback(input: {
+      projectId: string;
+      feedbackId: string;
+      confirmed: boolean;
+    }) {
+      calls.push(
+        "deactivate-feedback:" +
+          input.feedbackId
+      );
+      return {
+        id: input.feedbackId,
+        projectId: input.projectId,
+        insightId: "insight-1",
+        actionIndex: 0,
+        actionHash:
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        actionText:
+          "下一条继续强化用户已经产生互动的视觉方向。",
+        evidenceRefs: [
+          "comment:comment-1",
+          "metric:snapshot-2"
+        ],
+        active: false,
+        confirmedAt:
+          "2026-10-07T05:35:00.000Z",
+        deactivatedAt:
+          "2026-10-07T05:36:00.000Z",
+        createdAt:
+          "2026-10-07T05:35:00.000Z",
+        updatedAt:
+          "2026-10-07T05:36:00.000Z"
+      };
     },
     async confirmBinding() {
       calls.push("binding");
@@ -615,6 +686,36 @@ test("Douyin ops HTTP exposes only P0 local/read actions", async () => {
       /播放增长/
     );
 
+    const promote = await fetch(
+      base + "/api/projects/project-1/douyin/creative-feedback/promote",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          insightId: "insight-1",
+          actionIndex: 0,
+          confirmed: true
+        })
+      }
+    );
+    assert.equal(promote.status, 200);
+
+    const deactivate = await fetch(
+      base + "/api/projects/project-1/douyin/creative-feedback/feedback-1/deactivate",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          confirmed: true
+        })
+      }
+    );
+    assert.equal(deactivate.status, 200);
+
     const bind = await fetch(
       base + "/api/projects/project-1/douyin/binding/confirm",
       {
@@ -657,6 +758,8 @@ test("Douyin ops HTTP exposes only P0 local/read actions", async () => {
       "save-draft:reply-draft-1:1",
       "reject-draft:reply-draft-1:1",
       "retrospective:project-1",
+      "promote-feedback:insight-1:0",
+      "deactivate-feedback:feedback-1",
       "binding"
     ]);
   } finally {

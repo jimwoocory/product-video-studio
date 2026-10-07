@@ -139,6 +139,12 @@ export async function handleDouyinOpsHttp(
   const retrospectiveGenerate = url.pathname.match(
     /^\/api\/projects\/([^/]+)\/douyin\/retrospective\/generate$/
   );
+  const creativeFeedbackPromote = url.pathname.match(
+    /^\/api\/projects\/([^/]+)\/douyin\/creative-feedback\/promote$/
+  );
+  const creativeFeedbackDeactivate = url.pathname.match(
+    /^\/api\/projects\/([^/]+)\/douyin\/creative-feedback\/([^/]+)\/deactivate$/
+  );
   const commentSync = url.pathname.match(
     /^\/api\/projects\/([^/]+)\/douyin\/comments\/sync$/
   );
@@ -169,6 +175,8 @@ export async function handleDouyinOpsHttp(
     !projectApi &&
     !metricRefresh &&
     !retrospectiveGenerate &&
+    !creativeFeedbackPromote &&
+    !creativeFeedbackDeactivate &&
     !commentSync &&
     !commentClassify &&
     !replySync &&
@@ -229,6 +237,8 @@ export async function handleDouyinOpsHttp(
       projectApi ??
       metricRefresh ??
       retrospectiveGenerate ??
+      creativeFeedbackPromote ??
+      creativeFeedbackDeactivate ??
       commentSync ??
       commentClassify ??
       replySync ??
@@ -283,6 +293,48 @@ export async function handleDouyinOpsHttp(
           await service.generateRetrospective(
             projectId
           )
+      });
+      return true;
+    }
+
+    if (creativeFeedbackPromote) {
+      const input = z
+        .object({
+          insightId: z.string().min(1),
+          actionIndex: z.number().int().nonnegative(),
+          confirmed: z.literal(true)
+        })
+        .strict()
+        .parse(await body(req));
+      json(res, 200, {
+        feedback:
+          await service.promoteCreativeFeedback({
+            projectId,
+            insightId: input.insightId,
+            actionIndex: input.actionIndex,
+            confirmed: true
+          })
+      });
+      return true;
+    }
+
+    if (creativeFeedbackDeactivate) {
+      const feedbackId = decodeURIComponent(
+        creativeFeedbackDeactivate[2]!
+      );
+      const input = z
+        .object({
+          confirmed: z.literal(true)
+        })
+        .strict()
+        .parse(await body(req));
+      json(res, 200, {
+        feedback:
+          await service.deactivateCreativeFeedback({
+            projectId,
+            feedbackId,
+            confirmed: true
+          })
       });
       return true;
     }

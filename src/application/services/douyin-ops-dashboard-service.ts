@@ -10,6 +10,7 @@ import type {
 } from "../ports/douyin-ops-launcher.js";
 import type { DouyinOpsRepository } from "../ports/douyin-ops-repository.js";
 import type {
+  DouyinCreativeFeedback,
   DouyinInsight,
   DouyinMetricSnapshot,
   DouyinReplyDraft,
@@ -32,6 +33,7 @@ import { DouyinCommentService } from "./douyin-comment-service.js";
 import { DouyinCommentClassificationService } from "./douyin-comment-classification-service.js";
 import { DouyinReplyDraftService } from "./douyin-reply-draft-service.js";
 import { DouyinRetrospectiveService } from "./douyin-retrospective-service.js";
+import { DouyinCreativeFeedbackService } from "./douyin-creative-feedback-service.js";
 import { DouyinOpsRuntimeError } from "../ports/douyin-ops-runtime.js";
 import { DomainValidationError } from "../../domain/validation.js";
 
@@ -62,6 +64,7 @@ export type DouyinOpsProjectView = {
   comments: DouyinComment[];
   replyDrafts: DouyinReplyDraft[];
   latestInsight: DouyinInsight | null;
+  creativeFeedback: DouyinCreativeFeedback[];
   candidates: DouyinOpsWork[];
   candidatesStatus: "READY" | "AUTH_REQUIRED" | "OFFLINE" | "FAILED";
   candidatesMessage?: string;
@@ -123,6 +126,7 @@ export class DouyinOpsDashboardService {
     private readonly classifier: DouyinCommentClassificationService,
     private readonly replyDrafts: DouyinReplyDraftService,
     private readonly retrospective: DouyinRetrospectiveService,
+    private readonly creativeFeedbackService: DouyinCreativeFeedbackService,
     private readonly launcher?: DouyinOpsLauncher
   ) {}
 
@@ -308,7 +312,7 @@ export class DouyinOpsDashboardService {
       account
     });
 
-    const [snapshots, comments, replyDrafts, latestInsight, candidateState] =
+    const [snapshots, comments, replyDrafts, latestInsight, creativeFeedback, candidateState] =
       await Promise.all([
         this.metrics.history({
           projectId,
@@ -336,6 +340,7 @@ export class DouyinOpsDashboardService {
               awemeId: state.binding.awemeId
             })
           : Promise.resolve(null as DouyinInsight | null),
+        this.creativeFeedbackService.active(projectId),
         runtime.ready &&
         account.ops.available &&
         account.ops.runtimeStatus === "READY"
@@ -368,12 +373,37 @@ export class DouyinOpsDashboardService {
       comments,
       replyDrafts,
       latestInsight,
+      creativeFeedback,
       candidates: candidateState.works,
       candidatesStatus: candidateState.status,
       ...(candidateState.message
         ? { candidatesMessage: candidateState.message }
         : {})
     };
+  }
+
+
+  async promoteCreativeFeedback(input: {
+    projectId: string;
+    insightId: string;
+    actionIndex: number;
+    confirmed: boolean;
+  }): Promise<DouyinCreativeFeedback> {
+    await this.requireProject(input.projectId);
+    return this.creativeFeedbackService.promote(
+      input
+    );
+  }
+
+  async deactivateCreativeFeedback(input: {
+    projectId: string;
+    feedbackId: string;
+    confirmed: boolean;
+  }): Promise<DouyinCreativeFeedback> {
+    await this.requireProject(input.projectId);
+    return this.creativeFeedbackService.deactivate(
+      input
+    );
   }
 
   async generateRetrospective(
