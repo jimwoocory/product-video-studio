@@ -464,5 +464,6 @@ export const p1AiSteps: Array<{ step: AiStep; label: string }> = [
   { step: "DIRECTOR", label: "导演分镜" },
   { step: "REFERENCE_VIDEO_ANALYSIS", label: "参考视频分析" },
   { step: "AUTO_EDIT_VISUAL", label: "视觉审片 / 智能剪辑" },
-  { step: "RESEARCH", label: "联网研究" }
+  { step: "RESEARCH", label: "联网研究" },
+  { step: "DOUYIN_OPS", label: "抖音运营" }
 ];

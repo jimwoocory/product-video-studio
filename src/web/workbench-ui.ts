@@ -1596,7 +1596,8 @@ const aiStepLabel: Record<AiStep, string> = {
   DIRECTOR: "导演分镜",
   REFERENCE_VIDEO_ANALYSIS: "参考视频分析",
   AUTO_EDIT_VISUAL: "视觉审片 / 智能剪辑",
-  RESEARCH: "联网研究"
+  RESEARCH: "联网研究",
+  DOUYIN_OPS: "抖音运营"
 };
 
 const aiCapabilityLabel = {

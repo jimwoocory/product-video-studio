@@ -139,6 +139,9 @@ export async function handleDouyinOpsHttp(
   const commentSync = url.pathname.match(
     /^\/api\/projects\/([^/]+)\/douyin\/comments\/sync$/
   );
+  const commentClassify = url.pathname.match(
+    /^\/api\/projects\/([^/]+)\/douyin\/comments\/classify$/
+  );
   const replySync = url.pathname.match(
     /^\/api\/projects\/([^/]+)\/douyin\/comments\/([^/]+)\/replies\/sync$/
   );
@@ -154,6 +157,7 @@ export async function handleDouyinOpsHttp(
     !projectApi &&
     !metricRefresh &&
     !commentSync &&
+    !commentClassify &&
     !replySync &&
     !bindingConfirm
   ) {
@@ -209,6 +213,7 @@ export async function handleDouyinOpsHttp(
       projectApi ??
       metricRefresh ??
       commentSync ??
+      commentClassify ??
       replySync ??
       bindingConfirm;
     const projectId = decodeURIComponent(
@@ -255,6 +260,32 @@ export async function handleDouyinOpsHttp(
     if (commentSync) {
       json(res, 200, {
         result: await service.syncComments(projectId)
+      });
+      return true;
+    }
+
+    if (commentClassify) {
+      const input = z
+        .object({
+          cids: z
+            .array(
+              z.string().regex(/^\d{1,40}$/)
+            )
+            .min(1)
+            .max(20)
+            .optional(),
+          force: z.boolean().optional()
+        })
+        .strict()
+        .parse(await body(req));
+      json(res, 200, {
+        result: await service.classifyComments({
+          projectId,
+          ...(input.cids ? { cids: input.cids } : {}),
+          ...(input.force !== undefined
+            ? { force: input.force }
+            : {})
+        })
       });
       return true;
     }

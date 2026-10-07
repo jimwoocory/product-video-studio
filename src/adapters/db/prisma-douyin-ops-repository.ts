@@ -1,10 +1,12 @@
 import type { PrismaClient } from "@prisma/client";
 import type { DouyinOpsRepository } from "../../application/ports/douyin-ops-repository.js";
 import {
+  douyinCommentClassificationSchema,
   douyinCommentSchema,
   douyinMetricSnapshotSchema,
   douyinWorkBindingSchema,
   type DouyinComment,
+  type DouyinCommentClassification,
   type DouyinMetricSnapshot,
   type DouyinWorkBinding
 } from "../../domain/douyin-ops.js";
@@ -59,12 +61,34 @@ type CommentRow = {
   parentCid: string | null;
   avatarUrl: string | null;
   sentiment: string | null;
+  category: string | null;
   priority: string | null;
   syncedAt: Date;
   rawJson: string;
   contentHash: string;
   createdAt: Date;
   updatedAt: Date;
+};
+
+type ClassificationRow = {
+  id: string;
+  projectId: string;
+  commentId: string;
+  awemeId: string;
+  cid: string;
+  sourceContentHash: string;
+  sentiment: string;
+  category: string;
+  priority: string;
+  rationale: string | null;
+  runtimeId: string;
+  runtimeVersion: string;
+  providerId: string | null;
+  modelId: string | null;
+  executionId: string | null;
+  configVersion: number | null;
+  classifiedAt: Date;
+  createdAt: Date;
 };
 
 function bindingToDomain(
@@ -142,12 +166,40 @@ function commentToDomain(
     ...(row.parentCid ? { parentCid: row.parentCid } : {}),
     ...(row.avatarUrl ? { avatarUrl: row.avatarUrl } : {}),
     ...(row.sentiment ? { sentiment: row.sentiment } : {}),
+    ...(row.category ? { category: row.category } : {}),
     ...(row.priority ? { priority: row.priority } : {}),
     syncedAt: row.syncedAt.toISOString(),
     rawJson: row.rawJson,
     contentHash: row.contentHash,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString()
+  });
+}
+
+function classificationToDomain(
+  row: ClassificationRow
+): DouyinCommentClassification {
+  return douyinCommentClassificationSchema.parse({
+    id: row.id,
+    projectId: row.projectId,
+    commentId: row.commentId,
+    awemeId: row.awemeId,
+    cid: row.cid,
+    sourceContentHash: row.sourceContentHash,
+    sentiment: row.sentiment,
+    category: row.category,
+    priority: row.priority,
+    ...(row.rationale ? { rationale: row.rationale } : {}),
+    runtimeId: row.runtimeId,
+    runtimeVersion: row.runtimeVersion,
+    ...(row.providerId ? { providerId: row.providerId } : {}),
+    ...(row.modelId ? { modelId: row.modelId } : {}),
+    ...(row.executionId ? { executionId: row.executionId } : {}),
+    ...(row.configVersion !== null
+      ? { configVersion: row.configVersion }
+      : {}),
+    classifiedAt: row.classifiedAt.toISOString(),
+    createdAt: row.createdAt.toISOString()
   });
 }
 
@@ -344,6 +396,7 @@ export class PrismaDouyinOpsRepository
           parentCid: value.parentCid ?? null,
           avatarUrl: value.avatarUrl ?? null,
           sentiment: value.sentiment ?? null,
+          category: value.category ?? null,
           priority: value.priority ?? null,
           syncedAt: new Date(value.syncedAt),
           rawJson: value.rawJson,
@@ -418,5 +471,119 @@ export class PrismaDouyinOpsRepository
       }
     });
     return row ? commentToDomain(row) : null;
+  }
+
+  async findCommentsByCids(
+    projectId: string,
+    cids: string[]
+  ): Promise<DouyinComment[]> {
+    if (!cids.length) return [];
+    const rows = await this.db.douyinCommentRecord.findMany({
+      where: {
+        projectId,
+        cid: { in: [...new Set(cids)] }
+      }
+    });
+    return rows.map(commentToDomain);
+  }
+
+  async latestCommentClassification(
+    commentId: string
+  ): Promise<DouyinCommentClassification | null> {
+    const row =
+      await this.db.douyinCommentClassificationRecord.findFirst({
+        where: { commentId },
+        orderBy: [
+          { classifiedAt: "desc" },
+          { createdAt: "desc" }
+        ]
+      });
+    return row ? classificationToDomain(row) : null;
+  }
+
+  async saveCommentClassifications(input: {
+    updates: Array<{
+      commentId: string;
+      sentiment: DouyinCommentClassification["sentiment"];
+      category: DouyinCommentClassification["category"];
+      priority: DouyinCommentClassification["priority"];
+    }>;
+    records: DouyinCommentClassification[];
+  }): Promise<DouyinComment[]> {
+    const records = input.records.map((item) =>
+      douyinCommentClassificationSchema.parse(item)
+    );
+    const updates = new Map(
+      input.updates.map((item) => [item.commentId, item])
+    );
+
+    if (
+      updates.size !== input.updates.length ||
+      records.length !== input.updates.length
+    ) {
+      throw new Error(
+        "Douyin comment classification batch is inconsistent"
+      );
+    }
+
+    const rows = await this.db.$transaction(async (tx) => {
+      const output: CommentRow[] = [];
+      for (const record of records) {
+        const update = updates.get(record.commentId);
+        if (!update) {
+          throw new Error(
+            "Missing current-comment update for classification"
+          );
+        }
+        const row = await tx.douyinCommentRecord.update({
+          where: { id: record.commentId },
+          data: {
+            sentiment: update.sentiment,
+            category: update.category,
+            priority: update.priority
+          }
+        });
+        await tx.douyinCommentClassificationRecord.create({
+          data: {
+            id: record.id,
+            projectId: record.projectId,
+            commentId: record.commentId,
+            awemeId: record.awemeId,
+            cid: record.cid,
+            sourceContentHash: record.sourceContentHash,
+            sentiment: record.sentiment,
+            category: record.category,
+            priority: record.priority,
+            rationale: record.rationale ?? null,
+            runtimeId: record.runtimeId,
+            runtimeVersion: record.runtimeVersion,
+            providerId: record.providerId ?? null,
+            modelId: record.modelId ?? null,
+            executionId: record.executionId ?? null,
+            configVersion: record.configVersion ?? null,
+            classifiedAt: new Date(record.classifiedAt),
+            createdAt: new Date(record.createdAt)
+          }
+        });
+        output.push(row);
+      }
+      return output;
+    });
+
+    return rows.map(commentToDomain);
+  }
+
+  async listCommentClassifications(
+    commentId: string
+  ): Promise<DouyinCommentClassification[]> {
+    const rows =
+      await this.db.douyinCommentClassificationRecord.findMany({
+        where: { commentId },
+        orderBy: [
+          { classifiedAt: "asc" },
+          { createdAt: "asc" }
+        ]
+      });
+    return rows.map(classificationToDomain);
   }
 }

@@ -103,6 +103,7 @@ export const douyinCommentSchema = z.object({
   parentCid: z.string().trim().regex(/^\d{1,40}$/).optional(),
   avatarUrl: z.string().optional(),
   sentiment: nonEmptyStringSchema.optional(),
+  category: nonEmptyStringSchema.optional(),
   priority: nonEmptyStringSchema.optional(),
   syncedAt: isoDateTimeSchema,
   rawJson: z.string(),
@@ -128,4 +129,61 @@ export type DouyinMetricSnapshot = z.infer<
 >;
 export type DouyinComment = z.infer<
   typeof douyinCommentSchema
+>;
+
+export const douyinCommentSentimentSchema = z.enum([
+  "POSITIVE",
+  "NEUTRAL",
+  "NEGATIVE",
+  "MIXED"
+]);
+
+export const douyinCommentCategorySchema = z.enum([
+  "PRODUCT_QUESTION",
+  "PURCHASE_INTENT",
+  "USAGE_FEEDBACK",
+  "PRAISE",
+  "COMPLAINT",
+  "GENERAL_INTERACTION",
+  "SPAM_OR_IRRELEVANT"
+]);
+
+export const douyinCommentPrioritySchema = z.enum([
+  "HIGH",
+  "MEDIUM",
+  "LOW"
+]);
+
+export const douyinCommentClassificationSchema = z.object({
+  id: entityIdSchema,
+  projectId: entityIdSchema,
+  commentId: entityIdSchema,
+  awemeId: douyinAwemeIdSchema,
+  cid: z.string().trim().regex(/^\d{1,40}$/),
+  sourceContentHash: sha256Schema,
+  sentiment: douyinCommentSentimentSchema,
+  category: douyinCommentCategorySchema,
+  priority: douyinCommentPrioritySchema,
+  rationale: z.string().trim().max(240).optional(),
+  runtimeId: nonEmptyStringSchema,
+  runtimeVersion: nonEmptyStringSchema,
+  providerId: nonEmptyStringSchema.optional(),
+  modelId: nonEmptyStringSchema.optional(),
+  executionId: entityIdSchema.optional(),
+  configVersion: z.number().int().positive().optional(),
+  classifiedAt: isoDateTimeSchema,
+  createdAt: isoDateTimeSchema
+});
+
+export type DouyinCommentSentiment = z.infer<
+  typeof douyinCommentSentimentSchema
+>;
+export type DouyinCommentCategory = z.infer<
+  typeof douyinCommentCategorySchema
+>;
+export type DouyinCommentPriority = z.infer<
+  typeof douyinCommentPrioritySchema
+>;
+export type DouyinCommentClassification = z.infer<
+  typeof douyinCommentClassificationSchema
 >;

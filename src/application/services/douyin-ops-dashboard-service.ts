@@ -27,6 +27,7 @@ import {
 } from "./douyin-work-binding-service.js";
 import { DouyinMetricService } from "./douyin-metric-service.js";
 import { DouyinCommentService } from "./douyin-comment-service.js";
+import { DouyinCommentClassificationService } from "./douyin-comment-classification-service.js";
 import { DouyinOpsRuntimeError } from "../ports/douyin-ops-runtime.js";
 import { DomainValidationError } from "../../domain/validation.js";
 
@@ -113,6 +114,7 @@ export class DouyinOpsDashboardService {
     private readonly workBinding: DouyinWorkBindingService,
     private readonly metrics: DouyinMetricService,
     private readonly comments: DouyinCommentService,
+    private readonly classifier: DouyinCommentClassificationService,
     private readonly launcher?: DouyinOpsLauncher
   ) {}
 
@@ -380,6 +382,36 @@ export class DouyinOpsDashboardService {
       cid,
       maxPages: 5,
       pageSize: 20
+    });
+  }
+
+  async classifyComments(input: {
+    projectId: string;
+    cids?: string[];
+    force?: boolean;
+  }) {
+    await this.requireProject(input.projectId);
+    const binding =
+      await this.opsRepo.latestWorkBinding(
+        input.projectId
+      );
+    if (
+      !binding ||
+      binding.status !== "BOUND" ||
+      !binding.awemeId
+    ) {
+      throw new DomainValidationError(
+        "当前项目尚未确认抖音作品绑定，不能进行评论 AI 分类"
+      );
+    }
+    return this.classifier.classify({
+      projectId: input.projectId,
+      awemeId: binding.awemeId,
+      ...(input.cids ? { cids: input.cids } : {}),
+      ...(input.force !== undefined
+        ? { force: input.force }
+        : {}),
+      limit: 20
     });
   }
 

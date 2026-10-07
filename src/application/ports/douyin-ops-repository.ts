@@ -1,5 +1,6 @@
 import type {
   DouyinComment,
+  DouyinCommentClassification,
   DouyinMetricSnapshot,
   DouyinWorkBinding
 } from "../../domain/douyin-ops.js";
@@ -51,4 +52,28 @@ export interface DouyinOpsRepository {
     awemeId: string;
     cid: string;
   }): Promise<DouyinComment | null>;
+
+  findCommentsByCids(
+    projectId: string,
+    cids: string[]
+  ): Promise<DouyinComment[]>;
+
+  latestCommentClassification(
+    commentId: string
+  ): Promise<DouyinCommentClassification | null>;
+
+  saveCommentClassifications(input: {
+    updates: Array<{
+      commentId: string;
+      sentiment: DouyinCommentClassification["sentiment"];
+      category: DouyinCommentClassification["category"];
+      priority: DouyinCommentClassification["priority"];
+    }>;
+    records: DouyinCommentClassification[];
+  }): Promise<DouyinComment[]>;
+
+  listCommentClassifications(
+    commentId: string
+  ): Promise<DouyinCommentClassification[]>;
+
 }

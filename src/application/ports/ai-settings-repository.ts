@@ -5,7 +5,8 @@ export type AiStep =
   | "DIRECTOR"
   | "REFERENCE_VIDEO_ANALYSIS"
   | "AUTO_EDIT_VISUAL"
-  | "RESEARCH";
+  | "RESEARCH"
+  | "DOUYIN_OPS";
 
 export type AiModelCapability =
   | "TEXT"

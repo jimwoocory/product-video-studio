@@ -160,6 +160,9 @@ const projectView: DouyinOpsProjectView = {
       diggCount: 1,
       replyCount: 2,
       platformCreatedAt: "2026-10-07T05:21:00.000Z",
+      sentiment: "POSITIVE",
+      category: "PRAISE",
+      priority: "LOW",
       syncedAt: "2026-10-07T05:30:00.000Z",
       rawJson: "{}",
       contentHash:
@@ -193,7 +196,12 @@ test("project page keeps persisted metrics/comments visible while runtime is off
   assert.match(html, /帅呀/);
   assert.match(html, /刷新数据/);
   assert.match(html, /同步评论/);
+  assert.match(html, /AI分类评论/);
+  assert.match(html, /情绪：正向/);
+  assert.match(html, /类型：好评/);
+  assert.match(html, /优先级：低/);
   assert.match(html, /同步这条评论的回复/);
+  assert.match(html, /AI 分类只写入 PVS 本地运营标签，不会发送回复/);
   assert.doesNotMatch(html, /确认回复|发布回复|发送私信|自动点赞/);
 });
 
@@ -280,6 +288,25 @@ test("Douyin ops HTTP exposes only P0 local/read actions", async () => {
         truncated: false
       };
     },
+    async classifyComments(input: {
+      projectId: string;
+      cids?: string[];
+      force?: boolean;
+    }) {
+      calls.push(
+        "classify:" +
+          input.projectId +
+          ":" +
+          (input.cids?.join(",") ?? "all")
+      );
+      return {
+        projectId: input.projectId,
+        requestedCount: 1,
+        classifiedCount: 1,
+        skippedCount: 0,
+        commentIds: ["comment-1"]
+      };
+    },
     async confirmBinding() {
       calls.push("binding");
       return binding;
@@ -347,6 +374,30 @@ test("Douyin ops HTTP exposes only P0 local/read actions", async () => {
       assert.equal(response.status, 200);
     }
 
+    const classify = await fetch(
+      base + "/api/projects/project-1/douyin/comments/classify",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          cids: ["1001"],
+          force: false
+        })
+      }
+    );
+    assert.equal(classify.status, 200);
+    const classifyBody = await classify.json() as {
+      result: {
+        classifiedCount: number;
+      };
+    };
+    assert.equal(
+      classifyBody.result.classifiedCount,
+      1
+    );
+
     const bind = await fetch(
       base + "/api/projects/project-1/douyin/binding/confirm",
       {
@@ -384,6 +435,7 @@ test("Douyin ops HTTP exposes only P0 local/read actions", async () => {
       "metrics",
       "comments",
       "replies:1001",
+      "classify:project-1:1001",
       "binding"
     ]);
   } finally {
