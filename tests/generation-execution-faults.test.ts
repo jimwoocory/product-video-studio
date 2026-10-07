@@ -164,7 +164,7 @@ test("reconcile matrix plus poll/download failures preserve durable Attempt sema
       | "SUCCEEDED",
     handle?: GenerationHandle
   ) {
-    const clipId = `clip-${label}`;
+    const clipId = `clip-${projectId}-${label}`;
     const requestHash = hash(`request-${label}`);
     const request = {
       ...makeRequest(),
