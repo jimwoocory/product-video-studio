@@ -63,6 +63,7 @@ model Project {
   publishReceipts PublishReceiptRecord[]
   douyinWorkBindings DouyinWorkBindingRecord[]
   douyinMetricSnapshots DouyinMetricSnapshotRecord[]
+  douyinComments DouyinCommentRecord[]
 }
 
 model SmartGenerationRunRecord {
@@ -700,6 +701,7 @@ model DouyinWorkBindingRecord {
 
   project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
   snapshots DouyinMetricSnapshotRecord[]
+  comments DouyinCommentRecord[]
 
   @@index([projectId, createdAt])
   @@index([projectId, status])
@@ -729,6 +731,39 @@ model DouyinMetricSnapshotRecord {
   @@unique([projectId, captureKey])
   @@index([projectId, awemeId, capturedAt])
   @@index([bindingId, capturedAt])
+  @@index([contentHash])
+}
+
+model DouyinCommentRecord {
+  id                String   @id
+  projectId         String
+  bindingId         String
+  awemeId           String
+  cid               String
+  uid               String?
+  secUid            String?
+  nickname          String
+  text              String
+  diggCount         Int
+  replyCount        Int
+  platformCreatedAt DateTime?
+  parentCid         String?
+  avatarUrl         String?
+  sentiment         String?
+  priority          String?
+  syncedAt          DateTime
+  rawJson           String
+  contentHash       String
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  binding DouyinWorkBindingRecord @relation(fields: [bindingId], references: [id], onDelete: Cascade)
+
+  @@unique([awemeId, cid])
+  @@index([projectId, awemeId, platformCreatedAt])
+  @@index([bindingId, platformCreatedAt])
+  @@index([parentCid])
   @@index([contentHash])
 }
 

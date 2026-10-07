@@ -87,6 +87,30 @@ export const douyinMetricSnapshotSchema = z.object({
   createdAt: isoDateTimeSchema
 });
 
+export const douyinCommentSchema = z.object({
+  id: entityIdSchema,
+  projectId: entityIdSchema,
+  bindingId: entityIdSchema,
+  awemeId: douyinAwemeIdSchema,
+  cid: z.string().trim().regex(/^\d{1,40}$/, "invalid Douyin comment id"),
+  uid: z.string().optional(),
+  secUid: z.string().optional(),
+  nickname: z.string(),
+  text: z.string(),
+  diggCount: z.number().int().nonnegative(),
+  replyCount: z.number().int().nonnegative(),
+  platformCreatedAt: isoDateTimeSchema.optional(),
+  parentCid: z.string().trim().regex(/^\d{1,40}$/).optional(),
+  avatarUrl: z.string().optional(),
+  sentiment: nonEmptyStringSchema.optional(),
+  priority: nonEmptyStringSchema.optional(),
+  syncedAt: isoDateTimeSchema,
+  rawJson: z.string(),
+  contentHash: sha256Schema,
+  createdAt: isoDateTimeSchema,
+  updatedAt: isoDateTimeSchema
+});
+
 export type DouyinWorkBindingStatus = z.infer<
   typeof douyinWorkBindingStatusSchema
 >;
@@ -101,4 +125,7 @@ export type DouyinWorkBinding = z.infer<
 >;
 export type DouyinMetricSnapshot = z.infer<
   typeof douyinMetricSnapshotSchema
+>;
+export type DouyinComment = z.infer<
+  typeof douyinCommentSchema
 >;

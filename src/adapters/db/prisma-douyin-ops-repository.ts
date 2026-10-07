@@ -1,8 +1,10 @@
 import type { PrismaClient } from "@prisma/client";
 import type { DouyinOpsRepository } from "../../application/ports/douyin-ops-repository.js";
 import {
+  douyinCommentSchema,
   douyinMetricSnapshotSchema,
   douyinWorkBindingSchema,
+  type DouyinComment,
   type DouyinMetricSnapshot,
   type DouyinWorkBinding
 } from "../../domain/douyin-ops.js";
@@ -39,6 +41,30 @@ type SnapshotRow = {
   rawJson: string;
   contentHash: string;
   createdAt: Date;
+};
+
+type CommentRow = {
+  id: string;
+  projectId: string;
+  bindingId: string;
+  awemeId: string;
+  cid: string;
+  uid: string | null;
+  secUid: string | null;
+  nickname: string;
+  text: string;
+  diggCount: number;
+  replyCount: number;
+  platformCreatedAt: Date | null;
+  parentCid: string | null;
+  avatarUrl: string | null;
+  sentiment: string | null;
+  priority: string | null;
+  syncedAt: Date;
+  rawJson: string;
+  contentHash: string;
+  createdAt: Date;
+  updatedAt: Date;
 };
 
 function bindingToDomain(
@@ -92,6 +118,36 @@ function snapshotToDomain(
     rawJson: row.rawJson,
     contentHash: row.contentHash,
     createdAt: row.createdAt.toISOString()
+  });
+}
+
+function commentToDomain(
+  row: CommentRow
+): DouyinComment {
+  return douyinCommentSchema.parse({
+    id: row.id,
+    projectId: row.projectId,
+    bindingId: row.bindingId,
+    awemeId: row.awemeId,
+    cid: row.cid,
+    ...(row.uid ? { uid: row.uid } : {}),
+    ...(row.secUid ? { secUid: row.secUid } : {}),
+    nickname: row.nickname,
+    text: row.text,
+    diggCount: row.diggCount,
+    replyCount: row.replyCount,
+    ...(row.platformCreatedAt
+      ? { platformCreatedAt: row.platformCreatedAt.toISOString() }
+      : {}),
+    ...(row.parentCid ? { parentCid: row.parentCid } : {}),
+    ...(row.avatarUrl ? { avatarUrl: row.avatarUrl } : {}),
+    ...(row.sentiment ? { sentiment: row.sentiment } : {}),
+    ...(row.priority ? { priority: row.priority } : {}),
+    syncedAt: row.syncedAt.toISOString(),
+    rawJson: row.rawJson,
+    contentHash: row.contentHash,
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString()
   });
 }
 
@@ -253,5 +309,114 @@ export class PrismaDouyinOpsRepository
       });
     const domain = rows.map(snapshotToDomain);
     return limit ? domain.reverse() : domain;
+  }
+
+  async upsertComments(
+    input: DouyinComment[]
+  ): Promise<DouyinComment[]> {
+    const values = input.map((item) =>
+      douyinCommentSchema.parse(item)
+    );
+    const output: DouyinComment[] = [];
+    for (const value of values) {
+      const row = await this.db.douyinCommentRecord.upsert({
+        where: {
+          awemeId_cid: {
+            awemeId: value.awemeId,
+            cid: value.cid
+          }
+        },
+        create: {
+          id: value.id,
+          projectId: value.projectId,
+          bindingId: value.bindingId,
+          awemeId: value.awemeId,
+          cid: value.cid,
+          uid: value.uid ?? null,
+          secUid: value.secUid ?? null,
+          nickname: value.nickname,
+          text: value.text,
+          diggCount: value.diggCount,
+          replyCount: value.replyCount,
+          platformCreatedAt: value.platformCreatedAt
+            ? new Date(value.platformCreatedAt)
+            : null,
+          parentCid: value.parentCid ?? null,
+          avatarUrl: value.avatarUrl ?? null,
+          sentiment: value.sentiment ?? null,
+          priority: value.priority ?? null,
+          syncedAt: new Date(value.syncedAt),
+          rawJson: value.rawJson,
+          contentHash: value.contentHash,
+          createdAt: new Date(value.createdAt),
+          updatedAt: new Date(value.updatedAt)
+        },
+        update: {
+          projectId: value.projectId,
+          bindingId: value.bindingId,
+          uid: value.uid ?? null,
+          secUid: value.secUid ?? null,
+          nickname: value.nickname,
+          text: value.text,
+          diggCount: value.diggCount,
+          replyCount: value.replyCount,
+          platformCreatedAt: value.platformCreatedAt
+            ? new Date(value.platformCreatedAt)
+            : null,
+          parentCid: value.parentCid ?? null,
+          avatarUrl: value.avatarUrl ?? null,
+          syncedAt: new Date(value.syncedAt),
+          rawJson: value.rawJson,
+          contentHash: value.contentHash,
+          updatedAt: new Date(value.updatedAt)
+        }
+      });
+      output.push(commentToDomain(row));
+    }
+    return output;
+  }
+
+  async listComments(input: {
+    projectId: string;
+    awemeId?: string;
+    parentCid?: string | null;
+    limit?: number;
+  }): Promise<DouyinComment[]> {
+    const limit =
+      input.limit === undefined
+        ? undefined
+        : Math.max(1, Math.min(1000, Math.trunc(input.limit)));
+    const rows = await this.db.douyinCommentRecord.findMany({
+      where: {
+        projectId: input.projectId,
+        ...(input.awemeId ? { awemeId: input.awemeId } : {}),
+        ...(input.parentCid === null
+          ? { parentCid: null }
+          : input.parentCid
+            ? { parentCid: input.parentCid }
+            : {})
+      },
+      orderBy: [
+        { platformCreatedAt: "asc" },
+        { createdAt: "asc" }
+      ],
+      ...(limit ? { take: limit } : {})
+    });
+    return rows.map(commentToDomain);
+  }
+
+  async findComment(input: {
+    awemeId: string;
+    cid: string;
+  }): Promise<DouyinComment | null> {
+    const row = await this.db.douyinCommentRecord.findUnique({
+      where: {
+        awemeId_cid: {
+          awemeId: input.awemeId,
+          cid: input.cid
+        }
+      }
+    });
+    return row ? commentToDomain(row) : null;
   }
 }
