@@ -3,6 +3,7 @@ import type {
   DouyinCommentClassification,
   DouyinMetricSnapshot,
   DouyinReplyDraft,
+  DouyinReplyDraftRevision,
   DouyinWorkBinding
 } from "../../domain/douyin-ops.js";
 
@@ -93,5 +94,21 @@ export interface DouyinOpsRepository {
   listReplyDrafts(
     commentId: string
   ): Promise<DouyinReplyDraft[]>;
+
+  findReplyDraftById(
+    draftId: string
+  ): Promise<DouyinReplyDraft | null>;
+
+  mutateReplyDraft(input: {
+    draftId: string;
+    expectedRevision: number;
+    currentText: string;
+    status: "DRAFT" | "REJECTED";
+    revisionRecord: DouyinReplyDraftRevision;
+  }): Promise<DouyinReplyDraft | null>;
+
+  listReplyDraftRevisions(
+    draftId: string
+  ): Promise<DouyinReplyDraftRevision[]>;
 
 }

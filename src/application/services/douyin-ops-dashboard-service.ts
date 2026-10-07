@@ -437,6 +437,26 @@ export class DouyinOpsDashboardService {
     });
   }
 
+
+  async editReplyDraft(input: {
+    projectId: string;
+    draftId: string;
+    expectedRevision: number;
+    currentText: string;
+  }): Promise<DouyinReplyDraft> {
+    await this.requireProject(input.projectId);
+    return this.replyDrafts.edit(input);
+  }
+
+  async rejectReplyDraft(input: {
+    projectId: string;
+    draftId: string;
+    expectedRevision: number;
+  }): Promise<DouyinReplyDraft> {
+    await this.requireProject(input.projectId);
+    return this.replyDrafts.reject(input);
+  }
+
   async confirmBinding(input: {
     projectId: string;
     awemeId: string;

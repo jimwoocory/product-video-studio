@@ -259,6 +259,7 @@ test("generates a local reply draft from confirmed facts and audits fact ids", a
     });
 
     assert.equal(draft.status, "DRAFT");
+    assert.equal(draft.revision, 1);
     assert.equal(draft.commentId, fx.comment.id);
     assert.equal(draft.awemeId, AWEME);
     assert.equal(
@@ -513,4 +514,140 @@ test("draft generation requires a stored comment on the current bound work", asy
   } finally {
     await fx.cleanup();
   }
+});
+
+test("edits a local reply draft with optimistic revision and immutable audit", async () => {
+  const fx = await fixture();
+  try {
+    const draft = await fx.service.generate({
+      projectId: fx.projectId,
+      cid: fx.comment.cid,
+      createdAt: "2026-10-07T07:11:00.000Z"
+    });
+
+    const edited = await fx.service.edit({
+      projectId: fx.projectId,
+      draftId: draft.id,
+      expectedRevision: 1,
+      currentText: "人工修改后的草稿，只保存在 PVS。",
+      updatedAt: "2026-10-07T07:13:00.000Z"
+    });
+
+    assert.equal(edited.status, "DRAFT");
+    assert.equal(edited.revision, 2);
+    assert.equal(
+      edited.currentText,
+      "人工修改后的草稿，只保存在 PVS。"
+    );
+    assert.equal(
+      edited.generatedText,
+      draft.generatedText
+    );
+
+    const revisions =
+      await fx.service.revisions(draft.id);
+    assert.equal(revisions.length, 1);
+    assert.equal(revisions[0]!.action, "EDIT");
+    assert.equal(revisions[0]!.beforeText, draft.currentText);
+    assert.equal(revisions[0]!.afterText, edited.currentText);
+    assert.equal(revisions[0]!.expectedRevision, 1);
+    assert.equal(revisions[0]!.resultingRevision, 2);
+  } finally {
+    await fx.cleanup();
+  }
+});
+
+test("stale reply draft revision fails without overwriting newer text", async () => {
+  const fx = await fixture();
+  try {
+    const draft = await fx.service.generate({
+      projectId: fx.projectId,
+      cid: fx.comment.cid
+    });
+
+    const edited = await fx.service.edit({
+      projectId: fx.projectId,
+      draftId: draft.id,
+      expectedRevision: 1,
+      currentText: "第一窗口已经保存的新内容"
+    });
+    assert.equal(edited.revision, 2);
+
+    await assert.rejects(
+      fx.service.edit({
+        projectId: fx.projectId,
+        draftId: draft.id,
+        expectedRevision: 1,
+        currentText: "旧窗口试图覆盖"
+      }),
+      (error: unknown) =>
+        error instanceof DomainValidationError &&
+        /已被更新/.test(error.message)
+    );
+
+    const latest =
+      await fx.repo.findReplyDraftById(draft.id);
+    assert.equal(latest?.revision, 2);
+    assert.equal(
+      latest?.currentText,
+      "第一窗口已经保存的新内容"
+    );
+    assert.equal(
+      (await fx.service.revisions(draft.id)).length,
+      1
+    );
+  } finally {
+    await fx.cleanup();
+  }
+});
+
+test("rejects a local draft and prevents later editing", async () => {
+  const fx = await fixture();
+  try {
+    const draft = await fx.service.generate({
+      projectId: fx.projectId,
+      cid: fx.comment.cid
+    });
+
+    const rejected = await fx.service.reject({
+      projectId: fx.projectId,
+      draftId: draft.id,
+      expectedRevision: 1,
+      updatedAt: "2026-10-07T07:14:00.000Z"
+    });
+    assert.equal(rejected.status, "REJECTED");
+    assert.equal(rejected.revision, 2);
+    assert.equal(rejected.currentText, draft.currentText);
+
+    const revisions =
+      await fx.service.revisions(draft.id);
+    assert.equal(revisions.length, 1);
+    assert.equal(revisions[0]!.action, "REJECT");
+    assert.equal(revisions[0]!.afterStatus, "REJECTED");
+
+    await assert.rejects(
+      fx.service.edit({
+        projectId: fx.projectId,
+        draftId: draft.id,
+        expectedRevision: 2,
+        currentText: "拒绝后不能继续编辑"
+      }),
+      /只有 DRAFT 状态/
+    );
+  } finally {
+    await fx.cleanup();
+  }
+});
+
+test("P1-03 service exposes no approval or posting action", async () => {
+  const source = await fs.readFile(
+    path.resolve(
+      "src/application/services/douyin-reply-draft-service.ts"
+    ),
+    "utf8"
+  );
+  assert.doesNotMatch(
+    source,
+    /postReply|publishReply|approveReply|status:\s*"POSTED"|status:\s*"APPROVED"/
+  );
 });

@@ -4,12 +4,14 @@ import {
   douyinCommentClassificationSchema,
   douyinCommentSchema,
   douyinMetricSnapshotSchema,
+  douyinReplyDraftRevisionSchema,
   douyinReplyDraftSchema,
   douyinWorkBindingSchema,
   type DouyinComment,
   type DouyinCommentClassification,
   type DouyinMetricSnapshot,
   type DouyinReplyDraft,
+  type DouyinReplyDraftRevision,
   type DouyinWorkBinding
 } from "../../domain/douyin-ops.js";
 
@@ -107,6 +109,7 @@ type ReplyDraftRow = {
   currentText: string;
   strategy: string;
   status: string;
+  revision: number;
   runtimeId: string;
   runtimeVersion: string;
   providerId: string | null;
@@ -115,6 +118,21 @@ type ReplyDraftRow = {
   configVersion: number | null;
   createdAt: Date;
   updatedAt: Date;
+};
+
+type ReplyDraftRevisionRow = {
+  id: string;
+  projectId: string;
+  draftId: string;
+  commentId: string;
+  action: string;
+  beforeText: string;
+  afterText: string;
+  beforeStatus: string;
+  afterStatus: string;
+  expectedRevision: number;
+  resultingRevision: number;
+  createdAt: Date;
 };
 
 function bindingToDomain(
@@ -248,6 +266,7 @@ function replyDraftToDomain(
     currentText: row.currentText,
     strategy: row.strategy,
     status: row.status,
+    revision: row.revision,
     runtimeId: row.runtimeId,
     runtimeVersion: row.runtimeVersion,
     ...(row.providerId ? { providerId: row.providerId } : {}),
@@ -258,6 +277,25 @@ function replyDraftToDomain(
       : {}),
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString()
+  });
+}
+
+function replyDraftRevisionToDomain(
+  row: ReplyDraftRevisionRow
+): DouyinReplyDraftRevision {
+  return douyinReplyDraftRevisionSchema.parse({
+    id: row.id,
+    projectId: row.projectId,
+    draftId: row.draftId,
+    commentId: row.commentId,
+    action: row.action,
+    beforeText: row.beforeText,
+    afterText: row.afterText,
+    beforeStatus: row.beforeStatus,
+    afterStatus: row.afterStatus,
+    expectedRevision: row.expectedRevision,
+    resultingRevision: row.resultingRevision,
+    createdAt: row.createdAt.toISOString()
   });
 }
 
@@ -664,6 +702,7 @@ export class PrismaDouyinOpsRepository
         currentText: value.currentText,
         strategy: value.strategy,
         status: value.status,
+        revision: value.revision,
         runtimeId: value.runtimeId,
         runtimeVersion: value.runtimeVersion,
         providerId: value.providerId ?? null,
@@ -727,5 +766,90 @@ export class PrismaDouyinOpsRepository
         ]
       });
     return rows.map(replyDraftToDomain);
+  }
+
+  async findReplyDraftById(
+    draftId: string
+  ): Promise<DouyinReplyDraft | null> {
+    const row =
+      await this.db.douyinReplyDraftRecord.findUnique({
+        where: { id: draftId }
+      });
+    return row ? replyDraftToDomain(row) : null;
+  }
+
+  async mutateReplyDraft(input: {
+    draftId: string;
+    expectedRevision: number;
+    currentText: string;
+    status: "DRAFT" | "REJECTED";
+    revisionRecord: DouyinReplyDraftRevision;
+  }): Promise<DouyinReplyDraft | null> {
+    const audit =
+      douyinReplyDraftRevisionSchema.parse(
+        input.revisionRecord
+      );
+
+    return this.db.$transaction(async (tx) => {
+      const updated =
+        await tx.douyinReplyDraftRecord.updateMany({
+          where: {
+            id: input.draftId,
+            revision: input.expectedRevision
+          },
+          data: {
+            currentText: input.currentText,
+            status: input.status,
+            revision: { increment: 1 },
+            updatedAt: new Date(audit.createdAt)
+          }
+        });
+
+      if (updated.count !== 1) {
+        return null;
+      }
+
+      await tx.douyinReplyDraftRevisionRecord.create({
+        data: {
+          id: audit.id,
+          projectId: audit.projectId,
+          draftId: audit.draftId,
+          commentId: audit.commentId,
+          action: audit.action,
+          beforeText: audit.beforeText,
+          afterText: audit.afterText,
+          beforeStatus: audit.beforeStatus,
+          afterStatus: audit.afterStatus,
+          expectedRevision: audit.expectedRevision,
+          resultingRevision: audit.resultingRevision,
+          createdAt: new Date(audit.createdAt)
+        }
+      });
+
+      const row =
+        await tx.douyinReplyDraftRecord.findUnique({
+          where: { id: input.draftId }
+        });
+      if (!row) {
+        throw new Error(
+          "Reply draft disappeared during mutation"
+        );
+      }
+      return replyDraftToDomain(row);
+    });
+  }
+
+  async listReplyDraftRevisions(
+    draftId: string
+  ): Promise<DouyinReplyDraftRevision[]> {
+    const rows =
+      await this.db.douyinReplyDraftRevisionRecord.findMany({
+        where: { draftId },
+        orderBy: [
+          { resultingRevision: "asc" },
+          { createdAt: "asc" }
+        ]
+      });
+    return rows.map(replyDraftRevisionToDomain);
   }
 }

@@ -7,10 +7,12 @@ import {
 } from "../ports/structured-ai-runtime.js";
 import type { ProductFlowService } from "./product-flow.js";
 import {
+  douyinReplyDraftRevisionSchema,
   douyinReplyDraftSchema,
   douyinReplyStrategySchema,
   type DouyinCommentClassification,
-  type DouyinReplyDraft
+  type DouyinReplyDraft,
+  type DouyinReplyDraftRevision
 } from "../../domain/douyin-ops.js";
 import { DomainValidationError } from "../../domain/validation.js";
 
@@ -224,6 +226,7 @@ export class DouyinReplyDraftService {
       currentText: output.replyText,
       strategy: output.strategy,
       status: "DRAFT",
+      revision: 1,
       runtimeId: this.runtime.id,
       runtimeVersion: this.runtime.version,
       ...(metadata?.providerId
@@ -243,6 +246,147 @@ export class DouyinReplyDraftService {
     });
 
     return this.repo.createReplyDraft(draft);
+  }
+
+
+  private async requireEditableDraft(input: {
+    projectId: string;
+    draftId: string;
+    expectedRevision: number;
+  }): Promise<DouyinReplyDraft> {
+    if (
+      !Number.isInteger(input.expectedRevision) ||
+      input.expectedRevision < 1
+    ) {
+      throw new DomainValidationError(
+        "草稿 revision 无效"
+      );
+    }
+
+    const draft =
+      await this.repo.findReplyDraftById(
+        input.draftId
+      );
+    if (!draft || draft.projectId !== input.projectId) {
+      throw new DomainValidationError(
+        "回复草稿不存在或不属于当前项目"
+      );
+    }
+    if (draft.status !== "DRAFT") {
+      throw new DomainValidationError(
+        "只有 DRAFT 状态的回复草稿可以编辑或拒绝"
+      );
+    }
+    if (draft.revision !== input.expectedRevision) {
+      throw new DomainValidationError(
+        "回复草稿已被更新，请刷新页面后重试"
+      );
+    }
+    return draft;
+  }
+
+  async edit(input: {
+    projectId: string;
+    draftId: string;
+    expectedRevision: number;
+    currentText: string;
+    updatedAt?: string;
+  }): Promise<DouyinReplyDraft> {
+    const currentText = input.currentText.trim();
+    if (!currentText || currentText.length > 280) {
+      throw new DomainValidationError(
+        "回复草稿内容必须为 1–280 个字符"
+      );
+    }
+
+    const draft = await this.requireEditableDraft(
+      input
+    );
+    const now =
+      input.updatedAt ?? new Date().toISOString();
+
+    const audit =
+      douyinReplyDraftRevisionSchema.parse({
+        id: randomUUID(),
+        projectId: input.projectId,
+        draftId: draft.id,
+        commentId: draft.commentId,
+        action: "EDIT",
+        beforeText: draft.currentText,
+        afterText: currentText,
+        beforeStatus: draft.status,
+        afterStatus: "DRAFT",
+        expectedRevision: draft.revision,
+        resultingRevision: draft.revision + 1,
+        createdAt: now
+      });
+
+    const updated =
+      await this.repo.mutateReplyDraft({
+        draftId: draft.id,
+        expectedRevision: draft.revision,
+        currentText,
+        status: "DRAFT",
+        revisionRecord: audit
+      });
+    if (!updated) {
+      throw new DomainValidationError(
+        "回复草稿已被更新，请刷新页面后重试"
+      );
+    }
+    return updated;
+  }
+
+  async reject(input: {
+    projectId: string;
+    draftId: string;
+    expectedRevision: number;
+    updatedAt?: string;
+  }): Promise<DouyinReplyDraft> {
+    const draft = await this.requireEditableDraft(
+      input
+    );
+    const now =
+      input.updatedAt ?? new Date().toISOString();
+
+    const audit =
+      douyinReplyDraftRevisionSchema.parse({
+        id: randomUUID(),
+        projectId: input.projectId,
+        draftId: draft.id,
+        commentId: draft.commentId,
+        action: "REJECT",
+        beforeText: draft.currentText,
+        afterText: draft.currentText,
+        beforeStatus: draft.status,
+        afterStatus: "REJECTED",
+        expectedRevision: draft.revision,
+        resultingRevision: draft.revision + 1,
+        createdAt: now
+      });
+
+    const updated =
+      await this.repo.mutateReplyDraft({
+        draftId: draft.id,
+        expectedRevision: draft.revision,
+        currentText: draft.currentText,
+        status: "REJECTED",
+        revisionRecord: audit
+      });
+    if (!updated) {
+      throw new DomainValidationError(
+        "回复草稿已被更新，请刷新页面后重试"
+      );
+    }
+    return updated;
+  }
+
+  revisions(
+    draftId: string
+  ): Promise<DouyinReplyDraftRevision[]> {
+    return this.repo.listReplyDraftRevisions(
+      draftId
+    );
   }
 
   latestForWork(input: {

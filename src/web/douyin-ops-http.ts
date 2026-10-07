@@ -148,6 +148,12 @@ export async function handleDouyinOpsHttp(
   const replyDraftGenerate = url.pathname.match(
     /^\/api\/projects\/([^/]+)\/douyin\/comments\/([^/]+)\/reply-draft$/
   );
+  const replyDraftSave = url.pathname.match(
+    /^\/api\/projects\/([^/]+)\/douyin\/reply-drafts\/([^/]+)\/save$/
+  );
+  const replyDraftReject = url.pathname.match(
+    /^\/api\/projects\/([^/]+)\/douyin\/reply-drafts\/([^/]+)\/reject$/
+  );
   const bindingConfirm = url.pathname.match(
     /^\/api\/projects\/([^/]+)\/douyin\/binding\/confirm$/
   );
@@ -163,6 +169,8 @@ export async function handleDouyinOpsHttp(
     !commentClassify &&
     !replySync &&
     !replyDraftGenerate &&
+    !replyDraftSave &&
+    !replyDraftReject &&
     !bindingConfirm
   ) {
     return false;
@@ -220,6 +228,8 @@ export async function handleDouyinOpsHttp(
       commentClassify ??
       replySync ??
       replyDraftGenerate ??
+      replyDraftSave ??
+      replyDraftReject ??
       bindingConfirm;
     const projectId = decodeURIComponent(
       projectMatch![1]!
@@ -324,6 +334,50 @@ export async function handleDouyinOpsHttp(
           await service.generateReplyDraft({
             projectId,
             cid
+          })
+      });
+      return true;
+    }
+
+    if (replyDraftSave) {
+      const draftId = decodeURIComponent(
+        replyDraftSave[2]!
+      );
+      const input = z
+        .object({
+          expectedRevision: z.number().int().positive(),
+          currentText: z.string().trim().min(1).max(280)
+        })
+        .strict()
+        .parse(await body(req));
+      json(res, 200, {
+        draft:
+          await service.editReplyDraft({
+            projectId,
+            draftId,
+            expectedRevision: input.expectedRevision,
+            currentText: input.currentText
+          })
+      });
+      return true;
+    }
+
+    if (replyDraftReject) {
+      const draftId = decodeURIComponent(
+        replyDraftReject[2]!
+      );
+      const input = z
+        .object({
+          expectedRevision: z.number().int().positive()
+        })
+        .strict()
+        .parse(await body(req));
+      json(res, 200, {
+        draft:
+          await service.rejectReplyDraft({
+            projectId,
+            draftId,
+            expectedRevision: input.expectedRevision
           })
       });
       return true;

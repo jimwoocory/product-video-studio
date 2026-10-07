@@ -188,6 +188,7 @@ const projectView: DouyinOpsProjectView = {
       currentText: "感谢关注，这是一条只保存在 PVS 的 AI 回复草稿。",
       strategy: "THANK_AND_ENGAGE",
       status: "DRAFT",
+      revision: 1,
       runtimeId: "TEST_REPLY",
       runtimeVersion: "1",
       providerId: "aihubmix",
@@ -228,6 +229,9 @@ test("project page keeps persisted metrics/comments visible while runtime is off
   assert.match(html, /AI 回复草稿（仅本地，未发布）/);
   assert.match(html, /感谢关注，这是一条只保存在 PVS 的 AI 回复草稿/);
   assert.match(html, /重新生成AI回复草稿/);
+  assert.match(html, /保存草稿/);
+  assert.match(html, /拒绝草稿/);
+  assert.match(html, /revision 1/);
   assert.match(html, /同步这条评论的回复/);
   assert.match(html, /AI 分类和回复草稿只保存在 PVS 本地，本阶段不会发送回复/);
   assert.doesNotMatch(html, /确认回复|发布回复|发送私信|自动点赞/);
@@ -347,6 +351,43 @@ test("Douyin ops HTTP exposes only P0 local/read actions", async () => {
       );
       return projectView.replyDrafts[0]!;
     },
+    async editReplyDraft(input: {
+      projectId: string;
+      draftId: string;
+      expectedRevision: number;
+      currentText: string;
+    }) {
+      calls.push(
+        "save-draft:" +
+          input.draftId +
+          ":" +
+          input.expectedRevision
+      );
+      return {
+        ...projectView.replyDrafts[0]!,
+        currentText: input.currentText,
+        revision: input.expectedRevision + 1,
+        updatedAt: "2026-10-07T05:32:00.000Z"
+      };
+    },
+    async rejectReplyDraft(input: {
+      projectId: string;
+      draftId: string;
+      expectedRevision: number;
+    }) {
+      calls.push(
+        "reject-draft:" +
+          input.draftId +
+          ":" +
+          input.expectedRevision
+      );
+      return {
+        ...projectView.replyDrafts[0]!,
+        status: "REJECTED" as const,
+        revision: input.expectedRevision + 1,
+        updatedAt: "2026-10-07T05:33:00.000Z"
+      };
+    },
     async confirmBinding() {
       calls.push("binding");
       return binding;
@@ -461,6 +502,48 @@ test("Douyin ops HTTP exposes only P0 local/read actions", async () => {
       /只保存在 PVS/
     );
 
+    const saveDraft = await fetch(
+      base + "/api/projects/project-1/douyin/reply-drafts/reply-draft-1/save",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          expectedRevision: 1,
+          currentText: "人工编辑后的本地草稿"
+        })
+      }
+    );
+    assert.equal(saveDraft.status, 200);
+    const saved = await saveDraft.json() as {
+      draft: { revision: number; currentText: string };
+    };
+    assert.equal(saved.draft.revision, 2);
+    assert.equal(
+      saved.draft.currentText,
+      "人工编辑后的本地草稿"
+    );
+
+    const rejectDraft = await fetch(
+      base + "/api/projects/project-1/douyin/reply-drafts/reply-draft-1/reject",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          expectedRevision: 1
+        })
+      }
+    );
+    assert.equal(rejectDraft.status, 200);
+    const rejected = await rejectDraft.json() as {
+      draft: { status: string; revision: number };
+    };
+    assert.equal(rejected.draft.status, "REJECTED");
+    assert.equal(rejected.draft.revision, 2);
+
     const bind = await fetch(
       base + "/api/projects/project-1/douyin/binding/confirm",
       {
@@ -500,6 +583,8 @@ test("Douyin ops HTTP exposes only P0 local/read actions", async () => {
       "replies:1001",
       "classify:project-1:1001",
       "reply-draft:project-1:1001",
+      "save-draft:reply-draft-1:1",
+      "reject-draft:reply-draft-1:1",
       "binding"
     ]);
   } finally {

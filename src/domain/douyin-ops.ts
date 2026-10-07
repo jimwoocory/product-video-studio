@@ -217,6 +217,7 @@ export const douyinReplyDraftSchema = z.object({
   currentText: z.string().trim().min(1).max(280),
   strategy: douyinReplyStrategySchema,
   status: douyinReplyDraftStatusSchema,
+  revision: z.number().int().positive(),
   runtimeId: nonEmptyStringSchema,
   runtimeVersion: nonEmptyStringSchema,
   providerId: nonEmptyStringSchema.optional(),
@@ -235,4 +236,31 @@ export type DouyinReplyDraftStatus = z.infer<
 >;
 export type DouyinReplyDraft = z.infer<
   typeof douyinReplyDraftSchema
+>;
+
+export const douyinReplyDraftRevisionActionSchema = z.enum([
+  "EDIT",
+  "REJECT"
+]);
+
+export const douyinReplyDraftRevisionSchema = z.object({
+  id: entityIdSchema,
+  projectId: entityIdSchema,
+  draftId: entityIdSchema,
+  commentId: entityIdSchema,
+  action: douyinReplyDraftRevisionActionSchema,
+  beforeText: z.string().trim().min(1).max(280),
+  afterText: z.string().trim().min(1).max(280),
+  beforeStatus: douyinReplyDraftStatusSchema,
+  afterStatus: douyinReplyDraftStatusSchema,
+  expectedRevision: z.number().int().positive(),
+  resultingRevision: z.number().int().positive(),
+  createdAt: isoDateTimeSchema
+});
+
+export type DouyinReplyDraftRevisionAction = z.infer<
+  typeof douyinReplyDraftRevisionActionSchema
+>;
+export type DouyinReplyDraftRevision = z.infer<
+  typeof douyinReplyDraftRevisionSchema
 >;
