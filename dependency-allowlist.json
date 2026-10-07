@@ -753,7 +753,7 @@
     },
     {
       "name": "social-auto-upload",
-      "version": "9059bca234efe71a578938c37a60b0ac6966b364",
+      "version": "217d22c64020db961d0cf8c1a19f91f7a12a3f0b",
       "ecosystem": "external-runtime",
       "usage": "Locally installed and separately maintained MIT-licensed browser publishing runtime used by the DOUYIN_BROWSER_AUTOMATION provider. Product Video Studio calls the structured sau-pvs bridge and does not vendor the Python source tree or browser binaries.",
       "license": "MIT",
@@ -767,19 +767,19 @@
       "reviewedAt": "2026-10-05"
     },
     {
-      "name": "dy-cli",
-      "version": "0.2.2+15d5818d3d75edf19b266263539bcd0b7fb46423",
+      "name": "yht-douyin-cli",
+      "version": "cbadd60fcd234d1059529aa5d54f75dcbadd43d6",
       "ecosystem": "external-runtime",
-      "usage": "Locally installed, separately maintained MIT-licensed Douyin research runtime used by the DOUYIN market-video provider for user-initiated public video search and selected-video media retrieval. Product Video Studio invokes its CLI as an external process and does not vendor its Python source tree, virtual environment, browser binaries, account cookies, or other runtime state.",
+      "usage": "Locally installed and separately maintained MIT-licensed Douyin operations runtime used by Product Video Studio through the read-only PVS_DOUYIN_JSON v1 bridge for account identity, own-work data, public search, comments, replies and selected-video media metadata. PVS does not vendor its Node source tree, browser profile, Tampermonkey extension, cookies, bridge token or runtime database.",
       "license": "MIT",
-      "sourceUrl": "https://github.com/Youhai020616/douyin/tree/v0.2.2",
+      "sourceUrl": "https://github.com/Yht20927/douyin-cli",
       "bundled": false,
       "runtimeType": "external-runtime",
       "approvedForP0": true,
       "serviceTermsStatus": "LOCAL_EXTERNAL_RUNTIME_NOT_BUNDLED_DOUYIN_PLATFORM_TERMS_APPLY",
-      "licenseFile": "third_party/licenses/dy-cli-MIT-LICENSE",
-      "noticeEntry": "THIRD_PARTY_NOTICES.md#dy-cli-external-research-runtime",
-      "reviewedAt": "2026-10-05"
+      "licenseFile": "third_party/licenses/yht-douyin-cli-MIT-LICENSE",
+      "noticeEntry": "THIRD_PARTY_NOTICES.md#yht20927douyin-cli-external-operations-runtime",
+      "reviewedAt": "2026-10-07"
     }
   ]
 }

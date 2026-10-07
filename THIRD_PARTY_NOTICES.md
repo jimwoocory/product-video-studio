@@ -95,23 +95,23 @@ Purpose: OAuth user authorization plus `video.create` upload/create APIs for exp
 
 Classification: external local runtime, not bundled into Product Video Studio.
 Upstream: https://github.com/dreammis/social-auto-upload
-Reviewed upstream baseline: commit `0012d2c355f88f683cc38dde2a2db209e14091bc`; PVS integration branch commit: `9059bca234efe71a578938c37a60b0ac6966b364`.
+Reviewed upstream baseline: commit `0012d2c355f88f683cc38dde2a2db209e14091bc`; PVS integration branch commit: `217d22c64020db961d0cf8c1a19f91f7a12a3f0b`.
 License: MIT, Copyright (c) 2023 dreammis. The reviewed license text is archived at `third_party/licenses/social-auto-upload-MIT-LICENSE`.
 
 Product Video Studio uses a separately maintained PVS integration branch of this runtime only behind the `DOUYIN_BROWSER_AUTOMATION` adapter. The application calls the machine-readable `sau-pvs` bridge as an external process; the Python source tree, Patchright/Playwright browser binaries and Python dependency environment are not copied into or redistributed with Product Video Studio by this integration.
 
 Douyin account cookies are stored only below Product Video Studio's ignored `.runtime-secrets/publishing/social-auto-upload/` runtime directory. They are not written to Prisma, project artifacts, `project.json`, normal application logs or Git. Use of Douyin remains subject to the platform's current account, content and publishing rules.
 
-## dy-cli external research runtime
+## Yht20927/douyin-cli external operations runtime
 
 Classification: external local runtime, not bundled into Product Video Studio.
-Upstream: https://github.com/Youhai020616/douyin/tree/v0.2.2
-Reviewed upstream baseline: tag `v0.2.2`, commit `15d5818d3d75edf19b266263539bcd0b7fb46423`.
-License: MIT, Copyright (c) 2026. The reviewed license text is archived at `third_party/licenses/dy-cli-MIT-LICENSE`.
+Upstream: https://github.com/Yht20927/douyin-cli
+Reviewed upstream baseline: commit `04f0a7695a5db48d9a6d3a89d720697570c4a191`; PVS integration branch commit: `cbadd60fcd234d1059529aa5d54f75dcbadd43d6`.
+License: MIT, Copyright (c) 2026 Yht20927. The reviewed license text is archived at `third_party/licenses/yht-douyin-cli-MIT-LICENSE`.
 
-Product Video Studio invokes this separately installed runtime only through the pluggable Douyin market-video research adapter. The application uses it for user-initiated public-video search and, only after an explicit candidate-selection action, retrieval of media needed for ReferenceVideoProfile analysis. The Python source tree, virtual environment, browser binaries, cookies and account state are not copied into or redistributed with Product Video Studio.
+Product Video Studio invokes this separately installed runtime only through the typed Douyin Operations adapter and its machine-readable, read-only `PVS_DOUYIN_JSON` v1 bridge. P0 capabilities are limited to health/identity checks, own-work data, public search, video detail, comments, replies and selected-video media metadata. The runtime's Node source tree, Tampermonkey extension, dedicated browser profile, cookies, bridge token, browser binaries and local SQLite state are not copied into or redistributed with Product Video Studio.
 
-Search results are isolated from Product Truth. A competitor or trend video can become a creative structure reference only; it cannot become current-product Evidence or a ProductFact. Login, captcha and risk-control states fail closed and require normal user action. Use of Douyin remains subject to the platform's current account, content and research rules.
+P0 deliberately does not expose the runtime's write-capable comment, like, DM or campaign commands. Login, captcha and risk-control states fail closed and require normal user action. PVS persists its own work bindings, metric history and comments as the business source of truth. Use of Douyin remains subject to the platform's current account, content, publishing and research rules.
 
 ## Prohibited license classes
 
