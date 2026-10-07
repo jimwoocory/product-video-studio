@@ -2,6 +2,7 @@ import type {
   DouyinComment,
   DouyinCommentClassification,
   DouyinMetricSnapshot,
+  DouyinReplyDraft,
   DouyinWorkBinding
 } from "../../domain/douyin-ops.js";
 
@@ -75,5 +76,22 @@ export interface DouyinOpsRepository {
   listCommentClassifications(
     commentId: string
   ): Promise<DouyinCommentClassification[]>;
+
+  createReplyDraft(
+    input: DouyinReplyDraft
+  ): Promise<DouyinReplyDraft>;
+
+  latestReplyDraft(
+    commentId: string
+  ): Promise<DouyinReplyDraft | null>;
+
+  listLatestReplyDrafts(input: {
+    projectId: string;
+    awemeId?: string;
+  }): Promise<DouyinReplyDraft[]>;
+
+  listReplyDrafts(
+    commentId: string
+  ): Promise<DouyinReplyDraft[]>;
 
 }

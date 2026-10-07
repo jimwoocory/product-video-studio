@@ -171,6 +171,31 @@ const projectView: DouyinOpsProjectView = {
       updatedAt: "2026-10-07T05:30:00.000Z"
     }
   ],
+  replyDrafts: [
+    {
+      id: "reply-draft-1",
+      projectId: "project-1",
+      commentId: "comment-1",
+      awemeId: work.awemeId,
+      cid: "1001",
+      sourceContentHash:
+        "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      classificationId: "classification-1",
+      productTruthHash:
+        "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      usedFactIds: ["fact-1"],
+      generatedText: "感谢关注，这是一条只保存在 PVS 的 AI 回复草稿。",
+      currentText: "感谢关注，这是一条只保存在 PVS 的 AI 回复草稿。",
+      strategy: "THANK_AND_ENGAGE",
+      status: "DRAFT",
+      runtimeId: "TEST_REPLY",
+      runtimeVersion: "1",
+      providerId: "aihubmix",
+      modelId: "deepseek-v4.1-flash",
+      createdAt: "2026-10-07T05:31:00.000Z",
+      updatedAt: "2026-10-07T05:31:00.000Z"
+    }
+  ],
   candidates: [],
   candidatesStatus: "OFFLINE",
   candidatesMessage: "当前无法读取账号作品。"
@@ -200,8 +225,11 @@ test("project page keeps persisted metrics/comments visible while runtime is off
   assert.match(html, /情绪：正向/);
   assert.match(html, /类型：好评/);
   assert.match(html, /优先级：低/);
+  assert.match(html, /AI 回复草稿（仅本地，未发布）/);
+  assert.match(html, /感谢关注，这是一条只保存在 PVS 的 AI 回复草稿/);
+  assert.match(html, /重新生成AI回复草稿/);
   assert.match(html, /同步这条评论的回复/);
-  assert.match(html, /AI 分类只写入 PVS 本地运营标签，不会发送回复/);
+  assert.match(html, /AI 分类和回复草稿只保存在 PVS 本地，本阶段不会发送回复/);
   assert.doesNotMatch(html, /确认回复|发布回复|发送私信|自动点赞/);
 });
 
@@ -307,6 +335,18 @@ test("Douyin ops HTTP exposes only P0 local/read actions", async () => {
         commentIds: ["comment-1"]
       };
     },
+    async generateReplyDraft(input: {
+      projectId: string;
+      cid: string;
+    }) {
+      calls.push(
+        "reply-draft:" +
+          input.projectId +
+          ":" +
+          input.cid
+      );
+      return projectView.replyDrafts[0]!;
+    },
     async confirmBinding() {
       calls.push("binding");
       return binding;
@@ -398,6 +438,29 @@ test("Douyin ops HTTP exposes only P0 local/read actions", async () => {
       1
     );
 
+    const replyDraft = await fetch(
+      base + "/api/projects/project-1/douyin/comments/1001/reply-draft",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: "{}"
+      }
+    );
+    assert.equal(replyDraft.status, 200);
+    const replyDraftBody = await replyDraft.json() as {
+      draft: {
+        status: string;
+        currentText: string;
+      };
+    };
+    assert.equal(replyDraftBody.draft.status, "DRAFT");
+    assert.match(
+      replyDraftBody.draft.currentText,
+      /只保存在 PVS/
+    );
+
     const bind = await fetch(
       base + "/api/projects/project-1/douyin/binding/confirm",
       {
@@ -436,6 +499,7 @@ test("Douyin ops HTTP exposes only P0 local/read actions", async () => {
       "comments",
       "replies:1001",
       "classify:project-1:1001",
+      "reply-draft:project-1:1001",
       "binding"
     ]);
   } finally {

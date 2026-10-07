@@ -4,10 +4,12 @@ import {
   douyinCommentClassificationSchema,
   douyinCommentSchema,
   douyinMetricSnapshotSchema,
+  douyinReplyDraftSchema,
   douyinWorkBindingSchema,
   type DouyinComment,
   type DouyinCommentClassification,
   type DouyinMetricSnapshot,
+  type DouyinReplyDraft,
   type DouyinWorkBinding
 } from "../../domain/douyin-ops.js";
 
@@ -89,6 +91,30 @@ type ClassificationRow = {
   configVersion: number | null;
   classifiedAt: Date;
   createdAt: Date;
+};
+
+type ReplyDraftRow = {
+  id: string;
+  projectId: string;
+  commentId: string;
+  awemeId: string;
+  cid: string;
+  sourceContentHash: string;
+  classificationId: string | null;
+  productTruthHash: string;
+  usedFactIdsJson: string;
+  generatedText: string;
+  currentText: string;
+  strategy: string;
+  status: string;
+  runtimeId: string;
+  runtimeVersion: string;
+  providerId: string | null;
+  modelId: string | null;
+  executionId: string | null;
+  configVersion: number | null;
+  createdAt: Date;
+  updatedAt: Date;
 };
 
 function bindingToDomain(
@@ -200,6 +226,38 @@ function classificationToDomain(
       : {}),
     classifiedAt: row.classifiedAt.toISOString(),
     createdAt: row.createdAt.toISOString()
+  });
+}
+
+function replyDraftToDomain(
+  row: ReplyDraftRow
+): DouyinReplyDraft {
+  return douyinReplyDraftSchema.parse({
+    id: row.id,
+    projectId: row.projectId,
+    commentId: row.commentId,
+    awemeId: row.awemeId,
+    cid: row.cid,
+    sourceContentHash: row.sourceContentHash,
+    ...(row.classificationId
+      ? { classificationId: row.classificationId }
+      : {}),
+    productTruthHash: row.productTruthHash,
+    usedFactIds: JSON.parse(row.usedFactIdsJson) as string[],
+    generatedText: row.generatedText,
+    currentText: row.currentText,
+    strategy: row.strategy,
+    status: row.status,
+    runtimeId: row.runtimeId,
+    runtimeVersion: row.runtimeVersion,
+    ...(row.providerId ? { providerId: row.providerId } : {}),
+    ...(row.modelId ? { modelId: row.modelId } : {}),
+    ...(row.executionId ? { executionId: row.executionId } : {}),
+    ...(row.configVersion !== null
+      ? { configVersion: row.configVersion }
+      : {}),
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString()
   });
 }
 
@@ -585,5 +643,89 @@ export class PrismaDouyinOpsRepository
         ]
       });
     return rows.map(classificationToDomain);
+  }
+
+  async createReplyDraft(
+    input: DouyinReplyDraft
+  ): Promise<DouyinReplyDraft> {
+    const value = douyinReplyDraftSchema.parse(input);
+    const row = await this.db.douyinReplyDraftRecord.create({
+      data: {
+        id: value.id,
+        projectId: value.projectId,
+        commentId: value.commentId,
+        awemeId: value.awemeId,
+        cid: value.cid,
+        sourceContentHash: value.sourceContentHash,
+        classificationId: value.classificationId ?? null,
+        productTruthHash: value.productTruthHash,
+        usedFactIdsJson: JSON.stringify(value.usedFactIds),
+        generatedText: value.generatedText,
+        currentText: value.currentText,
+        strategy: value.strategy,
+        status: value.status,
+        runtimeId: value.runtimeId,
+        runtimeVersion: value.runtimeVersion,
+        providerId: value.providerId ?? null,
+        modelId: value.modelId ?? null,
+        executionId: value.executionId ?? null,
+        configVersion: value.configVersion ?? null,
+        createdAt: new Date(value.createdAt),
+        updatedAt: new Date(value.updatedAt)
+      }
+    });
+    return replyDraftToDomain(row);
+  }
+
+  async latestReplyDraft(
+    commentId: string
+  ): Promise<DouyinReplyDraft | null> {
+    const row =
+      await this.db.douyinReplyDraftRecord.findFirst({
+        where: { commentId },
+        orderBy: [
+          { createdAt: "desc" },
+          { updatedAt: "desc" }
+        ]
+      });
+    return row ? replyDraftToDomain(row) : null;
+  }
+
+  async listLatestReplyDrafts(input: {
+    projectId: string;
+    awemeId?: string;
+  }): Promise<DouyinReplyDraft[]> {
+    const rows =
+      await this.db.douyinReplyDraftRecord.findMany({
+        where: {
+          projectId: input.projectId,
+          ...(input.awemeId
+            ? { awemeId: input.awemeId }
+            : {})
+        },
+        orderBy: [
+          { createdAt: "asc" },
+          { updatedAt: "asc" }
+        ]
+      });
+    const latest = new Map<string, ReplyDraftRow>();
+    for (const row of rows) {
+      latest.set(row.commentId, row);
+    }
+    return [...latest.values()].map(replyDraftToDomain);
+  }
+
+  async listReplyDrafts(
+    commentId: string
+  ): Promise<DouyinReplyDraft[]> {
+    const rows =
+      await this.db.douyinReplyDraftRecord.findMany({
+        where: { commentId },
+        orderBy: [
+          { createdAt: "asc" },
+          { updatedAt: "asc" }
+        ]
+      });
+    return rows.map(replyDraftToDomain);
   }
 }

@@ -145,6 +145,9 @@ export async function handleDouyinOpsHttp(
   const replySync = url.pathname.match(
     /^\/api\/projects\/([^/]+)\/douyin\/comments\/([^/]+)\/replies\/sync$/
   );
+  const replyDraftGenerate = url.pathname.match(
+    /^\/api\/projects\/([^/]+)\/douyin\/comments\/([^/]+)\/reply-draft$/
+  );
   const bindingConfirm = url.pathname.match(
     /^\/api\/projects\/([^/]+)\/douyin\/binding\/confirm$/
   );
@@ -159,6 +162,7 @@ export async function handleDouyinOpsHttp(
     !commentSync &&
     !commentClassify &&
     !replySync &&
+    !replyDraftGenerate &&
     !bindingConfirm
   ) {
     return false;
@@ -215,6 +219,7 @@ export async function handleDouyinOpsHttp(
       commentSync ??
       commentClassify ??
       replySync ??
+      replyDraftGenerate ??
       bindingConfirm;
     const projectId = decodeURIComponent(
       projectMatch![1]!
@@ -300,6 +305,26 @@ export async function handleDouyinOpsHttp(
       json(res, 200, {
         result:
           await service.syncReplies(projectId, cid)
+      });
+      return true;
+    }
+
+    if (replyDraftGenerate) {
+      const cid = decodeURIComponent(
+        replyDraftGenerate[2]!
+      );
+      if (!/^\d{1,40}$/.test(cid)) {
+        throw new DomainValidationError(
+          "评论 ID 格式无效"
+        );
+      }
+      z.object({}).strict().parse(await body(req));
+      json(res, 200, {
+        draft:
+          await service.generateReplyDraft({
+            projectId,
+            cid
+          })
       });
       return true;
     }

@@ -11,6 +11,7 @@ import type {
 import type { DouyinOpsRepository } from "../ports/douyin-ops-repository.js";
 import type {
   DouyinMetricSnapshot,
+  DouyinReplyDraft,
   DouyinWorkBinding,
   DouyinComment
 } from "../../domain/douyin-ops.js";
@@ -28,6 +29,7 @@ import {
 import { DouyinMetricService } from "./douyin-metric-service.js";
 import { DouyinCommentService } from "./douyin-comment-service.js";
 import { DouyinCommentClassificationService } from "./douyin-comment-classification-service.js";
+import { DouyinReplyDraftService } from "./douyin-reply-draft-service.js";
 import { DouyinOpsRuntimeError } from "../ports/douyin-ops-runtime.js";
 import { DomainValidationError } from "../../domain/validation.js";
 
@@ -56,6 +58,7 @@ export type DouyinOpsProjectView = {
   binding: DouyinWorkBinding | null;
   snapshots: DouyinMetricSnapshot[];
   comments: DouyinComment[];
+  replyDrafts: DouyinReplyDraft[];
   candidates: DouyinOpsWork[];
   candidatesStatus: "READY" | "AUTH_REQUIRED" | "OFFLINE" | "FAILED";
   candidatesMessage?: string;
@@ -115,6 +118,7 @@ export class DouyinOpsDashboardService {
     private readonly metrics: DouyinMetricService,
     private readonly comments: DouyinCommentService,
     private readonly classifier: DouyinCommentClassificationService,
+    private readonly replyDrafts: DouyinReplyDraftService,
     private readonly launcher?: DouyinOpsLauncher
   ) {}
 
@@ -300,7 +304,7 @@ export class DouyinOpsDashboardService {
       account
     });
 
-    const [snapshots, comments, candidateState] =
+    const [snapshots, comments, replyDrafts, candidateState] =
       await Promise.all([
         this.metrics.history({
           projectId,
@@ -316,6 +320,12 @@ export class DouyinOpsDashboardService {
           parentCid: null,
           limit: 500
         }),
+        state.binding?.awemeId
+          ? this.replyDrafts.latestForWork({
+              projectId,
+              awemeId: state.binding.awemeId
+            })
+          : Promise.resolve([] as DouyinReplyDraft[]),
         runtime.ready &&
         account.ops.available &&
         account.ops.runtimeStatus === "READY"
@@ -346,6 +356,7 @@ export class DouyinOpsDashboardService {
       binding: state.binding,
       snapshots,
       comments,
+      replyDrafts,
       candidates: candidateState.works,
       candidatesStatus: candidateState.status,
       ...(candidateState.message
@@ -412,6 +423,17 @@ export class DouyinOpsDashboardService {
         ? { force: input.force }
         : {}),
       limit: 20
+    });
+  }
+
+  async generateReplyDraft(input: {
+    projectId: string;
+    cid: string;
+  }): Promise<DouyinReplyDraft> {
+    await this.requireProject(input.projectId);
+    return this.replyDrafts.generate({
+      projectId: input.projectId,
+      cid: input.cid
     });
   }
 

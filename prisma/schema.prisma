@@ -65,6 +65,7 @@ model Project {
   douyinMetricSnapshots DouyinMetricSnapshotRecord[]
   douyinComments DouyinCommentRecord[]
   douyinCommentClassifications DouyinCommentClassificationRecord[]
+  douyinReplyDrafts DouyinReplyDraftRecord[]
 }
 
 model SmartGenerationRunRecord {
@@ -762,6 +763,7 @@ model DouyinCommentRecord {
   project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
   binding DouyinWorkBindingRecord @relation(fields: [bindingId], references: [id], onDelete: Cascade)
   classifications DouyinCommentClassificationRecord[]
+  replyDrafts DouyinReplyDraftRecord[]
 
   @@unique([awemeId, cid])
   @@index([projectId, awemeId, platformCreatedAt])
@@ -797,6 +799,39 @@ model DouyinCommentClassificationRecord {
   @@index([commentId, classifiedAt])
   @@index([cid, classifiedAt])
   @@index([sourceContentHash])
+}
+
+model DouyinReplyDraftRecord {
+  id                String   @id
+  projectId         String
+  commentId         String
+  awemeId           String
+  cid               String
+  sourceContentHash String
+  classificationId  String?
+  productTruthHash  String
+  usedFactIdsJson   String
+  generatedText     String
+  currentText       String
+  strategy          String
+  status            String
+  runtimeId         String
+  runtimeVersion    String
+  providerId        String?
+  modelId           String?
+  executionId       String?
+  configVersion     Int?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  comment DouyinCommentRecord @relation(fields: [commentId], references: [id], onDelete: Cascade)
+
+  @@index([projectId, awemeId, createdAt])
+  @@index([commentId, createdAt])
+  @@index([cid, createdAt])
+  @@index([sourceContentHash])
+  @@index([productTruthHash])
 }
 
 model ResearchMediaCandidateRecord {

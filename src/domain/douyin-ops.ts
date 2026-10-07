@@ -187,3 +187,52 @@ export type DouyinCommentPriority = z.infer<
 export type DouyinCommentClassification = z.infer<
   typeof douyinCommentClassificationSchema
 >;
+
+export const douyinReplyStrategySchema = z.enum([
+  "ANSWER_QUESTION",
+  "ACKNOWLEDGE_FEEDBACK",
+  "THANK_AND_ENGAGE",
+  "DEESCALATE",
+  "CLARIFY_WITHOUT_CLAIMING"
+]);
+
+export const douyinReplyDraftStatusSchema = z.enum([
+  "DRAFT",
+  "REJECTED",
+  "APPROVED",
+  "POSTED"
+]);
+
+export const douyinReplyDraftSchema = z.object({
+  id: entityIdSchema,
+  projectId: entityIdSchema,
+  commentId: entityIdSchema,
+  awemeId: douyinAwemeIdSchema,
+  cid: z.string().trim().regex(/^\d{1,40}$/),
+  sourceContentHash: sha256Schema,
+  classificationId: entityIdSchema.optional(),
+  productTruthHash: sha256Schema,
+  usedFactIds: z.array(entityIdSchema),
+  generatedText: z.string().trim().min(1).max(280),
+  currentText: z.string().trim().min(1).max(280),
+  strategy: douyinReplyStrategySchema,
+  status: douyinReplyDraftStatusSchema,
+  runtimeId: nonEmptyStringSchema,
+  runtimeVersion: nonEmptyStringSchema,
+  providerId: nonEmptyStringSchema.optional(),
+  modelId: nonEmptyStringSchema.optional(),
+  executionId: entityIdSchema.optional(),
+  configVersion: z.number().int().positive().optional(),
+  createdAt: isoDateTimeSchema,
+  updatedAt: isoDateTimeSchema
+});
+
+export type DouyinReplyStrategy = z.infer<
+  typeof douyinReplyStrategySchema
+>;
+export type DouyinReplyDraftStatus = z.infer<
+  typeof douyinReplyDraftStatusSchema
+>;
+export type DouyinReplyDraft = z.infer<
+  typeof douyinReplyDraftSchema
+>;
