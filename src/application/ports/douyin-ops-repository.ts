@@ -6,6 +6,7 @@ import type {
   DouyinMetricSnapshot,
   DouyinReplyDraft,
   DouyinReplyDraftRevision,
+  DouyinReplyWriteIntent,
   DouyinWorkBinding
 } from "../../domain/douyin-ops.js";
 
@@ -105,7 +106,7 @@ export interface DouyinOpsRepository {
     draftId: string;
     expectedRevision: number;
     currentText: string;
-    status: "DRAFT" | "REJECTED";
+    status: "DRAFT" | "REJECTED" | "POSTED";
     revisionRecord: DouyinReplyDraftRevision;
   }): Promise<DouyinReplyDraft | null>;
 
@@ -150,5 +151,36 @@ export interface DouyinOpsRepository {
     projectId: string;
     deactivatedAt: string;
   }): Promise<DouyinCreativeFeedback | null>;
+
+  claimReplyWriteIntent(
+    input: DouyinReplyWriteIntent
+  ): Promise<{
+    intent: DouyinReplyWriteIntent;
+    claimed: boolean;
+  }>;
+
+  findReplyWriteIntentById(
+    intentId: string
+  ): Promise<DouyinReplyWriteIntent | null>;
+
+  findReplyWriteIntentByFingerprint(
+    operationFingerprint: string
+  ): Promise<DouyinReplyWriteIntent | null>;
+
+  completeReplyWriteIntent(input: {
+    intentId: string;
+    status: Exclude<
+      DouyinReplyWriteIntent["status"],
+      "PENDING"
+    >;
+    externalReplyCid?: string;
+    message?: string;
+    completedAt: string;
+  }): Promise<DouyinReplyWriteIntent>;
+
+  listLatestReplyWriteIntents(input: {
+    projectId: string;
+    awemeId?: string;
+  }): Promise<DouyinReplyWriteIntent[]>;
 
 }

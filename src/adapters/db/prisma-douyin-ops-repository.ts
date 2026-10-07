@@ -8,6 +8,7 @@ import {
   douyinMetricSnapshotSchema,
   douyinReplyDraftRevisionSchema,
   douyinReplyDraftSchema,
+  douyinReplyWriteIntentSchema,
   douyinWorkBindingSchema,
   type DouyinComment,
   type DouyinCommentClassification,
@@ -16,6 +17,7 @@ import {
   type DouyinMetricSnapshot,
   type DouyinReplyDraft,
   type DouyinReplyDraftRevision,
+  type DouyinReplyWriteIntent,
   type DouyinWorkBinding
 } from "../../domain/douyin-ops.js";
 
@@ -173,6 +175,27 @@ type CreativeFeedbackRow = {
   active: boolean;
   confirmedAt: Date;
   deactivatedAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+type ReplyWriteIntentRow = {
+  id: string;
+  projectId: string;
+  draftId: string;
+  commentId: string;
+  awemeId: string;
+  cid: string;
+  textHash: string;
+  operationFingerprint: string;
+  draftRevision: number;
+  status: string;
+  externalReplyCid: string | null;
+  accountPublishId: string;
+  accountOpsId: string;
+  confirmedAt: Date;
+  completedAt: Date | null;
+  message: string | null;
   createdAt: Date;
   updatedAt: Date;
 };
@@ -391,6 +414,35 @@ function creativeFeedbackToDomain(
     ...(row.deactivatedAt
       ? { deactivatedAt: row.deactivatedAt.toISOString() }
       : {}),
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString()
+  });
+}
+
+function replyWriteIntentToDomain(
+  row: ReplyWriteIntentRow
+): DouyinReplyWriteIntent {
+  return douyinReplyWriteIntentSchema.parse({
+    id: row.id,
+    projectId: row.projectId,
+    draftId: row.draftId,
+    commentId: row.commentId,
+    awemeId: row.awemeId,
+    cid: row.cid,
+    textHash: row.textHash,
+    operationFingerprint: row.operationFingerprint,
+    draftRevision: row.draftRevision,
+    status: row.status,
+    ...(row.externalReplyCid
+      ? { externalReplyCid: row.externalReplyCid }
+      : {}),
+    accountPublishId: row.accountPublishId,
+    accountOpsId: row.accountOpsId,
+    confirmedAt: row.confirmedAt.toISOString(),
+    ...(row.completedAt
+      ? { completedAt: row.completedAt.toISOString() }
+      : {}),
+    ...(row.message ? { message: row.message } : {}),
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString()
   });
@@ -1135,5 +1187,170 @@ export class PrismaDouyinOpsRepository
         where: { id: input.feedbackId }
       });
     return row ? creativeFeedbackToDomain(row) : null;
+  }
+
+  async claimReplyWriteIntent(
+    input: DouyinReplyWriteIntent
+  ): Promise<{
+    intent: DouyinReplyWriteIntent;
+    claimed: boolean;
+  }> {
+    const value =
+      douyinReplyWriteIntentSchema.parse(input);
+
+    const existingById =
+      await this.db.douyinReplyWriteIntentRecord.findUnique({
+        where: { id: value.id }
+      });
+    if (existingById) {
+      return {
+        intent: replyWriteIntentToDomain(existingById),
+        claimed: false
+      };
+    }
+
+    const existingByFingerprint =
+      await this.db.douyinReplyWriteIntentRecord.findUnique({
+        where: {
+          operationFingerprint:
+            value.operationFingerprint
+        }
+      });
+    if (existingByFingerprint) {
+      return {
+        intent:
+          replyWriteIntentToDomain(
+            existingByFingerprint
+          ),
+        claimed: false
+      };
+    }
+
+    try {
+      const row =
+        await this.db.douyinReplyWriteIntentRecord.create({
+          data: {
+            id: value.id,
+            projectId: value.projectId,
+            draftId: value.draftId,
+            commentId: value.commentId,
+            awemeId: value.awemeId,
+            cid: value.cid,
+            textHash: value.textHash,
+            operationFingerprint:
+              value.operationFingerprint,
+            draftRevision: value.draftRevision,
+            status: value.status,
+            externalReplyCid:
+              value.externalReplyCid ?? null,
+            accountPublishId:
+              value.accountPublishId,
+            accountOpsId: value.accountOpsId,
+            confirmedAt:
+              new Date(value.confirmedAt),
+            completedAt: value.completedAt
+              ? new Date(value.completedAt)
+              : null,
+            message: value.message ?? null,
+            createdAt: new Date(value.createdAt),
+            updatedAt: new Date(value.updatedAt)
+          }
+        });
+      return {
+        intent: replyWriteIntentToDomain(row),
+        claimed: true
+      };
+    } catch (error) {
+      const raced =
+        (await this.db.douyinReplyWriteIntentRecord.findUnique({
+          where: { id: value.id }
+        })) ??
+        (await this.db.douyinReplyWriteIntentRecord.findUnique({
+          where: {
+            operationFingerprint:
+              value.operationFingerprint
+          }
+        }));
+      if (raced) {
+        return {
+          intent: replyWriteIntentToDomain(raced),
+          claimed: false
+        };
+      }
+      throw error;
+    }
+  }
+
+  async findReplyWriteIntentById(
+    intentId: string
+  ): Promise<DouyinReplyWriteIntent | null> {
+    const row =
+      await this.db.douyinReplyWriteIntentRecord.findUnique({
+        where: { id: intentId }
+      });
+    return row ? replyWriteIntentToDomain(row) : null;
+  }
+
+  async findReplyWriteIntentByFingerprint(
+    operationFingerprint: string
+  ): Promise<DouyinReplyWriteIntent | null> {
+    const row =
+      await this.db.douyinReplyWriteIntentRecord.findUnique({
+        where: { operationFingerprint }
+      });
+    return row ? replyWriteIntentToDomain(row) : null;
+  }
+
+  async completeReplyWriteIntent(input: {
+    intentId: string;
+    status: Exclude<
+      DouyinReplyWriteIntent["status"],
+      "PENDING"
+    >;
+    externalReplyCid?: string;
+    message?: string;
+    completedAt: string;
+  }): Promise<DouyinReplyWriteIntent> {
+    const row =
+      await this.db.douyinReplyWriteIntentRecord.update({
+        where: { id: input.intentId },
+        data: {
+          status: input.status,
+          externalReplyCid:
+            input.externalReplyCid ?? null,
+          message: input.message ?? null,
+          completedAt:
+            new Date(input.completedAt),
+          updatedAt:
+            new Date(input.completedAt)
+        }
+      });
+    return replyWriteIntentToDomain(row);
+  }
+
+  async listLatestReplyWriteIntents(input: {
+    projectId: string;
+    awemeId?: string;
+  }): Promise<DouyinReplyWriteIntent[]> {
+    const rows =
+      await this.db.douyinReplyWriteIntentRecord.findMany({
+        where: {
+          projectId: input.projectId,
+          ...(input.awemeId
+            ? { awemeId: input.awemeId }
+            : {})
+        },
+        orderBy: [
+          { createdAt: "asc" },
+          { updatedAt: "asc" }
+        ]
+      });
+    const latest = new Map<string, ReplyWriteIntentRow>();
+    for (const row of rows) {
+      latest.set(row.draftId, row);
+    }
+    return [...latest.values()].map(
+      replyWriteIntentToDomain
+    );
   }
 }

@@ -240,7 +240,8 @@ export type DouyinReplyDraft = z.infer<
 
 export const douyinReplyDraftRevisionActionSchema = z.enum([
   "EDIT",
-  "REJECT"
+  "REJECT",
+  "POST"
 ]);
 
 export const douyinReplyDraftRevisionSchema = z.object({
@@ -317,4 +318,40 @@ export const douyinCreativeFeedbackSchema = z.object({
 
 export type DouyinCreativeFeedback = z.infer<
   typeof douyinCreativeFeedbackSchema
+>;
+
+export const douyinReplyWriteIntentStatusSchema = z.enum([
+  "PENDING",
+  "REPLY_POSTED_CONFIRMED",
+  "SUBMISSION_UNKNOWN",
+  "REJECTED",
+  "FAILED"
+]);
+
+export const douyinReplyWriteIntentSchema = z.object({
+  id: entityIdSchema,
+  projectId: entityIdSchema,
+  draftId: entityIdSchema,
+  commentId: entityIdSchema,
+  awemeId: douyinAwemeIdSchema,
+  cid: z.string().trim().regex(/^\d{1,40}$/),
+  textHash: sha256Schema,
+  operationFingerprint: sha256Schema,
+  draftRevision: z.number().int().positive(),
+  status: douyinReplyWriteIntentStatusSchema,
+  externalReplyCid: z.string().trim().regex(/^\d{1,40}$/).optional(),
+  accountPublishId: nonEmptyStringSchema,
+  accountOpsId: nonEmptyStringSchema,
+  confirmedAt: isoDateTimeSchema,
+  completedAt: isoDateTimeSchema.optional(),
+  message: z.string().trim().max(1000).optional(),
+  createdAt: isoDateTimeSchema,
+  updatedAt: isoDateTimeSchema
+});
+
+export type DouyinReplyWriteIntentStatus = z.infer<
+  typeof douyinReplyWriteIntentStatusSchema
+>;
+export type DouyinReplyWriteIntent = z.infer<
+  typeof douyinReplyWriteIntentSchema
 >;

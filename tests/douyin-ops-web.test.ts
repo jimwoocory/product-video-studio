@@ -245,7 +245,7 @@ const projectView: DouyinOpsProjectView = {
   candidatesMessage: "当前无法读取账号作品。"
 };
 
-test("global Douyin ops page is visual, Chinese and read-only", () => {
+test("global Douyin ops page is visual, Chinese and exposes only explicit single-reply writes", () => {
   const html = renderDouyinOpsGlobalPage(globalView);
   assert.match(html, /抖音运营/);
   assert.match(html, /账号已匹配/);
@@ -253,7 +253,9 @@ test("global Douyin ops page is visual, Chinese and read-only", () => {
   assert.match(html, /可以的#拳击/);
   assert.match(html, /启动 \/ 打开抖音运营连接/);
   assert.match(html, /查看发布后表现/);
-  assert.doesNotMatch(html, /确认回复|发送私信|自动点赞|campaign run/);
+  assert.match(html, /单条人工确认回复/);
+  assert.match(html, /不会自动评论、批量回复、点赞或私信/);
+  assert.doesNotMatch(html, /campaign run/);
 });
 
 test("project page keeps persisted metrics/comments visible while runtime is offline", () => {
@@ -269,11 +271,14 @@ test("project page keeps persisted metrics/comments visible while runtime is off
   assert.match(html, /情绪：正向/);
   assert.match(html, /类型：好评/);
   assert.match(html, /优先级：低/);
-  assert.match(html, /AI 回复草稿（仅本地，未发布）/);
+  assert.match(html, /AI 回复草稿（发布前可编辑）/);
   assert.match(html, /感谢关注，这是一条只保存在 PVS 的 AI 回复草稿/);
   assert.match(html, /重新生成AI回复草稿/);
   assert.match(html, /保存草稿/);
   assert.match(html, /拒绝草稿/);
+  assert.match(html, /确认并发布这条回复/);
+  assert.match(html, /发布按钮只会发送当前这一条评论回复/);
+  assert.match(html, /需要运营连接正常、账号强匹配且作品已绑定/);
   assert.match(html, /revision 1/);
   assert.match(html, /发布后 AI 复盘/);
   assert.match(html, /AI复盘/);
@@ -282,8 +287,10 @@ test("project page keeps persisted metrics/comments visible while runtime is off
   assert.match(html, /下一条创意建议/);
   assert.match(html, /加入下一轮创意/);
   assert.match(html, /同步这条评论的回复/);
-  assert.match(html, /AI 分类和回复草稿只保存在 PVS 本地，本阶段不会发送回复/);
-  assert.doesNotMatch(html, /确认回复|发布回复|发送私信|自动点赞/);
+  assert.match(html, /本阶段仅支持你对单条草稿显式确认后发送，不会自动或批量回复/);
+  assert.match(html, /即将向抖音真实发送这 1 条回复/);
+  assert.match(html, /平台状态无法确认。系统不会自动重试/);
+  assert.doesNotMatch(html, /发送私信|自动点赞|批量发布/);
 });
 
 test("publisher account check has a bounded UI timeout", async () => {
@@ -435,6 +442,45 @@ test("Douyin ops HTTP exposes only P0 local/read actions", async () => {
         status: "REJECTED" as const,
         revision: input.expectedRevision + 1,
         updatedAt: "2026-10-07T05:33:00.000Z"
+      };
+    },
+    async publishReplyDraft(input: {
+      projectId: string;
+      draftId: string;
+      expectedRevision: number;
+      writeIntentId: string;
+      confirmed: boolean;
+    }) {
+      calls.push(
+        "publish-draft:" +
+          input.draftId +
+          ":" +
+          input.expectedRevision
+      );
+      return {
+        intent: {
+          id: input.writeIntentId,
+          projectId: input.projectId,
+          draftId: input.draftId,
+          commentId: "comment-1",
+          awemeId: work.awemeId,
+          cid: "1001",
+          textHash:
+            "a".repeat(64),
+          operationFingerprint:
+            "b".repeat(64),
+          draftRevision: input.expectedRevision,
+          status: "REPLY_POSTED_CONFIRMED" as const,
+          externalReplyCid: "99887766",
+          accountPublishId: "50805615998",
+          accountOpsId: "50805615998",
+          confirmedAt: "2026-10-07T05:33:30.000Z",
+          completedAt: "2026-10-07T05:33:31.000Z",
+          createdAt: "2026-10-07T05:33:30.000Z",
+          updatedAt: "2026-10-07T05:33:31.000Z"
+        },
+        externalCalled: true,
+        draftMarkedPosted: true
       };
     },
     async generateRetrospective(projectId: string) {
@@ -666,6 +712,37 @@ test("Douyin ops HTTP exposes only P0 local/read actions", async () => {
     assert.equal(rejected.draft.status, "REJECTED");
     assert.equal(rejected.draft.revision, 2);
 
+    const publishDraft = await fetch(
+      base + "/api/projects/project-1/douyin/reply-drafts/reply-draft-1/publish",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          expectedRevision: 1,
+          writeIntentId:
+            "11111111-1111-4111-8111-111111111111",
+          confirmed: true
+        })
+      }
+    );
+    assert.equal(publishDraft.status, 200);
+    const published = await publishDraft.json() as {
+      result: {
+        intent: { status: string };
+        externalCalled: boolean;
+      };
+    };
+    assert.equal(
+      published.result.intent.status,
+      "REPLY_POSTED_CONFIRMED"
+    );
+    assert.equal(
+      published.result.externalCalled,
+      true
+    );
+
     const retrospective = await fetch(
       base + "/api/projects/project-1/douyin/retrospective/generate",
       {
@@ -757,6 +834,7 @@ test("Douyin ops HTTP exposes only P0 local/read actions", async () => {
       "reply-draft:project-1:1001",
       "save-draft:reply-draft-1:1",
       "reject-draft:reply-draft-1:1",
+      "publish-draft:reply-draft-1:1",
       "retrospective:project-1",
       "promote-feedback:insight-1:0",
       "deactivate-feedback:feedback-1",

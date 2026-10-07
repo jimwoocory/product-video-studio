@@ -36,6 +36,7 @@ import { DouyinH5HandoffProvider } from "../adapters/publish/douyin-h5-handoff-p
 import { DouyinBrowserAutomationProvider } from "../adapters/publish/douyin-browser-automation-provider.js";
 import { SocialAutoUploadRuntime } from "../adapters/publish/social-auto-upload-runtime.js";
 import { YhtDouyinOpsRuntime } from "../adapters/douyin/yht-douyin-ops-runtime.js";
+import { YhtDouyinReplyWriterRuntime } from "../adapters/douyin/yht-douyin-reply-writer-runtime.js";
 import { WindowsDouyinOpsLauncher } from "../adapters/douyin/windows-douyin-ops-launcher.js";
 import { ManualExportProvider } from "../adapters/publish/manual-export-provider.js";
 import { HttpWebResearchProvider } from "../adapters/research/http-web-research-provider.js";
@@ -93,6 +94,7 @@ import { DouyinMetricService } from "../application/services/douyin-metric-servi
 import { DouyinCommentService } from "../application/services/douyin-comment-service.js";
 import { DouyinCommentClassificationService } from "../application/services/douyin-comment-classification-service.js";
 import { DouyinReplyDraftService } from "../application/services/douyin-reply-draft-service.js";
+import { DouyinReplyPublishService } from "../application/services/douyin-reply-publish-service.js";
 import { DouyinRetrospectiveService } from "../application/services/douyin-retrospective-service.js";
 import { DouyinCreativeFeedbackService } from "../application/services/douyin-creative-feedback-service.js";
 import { DouyinOpsDashboardService } from "../application/services/douyin-ops-dashboard-service.js";
@@ -419,6 +421,15 @@ export function createDefaultDependencies(): WebDependencies {
       productFlow,
       aiRuntime
     );
+  const douyinReplyWriter =
+    new YhtDouyinReplyWriterRuntime();
+  const douyinReplyPublishService =
+    new DouyinReplyPublishService(
+      douyinOpsRepo,
+      douyinOpsRuntime,
+      douyinAccountBinding,
+      douyinReplyWriter
+    );
   const douyinRetrospectiveService =
     new DouyinRetrospectiveService(
       douyinOpsRepo,
@@ -440,6 +451,7 @@ export function createDefaultDependencies(): WebDependencies {
     douyinCommentService,
     douyinCommentClassifier,
     douyinReplyDraftService,
+    douyinReplyPublishService,
     douyinRetrospectiveService,
     douyinCreativeFeedbackService,
     new WindowsDouyinOpsLauncher()

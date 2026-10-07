@@ -32,6 +32,7 @@ import { DouyinMetricService } from "./douyin-metric-service.js";
 import { DouyinCommentService } from "./douyin-comment-service.js";
 import { DouyinCommentClassificationService } from "./douyin-comment-classification-service.js";
 import { DouyinReplyDraftService } from "./douyin-reply-draft-service.js";
+import { DouyinReplyPublishService, type DouyinReplyPublishResult } from "./douyin-reply-publish-service.js";
 import { DouyinRetrospectiveService } from "./douyin-retrospective-service.js";
 import { DouyinCreativeFeedbackService } from "./douyin-creative-feedback-service.js";
 import { DouyinOpsRuntimeError } from "../ports/douyin-ops-runtime.js";
@@ -125,6 +126,7 @@ export class DouyinOpsDashboardService {
     private readonly comments: DouyinCommentService,
     private readonly classifier: DouyinCommentClassificationService,
     private readonly replyDrafts: DouyinReplyDraftService,
+    private readonly replyPublisher: DouyinReplyPublishService,
     private readonly retrospective: DouyinRetrospectiveService,
     private readonly creativeFeedbackService: DouyinCreativeFeedbackService,
     private readonly launcher?: DouyinOpsLauncher
@@ -505,6 +507,17 @@ export class DouyinOpsDashboardService {
   }): Promise<DouyinReplyDraft> {
     await this.requireProject(input.projectId);
     return this.replyDrafts.reject(input);
+  }
+
+  async publishReplyDraft(input: {
+    projectId: string;
+    draftId: string;
+    expectedRevision: number;
+    writeIntentId: string;
+    confirmed: boolean;
+  }): Promise<DouyinReplyPublishResult> {
+    await this.requireProject(input.projectId);
+    return this.replyPublisher.publish(input);
   }
 
   async confirmBinding(input: {

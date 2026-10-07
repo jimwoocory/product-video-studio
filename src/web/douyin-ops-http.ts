@@ -163,6 +163,9 @@ export async function handleDouyinOpsHttp(
   const replyDraftReject = url.pathname.match(
     /^\/api\/projects\/([^/]+)\/douyin\/reply-drafts\/([^/]+)\/reject$/
   );
+  const replyDraftPublish = url.pathname.match(
+    /^\/api\/projects\/([^/]+)\/douyin\/reply-drafts\/([^/]+)\/publish$/
+  );
   const bindingConfirm = url.pathname.match(
     /^\/api\/projects\/([^/]+)\/douyin\/binding\/confirm$/
   );
@@ -183,6 +186,7 @@ export async function handleDouyinOpsHttp(
     !replyDraftGenerate &&
     !replyDraftSave &&
     !replyDraftReject &&
+    !replyDraftPublish &&
     !bindingConfirm
   ) {
     return false;
@@ -245,6 +249,7 @@ export async function handleDouyinOpsHttp(
       replyDraftGenerate ??
       replyDraftSave ??
       replyDraftReject ??
+      replyDraftPublish ??
       bindingConfirm;
     const projectId = decodeURIComponent(
       projectMatch![1]!
@@ -445,6 +450,31 @@ export async function handleDouyinOpsHttp(
             projectId,
             draftId,
             expectedRevision: input.expectedRevision
+          })
+      });
+      return true;
+    }
+
+    if (replyDraftPublish) {
+      const draftId = decodeURIComponent(
+        replyDraftPublish[2]!
+      );
+      const input = z
+        .object({
+          expectedRevision: z.number().int().positive(),
+          writeIntentId: z.string().uuid(),
+          confirmed: z.literal(true)
+        })
+        .strict()
+        .parse(await body(req));
+      json(res, 200, {
+        result:
+          await service.publishReplyDraft({
+            projectId,
+            draftId,
+            expectedRevision: input.expectedRevision,
+            writeIntentId: input.writeIntentId,
+            confirmed: true
           })
       });
       return true;

@@ -69,6 +69,7 @@ model Project {
   douyinReplyDraftRevisions DouyinReplyDraftRevisionRecord[]
   douyinInsights DouyinInsightRecord[]
   douyinCreativeFeedback DouyinCreativeFeedbackRecord[]
+  douyinReplyWriteIntents DouyinReplyWriteIntentRecord[]
 }
 
 model SmartGenerationRunRecord {
@@ -832,6 +833,7 @@ model DouyinReplyDraftRecord {
   project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
   comment DouyinCommentRecord @relation(fields: [commentId], references: [id], onDelete: Cascade)
   revisions DouyinReplyDraftRevisionRecord[]
+  writeIntents DouyinReplyWriteIntentRecord[]
 
   @@index([projectId, awemeId, createdAt])
   @@index([commentId, createdAt])
@@ -912,6 +914,35 @@ model DouyinCreativeFeedbackRecord {
   @@unique([insightId, actionHash])
   @@index([projectId, active, confirmedAt])
   @@index([insightId, actionIndex])
+}
+
+model DouyinReplyWriteIntentRecord {
+  id                   String   @id
+  projectId            String
+  draftId              String
+  commentId            String
+  awemeId              String
+  cid                  String
+  textHash             String
+  operationFingerprint String   @unique
+  draftRevision        Int
+  status               String
+  externalReplyCid     String?
+  accountPublishId     String
+  accountOpsId         String
+  confirmedAt          DateTime
+  completedAt          DateTime?
+  message              String?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  draft DouyinReplyDraftRecord @relation(fields: [draftId], references: [id], onDelete: Cascade)
+
+  @@index([projectId, awemeId, createdAt])
+  @@index([draftId, createdAt])
+  @@index([commentId, createdAt])
+  @@index([status])
 }
 
 model ResearchMediaCandidateRecord {
