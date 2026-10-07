@@ -1,6 +1,7 @@
 import type {
   DouyinComment,
   DouyinCommentClassification,
+  DouyinInsight,
   DouyinMetricSnapshot,
   DouyinReplyDraft,
   DouyinReplyDraftRevision,
@@ -110,5 +111,20 @@ export interface DouyinOpsRepository {
   listReplyDraftRevisions(
     draftId: string
   ): Promise<DouyinReplyDraftRevision[]>;
+
+  createInsight(
+    input: DouyinInsight
+  ): Promise<DouyinInsight>;
+
+  latestInsight(
+    projectId: string,
+    awemeId?: string
+  ): Promise<DouyinInsight | null>;
+
+  listInsights(input: {
+    projectId: string;
+    awemeId?: string;
+    limit?: number;
+  }): Promise<DouyinInsight[]>;
 
 }

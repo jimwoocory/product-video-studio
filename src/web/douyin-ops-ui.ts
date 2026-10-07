@@ -192,6 +192,19 @@ function historyBlock(view: DouyinOpsProjectView) {
     .join("")}</tbody></table></div>`;
 }
 
+function insightItems(title: string, items: DouyinOpsProjectView["latestInsight"] extends infer T ? any[] : never): string {
+  if (!items?.length) return "";
+  return `<h4>${esc(title)}</h4><ul>${items.map((item) => `<li>${esc(item.text)}<div class="technical">证据：${esc(item.evidenceRefs.join(" / "))}</div></li>`).join("")}</ul>`;
+}
+
+function retrospectiveBlock(view: DouyinOpsProjectView): string {
+  const insight = view.latestInsight;
+  if (!insight) {
+    return '<p class="muted">还没有发布后 AI 复盘。至少保存一条作品指标快照后即可生成。</p>';
+  }
+  return `<div class="notice"><p><b>复盘摘要</b></p><p>${esc(insight.summary)}</p><div class="comment-meta"><span>生成时间：${time(insight.createdAt)}</span><span>指标证据 ${insight.metricSnapshotIds.length} 条</span><span>评论证据 ${insight.commentIds.length} 条</span></div></div>${insightItems("已验证优势", insight.strengths)}${insightItems("需要改进", insight.weaknesses)}${insightItems("用户真实关注", insight.audienceQuestions)}${insightItems("下一条创意建议", insight.nextCreativeActions)}`;
+}
+
 function commentsBlock(view: DouyinOpsProjectView) {
   if (!view.comments.length) {
     return '<p class="muted">还没有保存评论。作品绑定后点击“同步评论”。</p>';
@@ -224,11 +237,13 @@ export function renderDouyinOpsProjectPage(
 <div class="head"><div><h1>发布后表现</h1><p>${esc(view.project.name)}</p><p class="muted">${esc(runtimeNote)}</p></div><div>${runtimeStatus(view.runtime)} ${accountStatus(view.account)}</div></div>
 <section class="card"><h2>抖音作品绑定</h2>${bindingBlock(view)}<div id="bind-message" class="error"></div></section>
 <section class="card"><div class="head"><div><h2>作品表现</h2><p class="muted">每次刷新都会保存在 PVS 自己的历史快照中。</p></div><div class="actions"><button id="refresh-metrics" ${view.binding?.status === "BOUND" ? "" : "disabled"}>刷新数据</button></div></div>${metricBlock(view)}${historyBlock(view)}<div id="metric-message" class="error"></div></section>
+<section class="card"><div class="head"><div><h2>发布后 AI 复盘</h2><p class="muted">只使用 PVS 已保存的指标快照、评论和已确认产品事实，不会编造平台指标。</p></div><div class="actions"><button id="generate-retrospective" ${view.snapshots.length ? "" : "disabled"}>AI复盘</button></div></div>${retrospectiveBlock(view)}<div id="retrospective-message" class="error"></div></section>
 <section class="card"><div class="head"><div><h2>评论中心</h2><p class="muted">评论同步仍然是只读；AI 分类和回复草稿只保存在 PVS 本地，本阶段不会发送回复。</p></div><div class="actions"><button id="sync-comments" ${view.binding?.status === "BOUND" ? "" : "disabled"}>同步评论</button><button class="secondary" id="classify-comments" ${view.comments.length ? "" : "disabled"}>AI分类评论</button></div></div><div id="comments-list">${commentsBlock(view)}</div><div id="comment-message" class="error"></div></section>
 <script>
 (()=>{const projectId=${JSON.stringify(view.project.id)};
 const call=async(url,body)=>{const r=await fetch(url,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body||{})});let data={};try{data=await r.json();}catch{}if(!r.ok)throw new Error(data.message||'操作失败');return data;};
 document.querySelector('#refresh-metrics')?.addEventListener('click',async(e)=>{const b=e.currentTarget,m=document.querySelector('#metric-message');b.disabled=true;m.textContent='正在读取抖音作品数据…';try{await call('/api/projects/'+encodeURIComponent(projectId)+'/douyin/metrics/refresh');location.reload();}catch(err){m.textContent=err.message;b.disabled=false;}});
+document.querySelector('#generate-retrospective')?.addEventListener('click',async(e)=>{const b=e.currentTarget,m=document.querySelector('#retrospective-message');b.disabled=true;m.textContent='正在基于已保存指标和评论生成 AI 复盘…';try{await call('/api/projects/'+encodeURIComponent(projectId)+'/douyin/retrospective/generate',{});location.reload();}catch(err){m.textContent=err.message;b.disabled=false;}});
 document.querySelector('#sync-comments')?.addEventListener('click',async(e)=>{const b=e.currentTarget,m=document.querySelector('#comment-message');b.disabled=true;m.textContent='正在同步评论…';try{await call('/api/projects/'+encodeURIComponent(projectId)+'/douyin/comments/sync');location.reload();}catch(err){m.textContent=err.message;b.disabled=false;}});
 document.querySelector('#classify-comments')?.addEventListener('click',async(e)=>{const b=e.currentTarget,m=document.querySelector('#comment-message');b.disabled=true;m.textContent='正在用当前项目的大模型设置分析评论…';try{const data=await call('/api/projects/'+encodeURIComponent(projectId)+'/douyin/comments/classify',{});const result=data.result||{};m.textContent='AI 分类完成：本次分类 '+(result.classifiedCount||0)+' 条，跳过 '+(result.skippedCount||0)+' 条。';setTimeout(()=>location.reload(),900);}catch(err){m.textContent=err.message;b.disabled=false;}});
 document.querySelectorAll('.generate-reply-draft').forEach(b=>b.addEventListener('click',async()=>{const m=document.querySelector('#comment-message');b.disabled=true;m.textContent='正在生成 AI 回复草稿（只保存到 PVS，不会发布）…';try{await call('/api/projects/'+encodeURIComponent(projectId)+'/douyin/comments/'+encodeURIComponent(b.dataset.cid)+'/reply-draft',{});location.reload();}catch(err){m.textContent=err.message;b.disabled=false;}}));

@@ -3,12 +3,14 @@ import type { DouyinOpsRepository } from "../../application/ports/douyin-ops-rep
 import {
   douyinCommentClassificationSchema,
   douyinCommentSchema,
+  douyinInsightSchema,
   douyinMetricSnapshotSchema,
   douyinReplyDraftRevisionSchema,
   douyinReplyDraftSchema,
   douyinWorkBindingSchema,
   type DouyinComment,
   type DouyinCommentClassification,
+  type DouyinInsight,
   type DouyinMetricSnapshot,
   type DouyinReplyDraft,
   type DouyinReplyDraftRevision,
@@ -132,6 +134,29 @@ type ReplyDraftRevisionRow = {
   afterStatus: string;
   expectedRevision: number;
   resultingRevision: number;
+  createdAt: Date;
+};
+
+type InsightRow = {
+  id: string;
+  projectId: string;
+  bindingId: string;
+  awemeId: string;
+  productTruthHash: string;
+  metricSnapshotIdsJson: string;
+  commentIdsJson: string;
+  evidenceHash: string;
+  summary: string;
+  strengthsJson: string;
+  weaknessesJson: string;
+  audienceQuestionsJson: string;
+  nextCreativeActionsJson: string;
+  runtimeId: string;
+  runtimeVersion: string;
+  providerId: string | null;
+  modelId: string | null;
+  executionId: string | null;
+  configVersion: number | null;
   createdAt: Date;
 };
 
@@ -295,6 +320,39 @@ function replyDraftRevisionToDomain(
     afterStatus: row.afterStatus,
     expectedRevision: row.expectedRevision,
     resultingRevision: row.resultingRevision,
+    createdAt: row.createdAt.toISOString()
+  });
+}
+
+function insightToDomain(
+  row: InsightRow
+): DouyinInsight {
+  return douyinInsightSchema.parse({
+    id: row.id,
+    projectId: row.projectId,
+    bindingId: row.bindingId,
+    awemeId: row.awemeId,
+    productTruthHash: row.productTruthHash,
+    metricSnapshotIds:
+      JSON.parse(row.metricSnapshotIdsJson) as string[],
+    commentIds:
+      JSON.parse(row.commentIdsJson) as string[],
+    evidenceHash: row.evidenceHash,
+    summary: row.summary,
+    strengths: JSON.parse(row.strengthsJson),
+    weaknesses: JSON.parse(row.weaknessesJson),
+    audienceQuestions:
+      JSON.parse(row.audienceQuestionsJson),
+    nextCreativeActions:
+      JSON.parse(row.nextCreativeActionsJson),
+    runtimeId: row.runtimeId,
+    runtimeVersion: row.runtimeVersion,
+    ...(row.providerId ? { providerId: row.providerId } : {}),
+    ...(row.modelId ? { modelId: row.modelId } : {}),
+    ...(row.executionId ? { executionId: row.executionId } : {}),
+    ...(row.configVersion !== null
+      ? { configVersion: row.configVersion }
+      : {}),
     createdAt: row.createdAt.toISOString()
   });
 }
@@ -851,5 +909,80 @@ export class PrismaDouyinOpsRepository
         ]
       });
     return rows.map(replyDraftRevisionToDomain);
+  }
+
+  async createInsight(
+    input: DouyinInsight
+  ): Promise<DouyinInsight> {
+    const value = douyinInsightSchema.parse(input);
+    const row = await this.db.douyinInsightRecord.create({
+      data: {
+        id: value.id,
+        projectId: value.projectId,
+        bindingId: value.bindingId,
+        awemeId: value.awemeId,
+        productTruthHash: value.productTruthHash,
+        metricSnapshotIdsJson:
+          JSON.stringify(value.metricSnapshotIds),
+        commentIdsJson:
+          JSON.stringify(value.commentIds),
+        evidenceHash: value.evidenceHash,
+        summary: value.summary,
+        strengthsJson:
+          JSON.stringify(value.strengths),
+        weaknessesJson:
+          JSON.stringify(value.weaknesses),
+        audienceQuestionsJson:
+          JSON.stringify(value.audienceQuestions),
+        nextCreativeActionsJson:
+          JSON.stringify(value.nextCreativeActions),
+        runtimeId: value.runtimeId,
+        runtimeVersion: value.runtimeVersion,
+        providerId: value.providerId ?? null,
+        modelId: value.modelId ?? null,
+        executionId: value.executionId ?? null,
+        configVersion: value.configVersion ?? null,
+        createdAt: new Date(value.createdAt)
+      }
+    });
+    return insightToDomain(row);
+  }
+
+  async latestInsight(
+    projectId: string,
+    awemeId?: string
+  ): Promise<DouyinInsight | null> {
+    const row =
+      await this.db.douyinInsightRecord.findFirst({
+        where: {
+          projectId,
+          ...(awemeId ? { awemeId } : {})
+        },
+        orderBy: { createdAt: "desc" }
+      });
+    return row ? insightToDomain(row) : null;
+  }
+
+  async listInsights(input: {
+    projectId: string;
+    awemeId?: string;
+    limit?: number;
+  }): Promise<DouyinInsight[]> {
+    const limit =
+      input.limit === undefined
+        ? undefined
+        : Math.max(1, Math.min(100, Math.trunc(input.limit)));
+    const rows =
+      await this.db.douyinInsightRecord.findMany({
+        where: {
+          projectId: input.projectId,
+          ...(input.awemeId
+            ? { awemeId: input.awemeId }
+            : {})
+        },
+        orderBy: { createdAt: "asc" },
+        ...(limit ? { take: limit } : {})
+      });
+    return rows.map(insightToDomain);
   }
 }

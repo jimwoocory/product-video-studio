@@ -197,6 +197,48 @@ const projectView: DouyinOpsProjectView = {
       updatedAt: "2026-10-07T05:31:00.000Z"
     }
   ],
+  latestInsight: {
+    id: "insight-1",
+    projectId: "project-1",
+    bindingId: "binding-1",
+    awemeId: work.awemeId,
+    productTruthHash:
+      "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    metricSnapshotIds: ["snapshot-1", "snapshot-2"],
+    commentIds: ["comment-1"],
+    evidenceHash:
+      "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+    summary: "播放增长，用户评论主要是正向互动。",
+    strengths: [
+      {
+        text: "播放从 300 增长到 310。",
+        evidenceRefs: ["metric:snapshot-1", "metric:snapshot-2"]
+      }
+    ],
+    weaknesses: [
+      {
+        text: "评论样本仍然很少，不能下强因果结论。",
+        evidenceRefs: ["metric:snapshot-2"]
+      }
+    ],
+    audienceQuestions: [
+      {
+        text: "当前样本主要是正向互动。",
+        evidenceRefs: ["comment:comment-1"]
+      }
+    ],
+    nextCreativeActions: [
+      {
+        text: "下一条继续强化用户已经产生互动的视觉方向。",
+        evidenceRefs: ["comment:comment-1", "metric:snapshot-2"]
+      }
+    ],
+    runtimeId: "TEST_RETRO",
+    runtimeVersion: "1",
+    providerId: "aihubmix",
+    modelId: "deepseek-v4.1-flash",
+    createdAt: "2026-10-07T05:34:00.000Z"
+  },
   candidates: [],
   candidatesStatus: "OFFLINE",
   candidatesMessage: "当前无法读取账号作品。"
@@ -232,6 +274,11 @@ test("project page keeps persisted metrics/comments visible while runtime is off
   assert.match(html, /保存草稿/);
   assert.match(html, /拒绝草稿/);
   assert.match(html, /revision 1/);
+  assert.match(html, /发布后 AI 复盘/);
+  assert.match(html, /AI复盘/);
+  assert.match(html, /播放增长，用户评论主要是正向互动/);
+  assert.match(html, /证据：metric:snapshot-1 \/ metric:snapshot-2/);
+  assert.match(html, /下一条创意建议/);
   assert.match(html, /同步这条评论的回复/);
   assert.match(html, /AI 分类和回复草稿只保存在 PVS 本地，本阶段不会发送回复/);
   assert.doesNotMatch(html, /确认回复|发布回复|发送私信|自动点赞/);
@@ -387,6 +434,10 @@ test("Douyin ops HTTP exposes only P0 local/read actions", async () => {
         revision: input.expectedRevision + 1,
         updatedAt: "2026-10-07T05:33:00.000Z"
       };
+    },
+    async generateRetrospective(projectId: string) {
+      calls.push("retrospective:" + projectId);
+      return projectView.latestInsight!;
     },
     async confirmBinding() {
       calls.push("binding");
@@ -544,6 +595,26 @@ test("Douyin ops HTTP exposes only P0 local/read actions", async () => {
     assert.equal(rejected.draft.status, "REJECTED");
     assert.equal(rejected.draft.revision, 2);
 
+    const retrospective = await fetch(
+      base + "/api/projects/project-1/douyin/retrospective/generate",
+      {
+        method: "POST"
+      }
+    );
+    assert.equal(retrospective.status, 200);
+    const retrospectiveBody =
+      await retrospective.json() as {
+        insight: { id: string; summary: string };
+      };
+    assert.equal(
+      retrospectiveBody.insight.id,
+      "insight-1"
+    );
+    assert.match(
+      retrospectiveBody.insight.summary,
+      /播放增长/
+    );
+
     const bind = await fetch(
       base + "/api/projects/project-1/douyin/binding/confirm",
       {
@@ -585,6 +656,7 @@ test("Douyin ops HTTP exposes only P0 local/read actions", async () => {
       "reply-draft:project-1:1001",
       "save-draft:reply-draft-1:1",
       "reject-draft:reply-draft-1:1",
+      "retrospective:project-1",
       "binding"
     ]);
   } finally {

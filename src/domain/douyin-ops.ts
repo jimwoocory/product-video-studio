@@ -264,3 +264,38 @@ export type DouyinReplyDraftRevisionAction = z.infer<
 export type DouyinReplyDraftRevision = z.infer<
   typeof douyinReplyDraftRevisionSchema
 >;
+
+export const douyinInsightEvidenceItemSchema = z.object({
+  text: z.string().trim().min(1).max(500),
+  evidenceRefs: z.array(nonEmptyStringSchema).min(1).max(12)
+});
+
+export const douyinInsightSchema = z.object({
+  id: entityIdSchema,
+  projectId: entityIdSchema,
+  bindingId: entityIdSchema,
+  awemeId: douyinAwemeIdSchema,
+  productTruthHash: sha256Schema,
+  metricSnapshotIds: z.array(entityIdSchema).min(1).max(100),
+  commentIds: z.array(entityIdSchema).max(500),
+  evidenceHash: sha256Schema,
+  summary: z.string().trim().min(1).max(1200),
+  strengths: z.array(douyinInsightEvidenceItemSchema).max(8),
+  weaknesses: z.array(douyinInsightEvidenceItemSchema).max(8),
+  audienceQuestions: z.array(douyinInsightEvidenceItemSchema).max(12),
+  nextCreativeActions: z.array(douyinInsightEvidenceItemSchema).max(8),
+  runtimeId: nonEmptyStringSchema,
+  runtimeVersion: nonEmptyStringSchema,
+  providerId: nonEmptyStringSchema.optional(),
+  modelId: nonEmptyStringSchema.optional(),
+  executionId: entityIdSchema.optional(),
+  configVersion: z.number().int().positive().optional(),
+  createdAt: isoDateTimeSchema
+});
+
+export type DouyinInsightEvidenceItem = z.infer<
+  typeof douyinInsightEvidenceItemSchema
+>;
+export type DouyinInsight = z.infer<
+  typeof douyinInsightSchema
+>;

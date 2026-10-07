@@ -93,6 +93,7 @@ import { DouyinMetricService } from "../application/services/douyin-metric-servi
 import { DouyinCommentService } from "../application/services/douyin-comment-service.js";
 import { DouyinCommentClassificationService } from "../application/services/douyin-comment-classification-service.js";
 import { DouyinReplyDraftService } from "../application/services/douyin-reply-draft-service.js";
+import { DouyinRetrospectiveService } from "../application/services/douyin-retrospective-service.js";
 import { DouyinOpsDashboardService } from "../application/services/douyin-ops-dashboard-service.js";
 import { DouyinPublishService } from "../application/services/douyin-publish-service.js";
 import {
@@ -417,6 +418,12 @@ export function createDefaultDependencies(): WebDependencies {
       productFlow,
       aiRuntime
     );
+  const douyinRetrospectiveService =
+    new DouyinRetrospectiveService(
+      douyinOpsRepo,
+      productFlow,
+      aiRuntime
+    );
   const douyinOpsDashboard = new DouyinOpsDashboardService(
     productFlow,
     publishRepo,
@@ -428,6 +435,7 @@ export function createDefaultDependencies(): WebDependencies {
     douyinCommentService,
     douyinCommentClassifier,
     douyinReplyDraftService,
+    douyinRetrospectiveService,
     new WindowsDouyinOpsLauncher()
   );
   const publishProviders = new PublishProviderRegistry([

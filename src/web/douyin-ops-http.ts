@@ -136,6 +136,9 @@ export async function handleDouyinOpsHttp(
   const metricRefresh = url.pathname.match(
     /^\/api\/projects\/([^/]+)\/douyin\/metrics\/refresh$/
   );
+  const retrospectiveGenerate = url.pathname.match(
+    /^\/api\/projects\/([^/]+)\/douyin\/retrospective\/generate$/
+  );
   const commentSync = url.pathname.match(
     /^\/api\/projects\/([^/]+)\/douyin\/comments\/sync$/
   );
@@ -165,6 +168,7 @@ export async function handleDouyinOpsHttp(
     !projectPage &&
     !projectApi &&
     !metricRefresh &&
+    !retrospectiveGenerate &&
     !commentSync &&
     !commentClassify &&
     !replySync &&
@@ -224,6 +228,7 @@ export async function handleDouyinOpsHttp(
       projectPage ??
       projectApi ??
       metricRefresh ??
+      retrospectiveGenerate ??
       commentSync ??
       commentClassify ??
       replySync ??
@@ -268,6 +273,16 @@ export async function handleDouyinOpsHttp(
       json(res, 200, {
         snapshot:
           await service.refreshMetrics(projectId)
+      });
+      return true;
+    }
+
+    if (retrospectiveGenerate) {
+      json(res, 200, {
+        insight:
+          await service.generateRetrospective(
+            projectId
+          )
       });
       return true;
     }

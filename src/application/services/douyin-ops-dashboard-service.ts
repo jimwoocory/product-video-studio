@@ -10,6 +10,7 @@ import type {
 } from "../ports/douyin-ops-launcher.js";
 import type { DouyinOpsRepository } from "../ports/douyin-ops-repository.js";
 import type {
+  DouyinInsight,
   DouyinMetricSnapshot,
   DouyinReplyDraft,
   DouyinWorkBinding,
@@ -30,6 +31,7 @@ import { DouyinMetricService } from "./douyin-metric-service.js";
 import { DouyinCommentService } from "./douyin-comment-service.js";
 import { DouyinCommentClassificationService } from "./douyin-comment-classification-service.js";
 import { DouyinReplyDraftService } from "./douyin-reply-draft-service.js";
+import { DouyinRetrospectiveService } from "./douyin-retrospective-service.js";
 import { DouyinOpsRuntimeError } from "../ports/douyin-ops-runtime.js";
 import { DomainValidationError } from "../../domain/validation.js";
 
@@ -59,6 +61,7 @@ export type DouyinOpsProjectView = {
   snapshots: DouyinMetricSnapshot[];
   comments: DouyinComment[];
   replyDrafts: DouyinReplyDraft[];
+  latestInsight: DouyinInsight | null;
   candidates: DouyinOpsWork[];
   candidatesStatus: "READY" | "AUTH_REQUIRED" | "OFFLINE" | "FAILED";
   candidatesMessage?: string;
@@ -119,6 +122,7 @@ export class DouyinOpsDashboardService {
     private readonly comments: DouyinCommentService,
     private readonly classifier: DouyinCommentClassificationService,
     private readonly replyDrafts: DouyinReplyDraftService,
+    private readonly retrospective: DouyinRetrospectiveService,
     private readonly launcher?: DouyinOpsLauncher
   ) {}
 
@@ -304,7 +308,7 @@ export class DouyinOpsDashboardService {
       account
     });
 
-    const [snapshots, comments, replyDrafts, candidateState] =
+    const [snapshots, comments, replyDrafts, latestInsight, candidateState] =
       await Promise.all([
         this.metrics.history({
           projectId,
@@ -326,6 +330,12 @@ export class DouyinOpsDashboardService {
               awemeId: state.binding.awemeId
             })
           : Promise.resolve([] as DouyinReplyDraft[]),
+        state.binding?.awemeId
+          ? this.retrospective.latest({
+              projectId,
+              awemeId: state.binding.awemeId
+            })
+          : Promise.resolve(null as DouyinInsight | null),
         runtime.ready &&
         account.ops.available &&
         account.ops.runtimeStatus === "READY"
@@ -357,12 +367,22 @@ export class DouyinOpsDashboardService {
       snapshots,
       comments,
       replyDrafts,
+      latestInsight,
       candidates: candidateState.works,
       candidatesStatus: candidateState.status,
       ...(candidateState.message
         ? { candidatesMessage: candidateState.message }
         : {})
     };
+  }
+
+  async generateRetrospective(
+    projectId: string
+  ): Promise<DouyinInsight> {
+    await this.requireProject(projectId);
+    return this.retrospective.generate({
+      projectId
+    });
   }
 
   async refreshMetrics(
