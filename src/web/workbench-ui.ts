@@ -492,7 +492,7 @@ window.pvsCreateMaterialManager=function(config){
 </script>
 </head>
 <body>
-<header class="top"><b>Product Video Studio · P1 Final</b><a href="/projects">项目</a><a href="/tasks">任务中心</a><a href="/health-center">系统诊断</a><a href="/agent">智能生成</a><a href="/settings/ai">大模型设置</a><span class="muted technical">版本 0.3.0-p1-final</span><button class="advanced-toggle" id="advanced-toggle" type="button">高级信息</button></header>
+<header class="top"><b>Product Video Studio · P1 Final</b><a href="/projects">项目</a><a href="/tasks">任务中心</a><a href="/health-center">系统诊断</a><a href="/agent">智能生成</a><a href="/douyin-ops">抖音运营</a><a href="/settings/ai">大模型设置</a><span class="muted technical">版本 0.3.0-p1-final</span><button class="advanced-toggle" id="advanced-toggle" type="button">高级信息</button></header>
 <main class="wrap">
 ${nav}
 ${project ? `<section class="card technical"><b>失效影响</b><p class="muted">${esc(staleImpact(project))}</p><p class="muted">恢复入口：重新打开当前项目会从本地数据库和素材记录恢复。</p></section>` : ""}

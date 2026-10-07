@@ -19,6 +19,7 @@ import { PrismaReferenceVideoRepository } from "../adapters/db/prisma-reference-
 import { PrismaResearchRepository } from "../adapters/db/prisma-research-repository.js";
 import { PrismaTimelineRepository } from "../adapters/db/prisma-timeline-repository.js";
 import { PrismaPublishRepository } from "../adapters/db/prisma-publish-repository.js";
+import { PrismaDouyinOpsRepository } from "../adapters/db/prisma-douyin-ops-repository.js";
 import { prisma } from "../adapters/db/prisma-client.js";
 import { LocalArtifactStore } from "../adapters/store/local-artifact-store.js";
 import { LocalProductInputStore } from "../adapters/store/local-product-input-store.js";
@@ -34,6 +35,8 @@ import { DouyinSdkHandoffProvider } from "../adapters/publish/douyin-sdk-handoff
 import { DouyinH5HandoffProvider } from "../adapters/publish/douyin-h5-handoff-provider.js";
 import { DouyinBrowserAutomationProvider } from "../adapters/publish/douyin-browser-automation-provider.js";
 import { SocialAutoUploadRuntime } from "../adapters/publish/social-auto-upload-runtime.js";
+import { YhtDouyinOpsRuntime } from "../adapters/douyin/yht-douyin-ops-runtime.js";
+import { WindowsDouyinOpsLauncher } from "../adapters/douyin/windows-douyin-ops-launcher.js";
 import { ManualExportProvider } from "../adapters/publish/manual-export-provider.js";
 import { HttpWebResearchProvider } from "../adapters/research/http-web-research-provider.js";
 import { ExternalBrowserResearchProvider } from "../adapters/research/external-browser-research-provider.js";
@@ -58,6 +61,7 @@ import { PrismaSmartRunRepository } from "../adapters/db/prisma-smart-run-reposi
 import { startSmartGenerationWorker } from "../application/services/smart-generation-worker.js";
 import { handleSmartGenerationHttp } from "./smart-generation-http.js";
 import { handleAutoEditHttp } from "./auto-edit-http.js";
+import { handleDouyinOpsHttp } from "./douyin-ops-http.js";
 import { AutoEditService } from "../application/services/auto-edit-service.js";
 import { VisualEditAssessmentService } from "../application/services/visual-edit-assessment.js";
 import { WindowsSpeechSynthesis } from "../adapters/media/windows-speech-synthesis.js";
@@ -83,6 +87,11 @@ import {
 import { RenderEngine } from "../application/services/render-engine.js";
 import { PublishProviderRegistry } from "../application/services/publish-provider-registry.js";
 import { PublishBridgeService } from "../application/services/publish-bridge-service.js";
+import { DouyinAccountBindingService } from "../application/services/douyin-account-binding-service.js";
+import { DouyinWorkBindingService } from "../application/services/douyin-work-binding-service.js";
+import { DouyinMetricService } from "../application/services/douyin-metric-service.js";
+import { DouyinCommentService } from "../application/services/douyin-comment-service.js";
+import { DouyinOpsDashboardService } from "../application/services/douyin-ops-dashboard-service.js";
 import { DouyinPublishService } from "../application/services/douyin-publish-service.js";
 import {
   assertCanonicalProductArtifactReady,
@@ -167,6 +176,7 @@ export type WebDependencies = {
   renderEngine: RenderEngine;
   publishBridge: PublishBridgeService;
   douyinBrowserRuntime?: DouyinBrowserPublisherRuntime;
+  douyinOpsDashboard?: DouyinOpsDashboardService;
   finalAssembly: FinalAssemblyService;
   finalQc: FinalQcService;
   douyinPublish: DouyinPublishService;
@@ -379,6 +389,32 @@ export function createDefaultDependencies(): WebDependencies {
   );
   const douyinProvider = new OfficialDouyinOpenApiProvider();
   const douyinBrowserRuntime = new SocialAutoUploadRuntime();
+  const douyinOpsRepo = new PrismaDouyinOpsRepository(prisma);
+  const douyinOpsRuntime = new YhtDouyinOpsRuntime();
+  const douyinAccountBinding = new DouyinAccountBindingService(
+    douyinBrowserRuntime,
+    douyinOpsRuntime
+  );
+  const douyinWorkBinding = new DouyinWorkBindingService();
+  const douyinMetricService = new DouyinMetricService(
+    douyinOpsRepo,
+    douyinOpsRuntime
+  );
+  const douyinCommentService = new DouyinCommentService(
+    douyinOpsRepo,
+    douyinOpsRuntime
+  );
+  const douyinOpsDashboard = new DouyinOpsDashboardService(
+    productFlow,
+    publishRepo,
+    douyinOpsRepo,
+    douyinOpsRuntime,
+    douyinAccountBinding,
+    douyinWorkBinding,
+    douyinMetricService,
+    douyinCommentService,
+    new WindowsDouyinOpsLauncher()
+  );
   const publishProviders = new PublishProviderRegistry([
     new DouyinBrowserAutomationProvider(douyinBrowserRuntime),
     new DouyinSdkHandoffProvider(),
@@ -496,6 +532,7 @@ export function createDefaultDependencies(): WebDependencies {
     renderEngine,
     publishBridge,
     douyinBrowserRuntime,
+    douyinOpsDashboard,
     finalAssembly,
     finalQc,
     douyinPublish,
@@ -785,6 +822,7 @@ export function createAppServer(
       if (await handleCreativeReferenceHttp(req,res,url,deps)) return;
       if (await handleSmartGenerationHttp(req, res, url, deps)) return;
       if (await handleAutoEditHttp(req, res, url, deps)) return;
+      if (await handleDouyinOpsHttp(req, res, url, deps)) return;
 
       if (req.method === "GET" && url.pathname === "/health") {
         return json(res, 200, {

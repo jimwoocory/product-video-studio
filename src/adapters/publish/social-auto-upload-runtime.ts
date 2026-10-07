@@ -12,6 +12,7 @@ import type {
 
 const RESULT_PREFIX = "PVS_BRIDGE_JSON:";
 const DEFAULT_TIMEOUT_MS = 120_000;
+const ACCOUNT_CHECK_TIMEOUT_MS = 8_000;
 const LOGIN_TIMEOUT_MS = 10 * 60_000;
 const PUBLISH_TIMEOUT_MS = 30 * 60_000;
 
@@ -187,7 +188,10 @@ export class SocialAutoUploadRuntime
     const account = accountName?.trim() || (await this.resolveAccountName());
     try {
       const payload = this.parse<DouyinBrowserAccountStatus>(
-        await this.run(["check", "--account", account])
+        await this.run(
+          ["check", "--account", account],
+          ACCOUNT_CHECK_TIMEOUT_MS
+        )
       );
       return {
         ...payload,
