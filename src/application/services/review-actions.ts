@@ -65,6 +65,7 @@ export type ScriptBeatRevision = {
   text: string;
   estimatedDurationMs: number;
   requiredFactIds: string[];
+  videoIntent?: ScriptDraft["beats"][number]["videoIntent"];
 };
 
 export function reviseScriptDraft(
@@ -83,7 +84,10 @@ export function reviseScriptDraft(
       purpose: beat.purpose,
       text: beat.text,
       estimatedDurationMs: beat.estimatedDurationMs,
-      requiredFactIds: beat.requiredFactIds
+      requiredFactIds: beat.requiredFactIds,
+      ...(beat.videoIntent
+        ? { videoIntent: beat.videoIntent }
+        : {})
     }))
   } as Record<string, unknown>;
   delete base.confirmedAt;

@@ -6,6 +6,11 @@ import { confirmScriptDraft, confirmProductionPlanDraft } from "../src/applicati
 import { HermesProductDirectorGenerator } from "../src/adapters/ai/hermes-product-director-generator.js";
 import { directorCase } from "./model-aware-fixtures.js";
 import { H, ISO } from "./fixtures.js";
+import {
+  productionAssetSetSchema,
+  productionStrategyRef,
+  productionStrategySchema
+} from "../src/domain/production-strategy.js";
 
 export class MemorySmartRuns implements SmartRunRepository {
   runs = new Map<string, SmartGenerationRun>();
@@ -36,7 +41,7 @@ export const smartOptions = {
 };
 export class FixtureProduction implements SmartProduction {
   readonly c = directorCase();
-  counts = { creative: 0, script: 0, director: 0, approvals: 0, generate: 0, cancelled: 0, installs: 0, renders: 0 };
+  counts = { creative: 0, planner: 0, assets: 0, script: 0, director: 0, approvals: 0, generate: 0, cancelled: 0, installs: 0, renders: 0 };
   truthReady = true; sourcesChanged = false; clipsReviewed = true; finalAccepted = false; unknownGeneration = false;
   installed = new Set<string>();
   async initial(_pid: string) { return { targetDurationMs: 15000, binding: {} }; }
@@ -46,6 +51,81 @@ export class FixtureProduction implements SmartProduction {
   }
   async assertCurrent(_run: SmartGenerationRun) { if (this.sourcesChanged) throw new SmartFlowPause("BLOCKED", "SOURCE_CHANGED", "来源改变", false); }
   async creative(_run: SmartGenerationRun) { this.counts.creative++; return structuredClone(this.c.input.creativeBatch); }
+  async planProduction(run: SmartGenerationRun) {
+    this.counts.planner++;
+    const base = {
+      id: "strategy-1",
+      projectId: run.projectId,
+      version: 1,
+      selectedCreativeId: run.selectedCreativeId!,
+      contentType: "PRODUCT_DEMO" as const,
+      summary: "直接使用已确认产品参考，不需要新增固定角色或场景",
+      rationale: ["单镜头产品演示不需要额外身份资产"],
+      assetRequirements: [{
+        key: "PRODUCT_MAIN",
+        kind: "PRODUCT" as const,
+        label: "当前产品",
+        description: "已确认产品主参考",
+        purpose: "保持产品身份",
+        required: true,
+        reuseScope: "RUN" as const,
+        generationMode: "REUSE_PRODUCT_REFERENCE" as const,
+        referenceAssetIds: ["product-main"],
+        confidence: "HIGH" as const,
+        needsReview: false
+      }],
+      plannerVersion: "fixture-v2",
+      createdAt: ISO
+    };
+    return productionStrategySchema.parse({
+      ...base,
+      contentHash: hashValue(base)
+    });
+  }
+  async prepareProductionAssets(run: SmartGenerationRun) {
+    this.counts.assets++;
+    const strategy = run.productionStrategy!;
+    const now = ISO;
+    const base = {
+      id: "production-assets-1",
+      projectId: run.projectId,
+      version: 1,
+      strategyRef: productionStrategyRef(strategy),
+      selectedCreativeId: run.selectedCreativeId!,
+      status: "READY" as const,
+      entries: [{
+        key: "PRODUCT_MAIN",
+        referenceAssetId: "product-main",
+        kind: "PRODUCT" as const,
+        label: "当前产品",
+        description: "已确认产品主参考",
+        purpose: "保持产品身份",
+        required: true,
+        reuseScope: "RUN" as const,
+        source: "PRODUCT_INPUT" as const,
+        status: "READY" as const,
+        artifactIds: ["artifact-product"],
+        sourceReferenceAssetIds: ["product-main"],
+        identityLock: ["保持产品身份"],
+        confidence: "HIGH" as const,
+        reviewSummary: "复用产品图"
+      }],
+      createdAt: now,
+      updatedAt: now
+    };
+    return {
+      set: productionAssetSetSchema.parse({
+        ...base,
+        contentHash: hashValue(base)
+      })
+    };
+  }
+  async advanceProductionAssets(run: SmartGenerationRun) {
+    return run.productionAssetSet!;
+  }
+  async acceptProductionAsset(run: SmartGenerationRun) {
+    return run.productionAssetSet!;
+  }
   async script(_run: SmartGenerationRun) { this.counts.script++; return { ...structuredClone(this.c.input.script), status: "DRAFT" as const, confirmedAt: undefined }; }
   async director(run: SmartGenerationRun) {
     this.counts.director++;

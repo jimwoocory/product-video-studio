@@ -176,3 +176,73 @@ test("Research UI shows independent Douyin market-video candidates and explicit 
   assert.match(html, /当前产品公开证据暂未找到/);
   assert.doesNotMatch(html, /<h3>研究失败<\/h3>/);
 });
+
+test("Research UI shows Douyin verify_check as risk-control action instead of zero candidates", () => {
+  const latestRun = run();
+  latestRun.status = "FAILED";
+  latestRun.browserState = {
+    ...latestRun.browserState!,
+    marketVideoResearch: {
+      status: "BLOCKED",
+      provider: "douyin-cli-search",
+      sort: "MOST_LIKED",
+      timeRange: "ANY",
+      searchedQueries: ["草本护颈枕"],
+      checkedAt: ISO,
+      candidates: [],
+      blockerCode: "RISK_CONTROL",
+      message: "抖音搜索触发验证码或平台风控，本轮已停止。",
+      requiredUserAction:
+        "在正常浏览器会话中完成人工验证后再重试；系统不会绕过验证码或风控。"
+    }
+  };
+  const html = renderResearchPage({
+    workspace: workspace(),
+    runs: [latestRun],
+    latestRun,
+    evidence: []
+  });
+  assert.match(html, /抖音爆款 \/ 竞品视频/);
+  assert.match(html, /需要处理/);
+  assert.match(html, /抖音搜索触发验证码或平台风控/);
+  assert.match(html, /完成人工验证后再重试/);
+  assert.match(html, /当前不是“缺少登录”，而是抖音搜索本身仍被平台限制/);
+  assert.match(html, /一直只有灰色骨架、没有验证码或滑块/);
+  assert.match(html, /打开抖音搜索页查看/);
+  assert.match(html, /重新检测风控状态/);
+  assert.doesNotMatch(html, /我已完成验证，重新研究/);
+  assert.match(
+    html,
+    /\/api\/projects\/research-ui-project\/research\/douyin-auth\/launch/
+  );
+  assert.doesNotMatch(html, /0 条候选/);
+});
+
+test("blocked Douyin provider renders only one research connection panel", () => {
+  const latestRun = run();
+  latestRun.status = "BLOCKED";
+  latestRun.browserState = {
+    ...latestRun.browserState!,
+    marketVideoResearch: {
+      status: "BLOCKED",
+      provider: "douyin-cli-search",
+      sort: "MOST_LIKED",
+      timeRange: "ANY",
+      searchedQueries: ["草本护颈枕"],
+      checkedAt: ISO,
+      candidates: [],
+      blockerCode: "PROVIDER_NOT_AVAILABLE",
+      message: "抖音连接暂时没有准备好",
+      requiredUserAction: "检查抖音连接"
+    }
+  };
+  const html = renderResearchPage({
+    workspace: workspace(),
+    runs: [latestRun],
+    latestRun,
+    evidence: []
+  });
+  assert.equal([...html.matchAll(/<div data-douyin-preflight/g)].length, 1);
+  assert.match(html, /这里不再重复显示第二套连接面板/);
+  assert.match(html, /重新检测抖音连接/);
+});

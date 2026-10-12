@@ -1,0 +1,1406 @@
+{
+  "frozenAt": "2026-10-07T10:45:09.304Z",
+  "purpose": "Director V3 pre-upgrade immutable comparison baseline. No paid generation performed.",
+  "project": {
+    "id": "bbcbff87-a977-4103-b2c4-d70cb8996edb",
+    "name": "广西金秀康瑶堂瑶药1",
+    "status": "READY_TO_GENERATE",
+    "targetPlatform": "douyin",
+    "targetDurationMs": 21000,
+    "aspectRatio": "9:16",
+    "currentProductTruthId": "fc3721e4-af4d-471e-876c-48a500d82cf8",
+    "currentProductTruthVersion": 2,
+    "currentProductTruthHash": "5bc3717355b00ab1c6c76e40c57417927c36c7f131e33782c32717cfcda42d54",
+    "currentCreativeBatchId": "b75e26a9-882a-4173-bad1-f28e2fefeac7",
+    "currentCreativeBatchVersion": 2,
+    "currentCreativeBatchHash": "2bb8d8c52d20cd10f2946f8155e06c1c8a4cb0dc465f386770b515d3fa9201d4",
+    "selectedCreativeId": "3a64d33b-8e6c-45df-919e-e95d4c7424d2",
+    "currentScriptId": "604e1334-d36e-488e-8e1a-b2f87c334444",
+    "currentScriptVersion": 4,
+    "currentScriptHash": "a05877fb623e36fbc593e7f90aa33ede0ca71c018cf5619d37463d6c1aa41cbd",
+    "currentProductionPlanId": "3769915f-3302-4868-b348-2bc4c6e8f40c",
+    "currentProductionPlanVersion": 4,
+    "currentProductionPlanHash": "cd943ba36f693bede642672cade673e772b42f8e00a39e891a241d6a83189f8c",
+    "createdAt": "2026-10-06T05:31:39.220Z",
+    "updatedAt": "2026-10-07T03:51:07.066Z"
+  },
+  "smartRun": {
+    "id": "464d0aaa-6eaa-48ef-bce3-32cf0cca8d41",
+    "status": "WAITING_FOR_CLIP_REVIEW",
+    "revision": 432,
+    "updatedAt": "2026-10-07T03:56:21.168Z"
+  },
+  "selectedCreative": {
+    "id": "3a64d33b-8e6c-45df-919e-e95d4c7424d2",
+    "title": "21秒漫剧・加班到十一点的那双手",
+    "targetAudience": "久坐办公、常加班到深夜、睡前脑子停不下来的上班族",
+    "painPoint": "一天班上下来脖子僵着，躺下后翻来覆去，脑子还在放白天的工作",
+    "hook": "前3秒：高角度俯拍桌面，一双手把枕头拍平、翻面，屏幕下方固定位置打出大号字幕「加班到11点，脖子先下班」；0.9秒处硬切到草本原料一字排开，无人物介绍、无铺垫",
+    "coreSellingPoint": "以瑶药草本配方为差异化特色的居家草本养生寝具，适配卧室睡眠与日常颈肩养护场景",
+    "narrativePattern": "漫剧三幕制：第一幕（0-6秒）工位收尾、揉脖子收包；第二幕（6-15秒）回家开柜取枕、翻动拍压、拆开看内胆；第三幕（15-21秒）枕上静止俯拍成品收束。全片以短句字幕逐步推进剧情，不依赖口播",
+    "expectedDurationMs": 21000,
+    "productShowcaseStrategy": "全片以「过程态」呈现产品：首帧即为枕头被拍压的动作状态，中段特写内胆分层与草本填充碎料，结尾回到完整成品平铺静止约3秒。机位以高角度俯拍桌面加手部特写为主，切换依据动作完成度，平均单镜头约1.2秒，全程预留上下字幕安全区",
+    "generationRisk": "MEDIUM",
+    "requiredFactIds": [
+      "aa5878e1-8216-45f1-93f4-d4c381fd065b",
+      "c6366dcd-d1b9-44d0-925d-e8f8824211ec",
+      "335fab09-fdeb-41da-ac9f-f603e8745fb0",
+      "8c3dcbc8-b6ca-4b1d-abd6-7be99bb74f5a",
+      "6c938d45-c23c-4b96-8af5-07d12a68c442",
+      "cf0a199a-a698-4a9e-9a73-23c84d733b82"
+    ]
+  },
+  "script": {
+    "id": "604e1334-d36e-488e-8e1a-b2f87c334444",
+    "projectId": "bbcbff87-a977-4103-b2c4-d70cb8996edb",
+    "version": 4,
+    "status": "CONFIRMED",
+    "productTruthRef": {
+      "entityType": "ProductTruth",
+      "entityId": "fc3721e4-af4d-471e-876c-48a500d82cf8",
+      "version": 2,
+      "hash": "5bc3717355b00ab1c6c76e40c57417927c36c7f131e33782c32717cfcda42d54"
+    },
+    "creativeBatchRef": {
+      "entityType": "CreativeBatch",
+      "entityId": "b75e26a9-882a-4173-bad1-f28e2fefeac7",
+      "version": 2,
+      "hash": "2bb8d8c52d20cd10f2946f8155e06c1c8a4cb0dc465f386770b515d3fa9201d4"
+    },
+    "referenceVideoProfileRef": {
+      "entityType": "ReferenceVideoProfile",
+      "entityId": "91c57192-704b-4727-a1a1-d97ecf189328",
+      "version": 1,
+      "hash": "34e391d3f8a06e1f51940b856f1c5964b13db835e49ef411a199203b4db08a24"
+    },
+    "productionAssetSetRef": {
+      "entityType": "ProductionAssetSet",
+      "entityId": "e2e7a2e7-9561-476c-8383-39c519b90d76",
+      "version": 1,
+      "hash": "a608e648af5084d2ab057590cf855382bd5b7982984a4070cb814246ac700c42"
+    },
+    "selectedCreativeId": "3a64d33b-8e6c-45df-919e-e95d4c7424d2",
+    "targetDurationMs": 21000,
+    "aiExecution": {
+      "executionId": "9a0a91ca-e6cb-4770-b327-96d9f53b21fd",
+      "providerId": "aihubmix",
+      "modelId": "deepseek-v4.1-flash",
+      "configVersion": 5
+    },
+    "beats": [
+      {
+        "id": "32c71c33-32ab-4d6c-be97-90c23eb31de4",
+        "order": 1,
+        "purpose": "HOOK",
+        "text": "高角度俯拍桌面：一双没有露脸的手把枕头拍平、翻面，动作紧凑、只留手部与枕体在画面中心。约0.9秒处硬切一次，切到草本原料分装并置的特写。画面下方固定位置打出大字幕：「加班到11点，脖子先下班」。全程无人物介绍、无口播铺垫。",
+        "estimatedDurationMs": 2600,
+        "requiredFactIds": []
+      },
+      {
+        "id": "b731311e-5cee-47b4-a028-0c70855f8159",
+        "order": 2,
+        "purpose": "PAIN",
+        "text": "切到工位：收拾桌面、合上电脑、单手揉脖子后颈，把包甩上肩，关灯离开。字幕短句逐条压上：「白天低头一整天」「回家躺下，脑子还在放白天的事」。只呈现状态，不做产品说明。",
+        "estimatedDurationMs": 2400,
+        "requiredFactIds": []
+      },
+      {
+        "id": "17e77d40-e49f-4adb-9704-a5d527461631",
+        "order": 3,
+        "purpose": "PRODUCT",
+        "text": "回到家，开柜取枕，手托住枕头翻一个面再放上桌面。字幕：「家里这只，叫瑶药护颈枕」「草本护颈枕 / 药枕」。机位保持高角度俯拍加手部特写，动作完成即切。",
+        "estimatedDurationMs": 3000,
+        "requiredFactIds": [
+          "aa5878e1-8216-45f1-93f4-d4c381fd065b",
+          "c6366dcd-d1b9-44d0-925d-e8f8824211ec"
+        ]
+      },
+      {
+        "id": "71b13e0e-0551-4531-936c-63ed115aeb17",
+        "order": 4,
+        "purpose": "FEATURE",
+        "text": "拆开外罩看内胆，草本填充碎料分装在一排小碟里，逐个入镜、逐条打出名字：佩兰、消山虎、草决明、土沉香、夜合欢、大风茅、首乌藤（夜交藤）、相思叶。字幕：「内胆里是这些草本原料」。用物料可见代替形容词。",
+        "estimatedDurationMs": 3800,
+        "requiredFactIds": [
+          "335fab09-fdeb-41da-ac9f-f603e8745fb0"
+        ]
+      },
+      {
+        "id": "f39729b1-d259-49ef-b074-02b7fd61eae0",
+        "order": 5,
+        "purpose": "FEATURE",
+        "text": "双手连续拍、压、翻动枕头，呈现厚度、软硬与回弹的手感；随后镜头贴近内胆分层与填充。字幕：「瑶药草本特色，做成居家能用的养生寝具」。",
+        "estimatedDurationMs": 3000,
+        "requiredFactIds": [
+          "6c938d45-c23c-4b96-8af5-07d12a68c442"
+        ]
+      },
+      {
+        "id": "b75b2cba-5402-42ab-b512-ae31a0bbb527",
+        "order": 6,
+        "purpose": "RESULT",
+        "text": "高角度俯拍床头，枕头摆正、手掌轻压一下定型，画面静止约2秒。字幕：「卧室睡眠、日常颈肩养护，都是它出现的地方」。不做功效结论，只落在使用场景。",
+        "estimatedDurationMs": 2900,
+        "requiredFactIds": [
+          "8c3dcbc8-b6ca-4b1d-abd6-7be99bb74f5a"
+        ]
+      },
+      {
+        "id": "38ff89ca-1b38-4ada-9157-11c39906de93",
+        "order": 7,
+        "purpose": "CTA",
+        "text": "回到完整成品平铺定帧，保持约3秒静止，其间字幕收束：「久坐、睡眠压力大、想在家做点轻养护的人，都可以看看它」「睡前把它放好，使用与保养提示记得先看一遍」。软收束，不做硬促销。",
+        "estimatedDurationMs": 3300,
+        "requiredFactIds": [
+          "cf0a199a-a698-4a9e-9a73-23c84d733b82",
+          "8c3dcbc8-b6ca-4b1d-abd6-7be99bb74f5a"
+        ]
+      }
+    ],
+    "contentHash": "a05877fb623e36fbc593e7f90aa33ede0ca71c018cf5619d37463d6c1aa41cbd",
+    "confirmedAt": "2026-10-07T03:48:21.982Z"
+  },
+  "productionStrategy": {
+    "id": "a0e3ffc5-7830-40b7-9670-ccf85c82b9e4",
+    "projectId": "bbcbff87-a977-4103-b2c4-d70cb8996edb",
+    "version": 1,
+    "selectedCreativeId": "3a64d33b-8e6c-45df-919e-e95d4c7424d2",
+    "contentType": "SHORT_DRAMA",
+    "summary": "21秒三幕漫剧，以产品过程态为叙事骨架：工位收尾、回家开柜取枕、拆开看内胆、成品静止收束。生产上最小化资产：仅保留产品 canonical 参考、一个内胆展示态、办公室桌面与卧室床头两个环境参考；不生成人物、道具或风格板。执行时全片采用高角度俯拍桌面加手部特写，按动作完成度切换，平均单镜头约1.2秒，全程预留上下字幕安全区，无口播，用短句字幕推进。产品外观严格复用 canonical 参考，内胆展示态需产品资料核验。",
+    "rationale": [
+      "产品为唯一身份核心，所有成品态直接复用 canonical 参考，避免重设计。",
+      "内胆与草本填充在 canonical 中不可见，且中段需要稳定展示，故创建 PRODUCT_STATE，但因产品资料未确认，标记 needsReview。",
+      "办公室与家庭卧室是两个故事关键环境，且各有多镜头，需 SET 参考保持空间一致性；采用空环境俯拍参考，不含人物与可读文字。",
+      "全片无命名或身份人物，仅手部动作，按规则不创建 CHARACTER 资产。",
+      "无复用型非产品道具，故不创建 PROP。",
+      "风格可由参考视频的结构原则与统一拍摄方案执行，不额外生成 STYLE 资产以最小化生成。",
+      "执行节奏：三幕制，切换依据动作完成度，保留字幕安全区，无口播。"
+    ],
+    "assetRequirements": [
+      {
+        "key": "PRODUCT_MAIN",
+        "kind": "PRODUCT",
+        "label": "瑶药护颈枕",
+        "description": "当前已确认产品本体；外观、颜色、形状、图案和品牌身份必须以产品主参考图为准。",
+        "purpose": "所有包含产品的镜头统一绑定产品身份",
+        "required": true,
+        "reuseScope": "RUN",
+        "generationMode": "REUSE_PRODUCT_REFERENCE",
+        "referenceAssetIds": [
+          "0b4cb39d-c128-450c-af6e-6aae6c22cd70"
+        ],
+        "dependsOnAssetKeys": [],
+        "confidence": "HIGH",
+        "needsReview": false
+      },
+      {
+        "key": "PRODUCT_STATE_INNER",
+        "kind": "PRODUCT_STATE",
+        "label": "内胆与草本填充展示态",
+        "description": "Stable visual state for the opened inner lining and herbal fill of the 瑶药护颈枕, derived strictly from canonical product reference; no exterior redesign.",
+        "purpose": "中段拆开看内胆与草本填充的镜头无法由 canonical 闭合产品安全替代，需稳定展示态。",
+        "required": true,
+        "reuseScope": "MULTI_CLIP",
+        "generationMode": "GENERATE_IMAGE",
+        "generationPrompt": "Product state reference for the opened inner lining of the 瑶药护颈枕, showing herbal fill and layered structure, based on the canonical product reference; keep exterior design unchanged, no readable text, no brand marks beyond product. If inner structure is not confirmed by product materials, show only the canonical closed product and mark for review.",
+        "referenceAssetIds": [
+          "0b4cb39d-c128-450c-af6e-6aae6c22cd70"
+        ],
+        "dependsOnAssetKeys": [],
+        "clipCountHint": 2,
+        "confidence": "MEDIUM",
+        "needsReview": true
+      },
+      {
+        "key": "SET_OFFICE_DESK",
+        "kind": "SET",
+        "label": "办公室工位桌面",
+        "description": "Empty high-angle overhead office desk surface identity reference: minimal desk, keyboard edge, notebook, mug, neutral lighting, no people, no readable text.",
+        "purpose": "保持第一幕办公室多镜头空间一致。",
+        "required": true,
+        "reuseScope": "MULTI_CLIP",
+        "generationMode": "GENERATE_IMAGE",
+        "generationPrompt": "Empty office desk surface, high-angle overhead view, minimal props: keyboard, notebook, mug, no people, no readable text, neutral office lighting, stable spatial layout, no product.",
+        "referenceAssetIds": [],
+        "dependsOnAssetKeys": [],
+        "clipCountHint": 3,
+        "confidence": "HIGH",
+        "needsReview": false
+      },
+      {
+        "key": "SET_HOME_BEDSIDE",
+        "kind": "SET",
+        "label": "家庭卧室床头柜与床角",
+        "description": "Empty high-angle overhead home bedside/cabinet surface identity reference: bedside table, bed corner, lamp, neutral warm lighting, no people, no readable text.",
+        "purpose": "保持第二、三幕家庭床头场景多镜头空间一致。",
+        "required": true,
+        "reuseScope": "MULTI_CLIP",
+        "generationMode": "GENERATE_IMAGE",
+        "generationPrompt": "Empty home bedside area, high-angle overhead view, bedside table, bed corner, lamp, no people, no readable text, warm domestic lighting, stable spatial layout, no product.",
+        "referenceAssetIds": [],
+        "dependsOnAssetKeys": [],
+        "clipCountHint": 4,
+        "confidence": "HIGH",
+        "needsReview": false
+      }
+    ],
+    "plannerVersion": "production-planner-v2-1",
+    "aiExecution": {
+      "executionId": "89708082-82d8-4061-b76e-3a3dfaf924a2",
+      "providerId": "aihubmix",
+      "modelId": "deepseek-v4.1-flash",
+      "configVersion": 5
+    },
+    "contentHash": "0ff4651c84ee38deb86c86a448987def4184f44465f4b94511f58642d2d5a915",
+    "createdAt": "2026-10-07T02:12:47.328Z"
+  },
+  "productionPlan": {
+    "id": "3769915f-3302-4868-b348-2bc4c6e8f40c",
+    "projectId": "bbcbff87-a977-4103-b2c4-d70cb8996edb",
+    "version": 4,
+    "status": "CONFIRMED",
+    "productTruthRef": {
+      "entityType": "ProductTruth",
+      "entityId": "fc3721e4-af4d-471e-876c-48a500d82cf8",
+      "version": 2,
+      "hash": "5bc3717355b00ab1c6c76e40c57417927c36c7f131e33782c32717cfcda42d54"
+    },
+    "scriptRef": {
+      "entityType": "ScriptDraft",
+      "entityId": "604e1334-d36e-488e-8e1a-b2f87c334444",
+      "version": 4,
+      "hash": "a05877fb623e36fbc593e7f90aa33ede0ca71c018cf5619d37463d6c1aa41cbd"
+    },
+    "referenceVideoProfileRef": {
+      "entityType": "ReferenceVideoProfile",
+      "entityId": "91c57192-704b-4727-a1a1-d97ecf189328",
+      "version": 1,
+      "hash": "34e391d3f8a06e1f51940b856f1c5964b13db835e49ef411a199203b4db08a24"
+    },
+    "productionAssetSetRef": {
+      "entityType": "ProductionAssetSet",
+      "entityId": "e2e7a2e7-9561-476c-8383-39c519b90d76",
+      "version": 1,
+      "hash": "a608e648af5084d2ab057590cf855382bd5b7982984a4070cb814246ac700c42"
+    },
+    "generationTarget": {
+      "source": "DREAMINA_CAPABILITY_REGISTRY",
+      "requestedModelVersion": "seedance2.0mini",
+      "aspectRatio": "9:16",
+      "videoResolution": "720p",
+      "nativeAudioOutputRequested": true,
+      "registryFingerprint": "0bc9592ea7199d7b02a403d40f63a1a62276747152b7e9575d236f55f32785fb",
+      "capabilityCheckedAt": "2026-10-07T03:48:25.337Z",
+      "operationConstraints": [
+        {
+          "operation": "text2video",
+          "operationLabel": "文生视频",
+          "modelMode": "EXPLICIT",
+          "modelVersion": "seedance2.0mini",
+          "durationMinSeconds": 4,
+          "durationMaxSeconds": 15,
+          "supportsReferenceAudio": false,
+          "supportsNativeAudioOutput": true,
+          "explicitRatioAllowed": true,
+          "supportedResolutions": [
+            "720p"
+          ]
+        },
+        {
+          "operation": "multimodal2video",
+          "operationLabel": "全能参考视频",
+          "modelMode": "EXPLICIT",
+          "modelVersion": "seedance2.0mini",
+          "durationMinSeconds": 4,
+          "durationMaxSeconds": 15,
+          "maxImages": 9,
+          "maxVideos": 3,
+          "maxAudio": 3,
+          "maxTotalInputs": 12,
+          "supportsReferenceAudio": true,
+          "supportsNativeAudioOutput": true,
+          "explicitRatioAllowed": true,
+          "supportedResolutions": [
+            "720p"
+          ]
+        }
+      ]
+    },
+    "selectedCreativeId": "3a64d33b-8e6c-45df-919e-e95d4c7424d2",
+    "visualDirection": "高角度俯拍桌面加手部特写的漫剧语言，全片以过程态呈现产品，机位以固定为主，切换依据动作完成度，全程预留上下字幕安全区，不要求模型渲染任何可读文字。",
+    "soundDirection": "无口播、无对白；后期按字幕节奏加入轻柔环境音与低量氛围垫底，保持安静深夜氛围，不夸大产品效果。",
+    "productShowcaseRules": [
+      "首帧即出现产品被拍压的过程态，不依赖人物介绍或口播开场。",
+      "中段以拆开外罩、内胆与草本填充展示建立物料可见信任。",
+      "结尾回到完整成品平铺静止约2秒，只落在使用场景，不做功效结论。",
+      "产品外观、颜色、形状、图案与材质必须严格保持主参考图身份。"
+    ],
+    "continuityLock": {
+      "product": {
+        "stableAttributes": [
+          "productName:瑶药护颈枕"
+        ],
+        "forbiddenChanges": []
+      },
+      "characters": [
+        {
+          "name": "加班者（只露手部）",
+          "stableAppearance": "只出现手部与局部身体，不露脸；手部动作稳定，无纹身或明显饰品",
+          "wardrobe": "深色通勤外套，袖口简洁"
+        }
+      ],
+      "environments": [
+        {
+          "sceneId": "267a5f06-5640-4d06-a546-8bfd39202c3a",
+          "stableElements": [
+            "office desk surface",
+            "keyboard edge",
+            "notebook",
+            "mug",
+            "neutral lighting",
+            "no people",
+            "no readable text"
+          ]
+        },
+        {
+          "sceneId": "9326dc1a-96b1-4e33-9acd-2ac9075ff27c",
+          "stableElements": [
+            "high-angle downward view of bedroom corner",
+            "bed",
+            "nightstand",
+            "lamp",
+            "warm lighting",
+            "no people",
+            "no readable text"
+          ]
+        }
+      ]
+    },
+    "aiExecution": {
+      "executionId": "6fbc75af-f08b-433e-a9bb-f3f1eca1e5b9",
+      "providerId": "aihubmix",
+      "modelId": "deepseek-v4.1-flash",
+      "configVersion": 5
+    },
+    "scenes": [
+      {
+        "id": "267a5f06-5640-4d06-a546-8bfd39202c3a",
+        "order": 1,
+        "purpose": "冷开场建立产品存在与深夜工位状态，不做产品说明",
+        "location": "办公室工位桌面",
+        "timeOfDay": "深夜",
+        "visualState": "深夜办公室，桌面整洁，键盘笔电一角，暖色台灯，无人脸，只留手部与产品",
+        "sourceBeatIds": [
+          "32c71c33-32ab-4d6c-be97-90c23eb31de4",
+          "b731311e-5cee-47b4-a028-0c70855f8159"
+        ],
+        "requiredFactIds": [],
+        "clips": [
+          {
+            "id": "877cc2a9-99a6-48fe-a337-66c49297f3b1",
+            "sceneId": "267a5f06-5640-4d06-a546-8bfd39202c3a",
+            "order": 1,
+            "durationMs": 11000,
+            "purpose": "以深夜办公桌为冷开场，用拍压枕头与草本原料特写建立产品存在，随后转入工位收尾与颈肩状态，不做产品说明",
+            "openingState": {
+              "description": "高角度俯拍办公室桌面，双手将枕头拍平、翻面；画面下方预留字幕安全区；无人物露脸",
+              "productState": "瑶药护颈枕以被拍压的过程态出现，外观保持主参考图身份",
+              "environmentState": "深夜办公室桌面，键盘笔电一角，暖色台灯，环境整洁无杂物",
+              "stateHash": "51295eadb3df0d88d9a2b8f8794910cd18b7fa7644d79631bb9dec01413179b5"
+            },
+            "closingState": {
+              "description": "工位灯光关闭，画面留下包与桌面的收尾状态；进入下一场景前的静止瞬间",
+              "productState": "产品不在画面内",
+              "environmentState": "办公室桌面，灯光调暗，桌面留有收尾痕迹",
+              "stateHash": "d2b659d10ef6159fd610589d1370ae3eb74e896b04b5029d356628d52033cc9f"
+            },
+            "referenceAssets": [
+              {
+                "assetId": "0b4cb39d-c128-450c-af6e-6aae6c22cd70",
+                "role": "PRIMARY_PRODUCT",
+                "priority": 0,
+                "required": true
+              },
+              {
+                "assetId": "production-asset:e2e7a2e7-9561-476c-8383-39c519b90d76:SET_OFFICE_DESK",
+                "role": "ENVIRONMENT",
+                "priority": 1,
+                "required": true
+              }
+            ],
+            "productVisibility": "PARTIAL",
+            "strictProductIdentity": true,
+            "strictProductIdentityScope": [
+              "shape",
+              "color",
+              "pattern",
+              "material",
+              "logo"
+            ],
+            "riskAssessment": {
+              "level": "MEDIUM",
+              "reasonCodes": [
+                "PRODUCT_IDENTITY",
+                "HANDS_ONLY_NO_FACE"
+              ],
+              "mitigations": [
+                "使用主参考图锁定产品外观，手部操作不替换产品身份",
+                "字幕仅后期叠加，不要求模型渲染文字"
+              ],
+              "source": "PRODUCT_DIRECTOR"
+            },
+            "sourceBeatIds": [
+              "32c71c33-32ab-4d6c-be97-90c23eb31de4",
+              "b731311e-5cee-47b4-a028-0c70855f8159"
+            ],
+            "requiredFactIds": [],
+            "segments": [
+              {
+                "id": "83f3e601-d1ec-4424-bfa9-ab5e46463d3c",
+                "order": 1,
+                "startMs": 0,
+                "endMs": 3000,
+                "shotSize": "特写",
+                "cameraPosition": "高角度俯拍桌面",
+                "cameraAngle": "俯视",
+                "cameraMovement": "固定机位，轻微手持晃动",
+                "composition": "中心构图突出手部与枕体，画面上下预留字幕安全区，不出现可读文字",
+                "subjectAction": "一双不露脸的手将瑶药护颈枕拍平、翻面，动作紧凑连续",
+                "productState": "枕头被拍压中的过程态，外观保持主参考图身份",
+                "dialogueOrNarration": {
+                  "kind": "NONE"
+                },
+                "ambientSound": {
+                  "kind": "NONE"
+                },
+                "postProductionText": [
+                  {
+                    "kind": "CAPTION",
+                    "text": "加班到11点，脖子先下班",
+                    "startMs": 0,
+                    "endMs": 3000,
+                    "position": "BOTTOM",
+                    "fontScale": 1,
+                    "sourceBeatIds": [
+                      "32c71c33-32ab-4d6c-be97-90c23eb31de4"
+                    ],
+                    "requiredFactIds": []
+                  }
+                ],
+                "lighting": "深夜桌面暖色台灯，光线集中桌面，背景暗",
+                "continuityIn": {
+                  "description": "高角度俯拍办公室桌面，双手将枕头拍平、翻面；画面下方预留字幕安全区；无人物露脸",
+                  "productState": "瑶药护颈枕以被拍压的过程态出现，外观保持主参考图身份",
+                  "environmentState": "深夜办公室桌面，键盘笔电一角，暖色台灯，环境整洁无杂物",
+                  "stateHash": "51295eadb3df0d88d9a2b8f8794910cd18b7fa7644d79631bb9dec01413179b5"
+                },
+                "continuityOut": {
+                  "description": "双手完成枕头拍压，准备硬切到草本原料特写；桌面保持同一位置",
+                  "productState": "枕头平放桌面，过程态保持",
+                  "environmentState": "深夜办公室桌面，暖色台灯，键盘笔电一角",
+                  "stateHash": "99e06915206b676336d394f0fcebb574f603381b47f9590ddeefc2694eb9c9db"
+                },
+                "sourceBeatIds": [
+                  "32c71c33-32ab-4d6c-be97-90c23eb31de4"
+                ],
+                "requiredFactIds": []
+              },
+              {
+                "id": "f31b2829-c1d2-46a8-aa63-70092693de0d",
+                "order": 2,
+                "startMs": 3000,
+                "endMs": 5500,
+                "shotSize": "特写",
+                "cameraPosition": "高角度俯拍桌面",
+                "cameraAngle": "俯视",
+                "cameraMovement": "固定机位",
+                "composition": "桌面横向并置构图，小碟与草本原料一字排开，浅景深；上下预留字幕安全区",
+                "subjectAction": "硬切到草本原料分装并置的特写，原料小碟逐个入镜",
+                "productState": "草本原料展示态，不出现产品主体",
+                "dialogueOrNarration": {
+                  "kind": "NONE"
+                },
+                "ambientSound": {
+                  "kind": "NONE"
+                },
+                "postProductionText": [],
+                "lighting": "同前，暖色台灯，原料表面有轻微质感光",
+                "continuityIn": {
+                  "description": "双手完成枕头拍压，准备硬切到草本原料特写；桌面保持同一位置",
+                  "productState": "枕头平放桌面，过程态保持",
+                  "environmentState": "深夜办公室桌面，暖色台灯，键盘笔电一角",
+                  "stateHash": "99e06915206b676336d394f0fcebb574f603381b47f9590ddeefc2694eb9c9db"
+                },
+                "continuityOut": {
+                  "description": "草本原料展示完毕，画面切至工位收尾",
+                  "productState": "产品不在画面内",
+                  "environmentState": "办公桌面，键盘笔电一角",
+                  "stateHash": "ffa9ada811d3c12a4d3d85cb387bfff13e97e4bcf1213929d8233ef054f4a969"
+                },
+                "sourceBeatIds": [
+                  "32c71c33-32ab-4d6c-be97-90c23eb31de4"
+                ],
+                "requiredFactIds": []
+              },
+              {
+                "id": "2f9cf740-907e-4e84-9d0d-fe3d4463c6da",
+                "order": 3,
+                "startMs": 5500,
+                "endMs": 8500,
+                "shotSize": "近景",
+                "cameraPosition": "侧前方平视",
+                "cameraAngle": "平视略俯",
+                "cameraMovement": "轻微手持晃动",
+                "composition": "工位桌面收尾，电脑合上，手揉后颈，包上肩；上下预留字幕安全区",
+                "subjectAction": "收拾桌面、合上电脑、单手揉脖子后颈，把包甩上肩",
+                "productState": "产品不在画面内",
+                "dialogueOrNarration": {
+                  "kind": "NONE"
+                },
+                "ambientSound": {
+                  "kind": "NONE"
+                },
+                "postProductionText": [
+                  {
+                    "kind": "CAPTION",
+                    "text": "白天低头一整天",
+                    "startMs": 5500,
+                    "endMs": 7000,
+                    "position": "BOTTOM",
+                    "fontScale": 1,
+                    "sourceBeatIds": [
+                      "b731311e-5cee-47b4-a028-0c70855f8159"
+                    ],
+                    "requiredFactIds": []
+                  },
+                  {
+                    "kind": "CAPTION",
+                    "text": "回家躺下，脑子还在放白天的事",
+                    "startMs": 7000,
+                    "endMs": 8500,
+                    "position": "BOTTOM",
+                    "fontScale": 1,
+                    "sourceBeatIds": [
+                      "b731311e-5cee-47b4-a028-0c70855f8159"
+                    ],
+                    "requiredFactIds": []
+                  }
+                ],
+                "lighting": "工位顶光与台灯混合，深夜冷调",
+                "continuityIn": {
+                  "description": "草本原料展示完毕，画面切至工位收尾",
+                  "productState": "产品不在画面内",
+                  "environmentState": "办公桌面，键盘笔电一角",
+                  "stateHash": "ffa9ada811d3c12a4d3d85cb387bfff13e97e4bcf1213929d8233ef054f4a969"
+                },
+                "continuityOut": {
+                  "description": "收拾完毕，准备关灯离开",
+                  "productState": "产品不在画面内",
+                  "environmentState": "办公室工位，灯光待关闭",
+                  "stateHash": "ab4bf6984e96f68b73704c9144d5582aed109454586c3facf24389d2b7a02213"
+                },
+                "sourceBeatIds": [
+                  "b731311e-5cee-47b4-a028-0c70855f8159"
+                ],
+                "requiredFactIds": []
+              },
+              {
+                "id": "0544aa4b-256d-41fe-b07b-528f73737618",
+                "order": 4,
+                "startMs": 8500,
+                "endMs": 11000,
+                "shotSize": "中景",
+                "cameraPosition": "斜向45度俯视",
+                "cameraAngle": "俯视",
+                "cameraMovement": "固定机位",
+                "composition": "关灯离开，画面渐暗，预留字幕安全区",
+                "subjectAction": "关灯，画面转暗，人物轮廓离开",
+                "productState": "产品不在画面内",
+                "dialogueOrNarration": {
+                  "kind": "NONE"
+                },
+                "ambientSound": {
+                  "kind": "NONE"
+                },
+                "postProductionText": [],
+                "lighting": "灯光关闭，画面暗下，仅留窗外微光",
+                "continuityIn": {
+                  "description": "收拾完毕，准备关灯离开",
+                  "productState": "产品不在画面内",
+                  "environmentState": "办公室工位，灯光待关闭",
+                  "stateHash": "ab4bf6984e96f68b73704c9144d5582aed109454586c3facf24389d2b7a02213"
+                },
+                "continuityOut": {
+                  "description": "工位灯光关闭，画面留下包与桌面的收尾状态；进入下一场景前的静止瞬间",
+                  "productState": "产品不在画面内",
+                  "environmentState": "办公室桌面，灯光调暗，桌面留有收尾痕迹",
+                  "stateHash": "d2b659d10ef6159fd610589d1370ae3eb74e896b04b5029d356628d52033cc9f"
+                },
+                "sourceBeatIds": [
+                  "b731311e-5cee-47b4-a028-0c70855f8159"
+                ],
+                "requiredFactIds": []
+              }
+            ],
+            "aggregateStatus": "PLANNED",
+            "contentHash": "83d16f10f093b2ee57f50a0bdc87bb5f60ca2d9635d95fb0ebbadd0e6c4034c5"
+          }
+        ]
+      },
+      {
+        "id": "9326dc1a-96b1-4e33-9acd-2ac9075ff27c",
+        "order": 2,
+        "purpose": "回家取枕、拆看内胆、草本原料展示、成品收束与软CTA",
+        "location": "家庭卧室床头柜与床角",
+        "timeOfDay": "深夜",
+        "visualState": "暖光卧室，床头柜，床角，灯，无人物露脸，产品以过程态和成品态出现",
+        "sourceBeatIds": [
+          "17e77d40-e49f-4adb-9704-a5d527461631",
+          "71b13e0e-0551-4531-936c-63ed115aeb17",
+          "f39729b1-d259-49ef-b074-02b7fd61eae0",
+          "b75b2cba-5402-42ab-b512-ae31a0bbb527",
+          "38ff89ca-1b38-4ada-9157-11c39906de93"
+        ],
+        "requiredFactIds": [
+          "aa5878e1-8216-45f1-93f4-d4c381fd065b",
+          "c6366dcd-d1b9-44d0-925d-e8f8824211ec",
+          "335fab09-fdeb-41da-ac9f-f603e8745fb0",
+          "6c938d45-c23c-4b96-8af5-07d12a68c442",
+          "8c3dcbc8-b6ca-4b1d-abd6-7be99bb74f5a",
+          "cf0a199a-a698-4a9e-9a73-23c84d733b82"
+        ],
+        "clips": [
+          {
+            "id": "99ef8126-b0c7-49a8-976a-7a53c2f66bd3",
+            "sceneId": "9326dc1a-96b1-4e33-9acd-2ac9075ff27c",
+            "order": 1,
+            "durationMs": 10000,
+            "purpose": "回家开柜取枕，翻动拍压，拆开看内胆，草本原料逐项呈现，最后回到完整成品，落在使用场景与软收束",
+            "openingState": {
+              "description": "高角度俯拍家庭卧室床头柜与床角，双手打开柜门取出瑶药护颈枕，暖色台灯照明",
+              "productState": "瑶药护颈枕在柜内叠放，外观保持主参考图身份",
+              "environmentState": "深夜卧室，暖色台灯，床头柜与床角，无人脸",
+              "stateHash": "649a5ea1f6c079593b578b6ccb657430f74045808aeff25810d310caa825087d"
+            },
+            "closingState": {
+              "description": "完整成品平铺静止，画面保持约3秒，字幕收束；灯光柔和稳定",
+              "productState": "瑶药护颈枕完整成品平铺，外观与主参考图一致",
+              "environmentState": "深夜卧室，床头柜与床角，暖色台灯",
+              "stateHash": "822797355337b9816215751bf7744f7457ada4c8d55c802a272107a57df3c2b8"
+            },
+            "referenceAssets": [
+              {
+                "assetId": "0b4cb39d-c128-450c-af6e-6aae6c22cd70",
+                "role": "PRIMARY_PRODUCT",
+                "priority": 0,
+                "required": true
+              },
+              {
+                "assetId": "production-asset:e2e7a2e7-9561-476c-8383-39c519b90d76:PRODUCT_STATE_INNER",
+                "role": "PRODUCT_ANGLE",
+                "priority": 1,
+                "required": true
+              },
+              {
+                "assetId": "production-asset:e2e7a2e7-9561-476c-8383-39c519b90d76:SET_HOME_BEDSIDE",
+                "role": "ENVIRONMENT",
+                "priority": 2,
+                "required": true
+              }
+            ],
+            "productVisibility": "HERO",
+            "strictProductIdentity": true,
+            "strictProductIdentityScope": [
+              "shape",
+              "color",
+              "pattern",
+              "material",
+              "logo"
+            ],
+            "riskAssessment": {
+              "level": "MEDIUM",
+              "reasonCodes": [
+                "PRODUCT_IDENTITY",
+                "INNER_STATE_ACCURACY"
+              ],
+              "mitigations": [
+                "内胆展示态使用锁定产品状态参考，不重新设计外观",
+                "草本原料名称仅以字幕呈现，不要求模型渲染文字"
+              ],
+              "source": "PRODUCT_DIRECTOR"
+            },
+            "sourceBeatIds": [
+              "17e77d40-e49f-4adb-9704-a5d527461631",
+              "71b13e0e-0551-4531-936c-63ed115aeb17",
+              "f39729b1-d259-49ef-b074-02b7fd61eae0",
+              "b75b2cba-5402-42ab-b512-ae31a0bbb527",
+              "38ff89ca-1b38-4ada-9157-11c39906de93"
+            ],
+            "requiredFactIds": [
+              "aa5878e1-8216-45f1-93f4-d4c381fd065b",
+              "c6366dcd-d1b9-44d0-925d-e8f8824211ec",
+              "335fab09-fdeb-41da-ac9f-f603e8745fb0",
+              "6c938d45-c23c-4b96-8af5-07d12a68c442",
+              "8c3dcbc8-b6ca-4b1d-abd6-7be99bb74f5a",
+              "cf0a199a-a698-4a9e-9a73-23c84d733b82"
+            ],
+            "segments": [
+              {
+                "id": "77da9bc0-2180-47d5-8a2f-9627f79e89c5",
+                "order": 1,
+                "startMs": 0,
+                "endMs": 2000,
+                "shotSize": "中景",
+                "cameraPosition": "高角度俯拍",
+                "cameraAngle": "俯视",
+                "cameraMovement": "固定机位",
+                "composition": "床头柜与柜门，双手取出枕头；上下预留字幕安全区",
+                "subjectAction": "打开柜门，双手取出瑶药护颈枕",
+                "productState": "枕头从柜内取出，外观保持主参考图身份",
+                "dialogueOrNarration": {
+                  "kind": "NONE"
+                },
+                "ambientSound": {
+                  "kind": "NONE"
+                },
+                "postProductionText": [
+                  {
+                    "kind": "CAPTION",
+                    "text": "家里这只，叫瑶药护颈枕",
+                    "startMs": 0,
+                    "endMs": 2000,
+                    "position": "BOTTOM",
+                    "fontScale": 1,
+                    "sourceBeatIds": [
+                      "17e77d40-e49f-4adb-9704-a5d527461631"
+                    ],
+                    "requiredFactIds": [
+                      "aa5878e1-8216-45f1-93f4-d4c381fd065b"
+                    ]
+                  }
+                ],
+                "lighting": "暖色台灯，卧室柔和光影",
+                "continuityIn": {
+                  "description": "高角度俯拍家庭卧室床头柜与床角，双手打开柜门取出瑶药护颈枕，暖色台灯照明",
+                  "productState": "瑶药护颈枕在柜内叠放，外观保持主参考图身份",
+                  "environmentState": "深夜卧室，暖色台灯，床头柜与床角，无人脸",
+                  "stateHash": "649a5ea1f6c079593b578b6ccb657430f74045808aeff25810d310caa825087d"
+                },
+                "continuityOut": {
+                  "description": "双手托住枕头，准备翻面放到桌面",
+                  "productState": "枕头被托在手中，过程态",
+                  "environmentState": "卧室床头柜前，柜门打开",
+                  "stateHash": "7d2757e0434c0a72070a81f3a5189d8e3caa1e5d2d29e0b4bbcb1b07bbca724f"
+                },
+                "sourceBeatIds": [
+                  "17e77d40-e49f-4adb-9704-a5d527461631"
+                ],
+                "requiredFactIds": [
+                  "aa5878e1-8216-45f1-93f4-d4c381fd065b"
+                ]
+              },
+              {
+                "id": "d4fba3d1-9f7d-44d5-ba6a-01be6ff42da9",
+                "order": 2,
+                "startMs": 2000,
+                "endMs": 3500,
+                "shotSize": "特写",
+                "cameraPosition": "高角度俯拍桌面",
+                "cameraAngle": "俯视",
+                "cameraMovement": "固定机位",
+                "composition": "桌面中心，手托枕头翻面，浅景深；预留字幕安全区",
+                "subjectAction": "手托住枕头翻一个面，再放上桌面",
+                "productState": "枕头翻面后的状态，外观保持主参考图身份",
+                "dialogueOrNarration": {
+                  "kind": "NONE"
+                },
+                "ambientSound": {
+                  "kind": "NONE"
+                },
+                "postProductionText": [
+                  {
+                    "kind": "LABEL",
+                    "text": "草本护颈枕 / 药枕",
+                    "startMs": 2000,
+                    "endMs": 3500,
+                    "position": "BOTTOM",
+                    "fontScale": 1,
+                    "sourceBeatIds": [
+                      "17e77d40-e49f-4adb-9704-a5d527461631"
+                    ],
+                    "requiredFactIds": [
+                      "c6366dcd-d1b9-44d0-925d-e8f8824211ec"
+                    ]
+                  }
+                ],
+                "lighting": "暖色台灯，桌面柔和",
+                "continuityIn": {
+                  "description": "双手托住枕头，准备翻面放到桌面",
+                  "productState": "枕头被托在手中，过程态",
+                  "environmentState": "卧室床头柜前，柜门打开",
+                  "stateHash": "7d2757e0434c0a72070a81f3a5189d8e3caa1e5d2d29e0b4bbcb1b07bbca724f"
+                },
+                "continuityOut": {
+                  "description": "枕头平放桌面，准备拆开外罩",
+                  "productState": "枕头平放，完整成品态",
+                  "environmentState": "卧室桌面，暖色台灯",
+                  "stateHash": "615a8ff9e64530314b843b408392de9d66ca43e482f1e79f85958584b61d1fc6"
+                },
+                "sourceBeatIds": [
+                  "17e77d40-e49f-4adb-9704-a5d527461631"
+                ],
+                "requiredFactIds": [
+                  "c6366dcd-d1b9-44d0-925d-e8f8824211ec"
+                ]
+              },
+              {
+                "id": "85be3142-6ab9-425e-8399-e6df59a7ae76",
+                "order": 3,
+                "startMs": 3500,
+                "endMs": 6000,
+                "shotSize": "特写",
+                "cameraPosition": "高角度俯拍桌面",
+                "cameraAngle": "俯视",
+                "cameraMovement": "轻微手持晃动",
+                "composition": "拆开外罩，露出内胆与草本填充，小碟并置；上下预留字幕安全区",
+                "subjectAction": "拆开外罩看内胆，草本填充碎料分装在一排小碟里，逐个入镜",
+                "productState": "内胆与草本填充展示态，使用锁定产品状态参考",
+                "dialogueOrNarration": {
+                  "kind": "NONE"
+                },
+                "ambientSound": {
+                  "kind": "NONE"
+                },
+                "postProductionText": [
+                  {
+                    "kind": "CAPTION",
+                    "text": "内胆里是这些草本原料",
+                    "startMs": 3500,
+                    "endMs": 6000,
+                    "position": "TOP",
+                    "fontScale": 1,
+                    "sourceBeatIds": [
+                      "71b13e0e-0551-4531-936c-63ed115aeb17"
+                    ],
+                    "requiredFactIds": [
+                      "335fab09-fdeb-41da-ac9f-f603e8745fb0"
+                    ]
+                  },
+                  {
+                    "kind": "CAPTION",
+                    "text": "佩兰、消山虎、草决明、土沉香、夜合欢、大风茅、首乌藤（夜交藤）、相思叶",
+                    "startMs": 3500,
+                    "endMs": 6000,
+                    "position": "BOTTOM",
+                    "fontScale": 1,
+                    "sourceBeatIds": [
+                      "71b13e0e-0551-4531-936c-63ed115aeb17"
+                    ],
+                    "requiredFactIds": [
+                      "335fab09-fdeb-41da-ac9f-f603e8745fb0"
+                    ]
+                  }
+                ],
+                "lighting": "暖色台灯，桌面柔和，原料有质感光",
+                "continuityIn": {
+                  "description": "枕头平放桌面，准备拆开外罩",
+                  "productState": "枕头平放，完整成品态",
+                  "environmentState": "卧室桌面，暖色台灯",
+                  "stateHash": "615a8ff9e64530314b843b408392de9d66ca43e482f1e79f85958584b61d1fc6"
+                },
+                "continuityOut": {
+                  "description": "内胆与草本填充展示完毕，准备拍压枕头",
+                  "productState": "内胆与草本填充展示态，使用锁定产品状态参考",
+                  "environmentState": "卧室桌面，暖色台灯，小碟并置",
+                  "stateHash": "5ed2183a8cd5b964cb7f92feec32134db55ffe760dd59417d67d2d43732b4099"
+                },
+                "sourceBeatIds": [
+                  "71b13e0e-0551-4531-936c-63ed115aeb17"
+                ],
+                "requiredFactIds": [
+                  "335fab09-fdeb-41da-ac9f-f603e8745fb0"
+                ]
+              },
+              {
+                "id": "2409f810-85bd-4bc4-aff2-d76677e2b2a7",
+                "order": 4,
+                "startMs": 6000,
+                "endMs": 7500,
+                "shotSize": "特写",
+                "cameraPosition": "高角度俯拍桌面",
+                "cameraAngle": "俯视",
+                "cameraMovement": "轻微手持晃动",
+                "composition": "双手连续拍、压、翻动枕头，随后镜头贴近内胆分层；预留字幕安全区",
+                "subjectAction": "双手连续拍、压、翻动枕头，呈现厚度、软硬与回弹的手感；随后镜头贴近内胆分层与填充",
+                "productState": "枕头被拍压中的过程态，内胆分层可见",
+                "dialogueOrNarration": {
+                  "kind": "NONE"
+                },
+                "ambientSound": {
+                  "kind": "NONE"
+                },
+                "postProductionText": [
+                  {
+                    "kind": "CAPTION",
+                    "text": "瑶药草本特色，做成居家能用的养生寝具",
+                    "startMs": 6000,
+                    "endMs": 7500,
+                    "position": "BOTTOM",
+                    "fontScale": 1,
+                    "sourceBeatIds": [
+                      "f39729b1-d259-49ef-b074-02b7fd61eae0"
+                    ],
+                    "requiredFactIds": [
+                      "6c938d45-c23c-4b96-8af5-07d12a68c442"
+                    ]
+                  }
+                ],
+                "lighting": "暖色台灯，桌面柔和",
+                "continuityIn": {
+                  "description": "内胆与草本填充展示完毕，准备拍压枕头",
+                  "productState": "内胆与草本填充展示态，使用锁定产品状态参考",
+                  "environmentState": "卧室桌面，暖色台灯，小碟并置",
+                  "stateHash": "5ed2183a8cd5b964cb7f92feec32134db55ffe760dd59417d67d2d43732b4099"
+                },
+                "continuityOut": {
+                  "description": "枕头被拍压后放平，准备移至床头",
+                  "productState": "枕头过程态，内胆已闭合",
+                  "environmentState": "卧室桌面，暖色台灯",
+                  "stateHash": "b85d07c1aa4eb19226e82328f24da1a0f3e18e3e79a7a27bb1b24445e1c00154"
+                },
+                "sourceBeatIds": [
+                  "f39729b1-d259-49ef-b074-02b7fd61eae0"
+                ],
+                "requiredFactIds": [
+                  "6c938d45-c23c-4b96-8af5-07d12a68c442"
+                ]
+              },
+              {
+                "id": "3db5f49d-ad72-4d8e-8700-bce49fef2e16",
+                "order": 5,
+                "startMs": 7500,
+                "endMs": 9000,
+                "shotSize": "中景",
+                "cameraPosition": "高角度俯拍床头",
+                "cameraAngle": "俯视",
+                "cameraMovement": "固定机位",
+                "composition": "床头柜与床角，枕头摆正，手掌轻压定型；上下预留字幕安全区",
+                "subjectAction": "枕头摆正、手掌轻压一下定型，画面静止",
+                "productState": "完整成品平铺在床头，外观与主参考图一致",
+                "dialogueOrNarration": {
+                  "kind": "NONE"
+                },
+                "ambientSound": {
+                  "kind": "NONE"
+                },
+                "postProductionText": [
+                  {
+                    "kind": "CAPTION",
+                    "text": "卧室睡眠、日常颈肩养护，都是它出现的地方",
+                    "startMs": 7500,
+                    "endMs": 9000,
+                    "position": "BOTTOM",
+                    "fontScale": 1,
+                    "sourceBeatIds": [
+                      "b75b2cba-5402-42ab-b512-ae31a0bbb527"
+                    ],
+                    "requiredFactIds": [
+                      "8c3dcbc8-b6ca-4b1d-abd6-7be99bb74f5a"
+                    ]
+                  }
+                ],
+                "lighting": "暖色台灯，床头柔和",
+                "continuityIn": {
+                  "description": "枕头被拍压后放平，准备移至床头",
+                  "productState": "枕头过程态，内胆已闭合",
+                  "environmentState": "卧室桌面，暖色台灯",
+                  "stateHash": "b85d07c1aa4eb19226e82328f24da1a0f3e18e3e79a7a27bb1b24445e1c00154"
+                },
+                "continuityOut": {
+                  "description": "枕头平放静止，准备最终定帧",
+                  "productState": "完整成品平铺",
+                  "environmentState": "卧室床头，暖色台灯",
+                  "stateHash": "66901e8d28bb930a07d760cb11446b09af758fd2131b56d8c7b62cb7517cf498"
+                },
+                "sourceBeatIds": [
+                  "b75b2cba-5402-42ab-b512-ae31a0bbb527"
+                ],
+                "requiredFactIds": [
+                  "8c3dcbc8-b6ca-4b1d-abd6-7be99bb74f5a"
+                ]
+              },
+              {
+                "id": "d10b38b2-434f-43b8-ba70-8970457e9f48",
+                "order": 6,
+                "startMs": 9000,
+                "endMs": 10000,
+                "shotSize": "中景",
+                "cameraPosition": "高角度俯拍",
+                "cameraAngle": "俯视",
+                "cameraMovement": "固定机位",
+                "composition": "完整成品平铺定帧，保持静止；上下预留字幕安全区",
+                "subjectAction": "画面保持静止，完整成品平铺",
+                "productState": "完整成品平铺，外观与主参考图一致",
+                "dialogueOrNarration": {
+                  "kind": "NONE"
+                },
+                "ambientSound": {
+                  "kind": "NONE"
+                },
+                "postProductionText": [
+                  {
+                    "kind": "CTA",
+                    "text": "久坐、睡眠压力大、想在家做点轻养护的人，都可以看看它",
+                    "startMs": 9000,
+                    "endMs": 9500,
+                    "position": "BOTTOM",
+                    "fontScale": 1,
+                    "sourceBeatIds": [
+                      "38ff89ca-1b38-4ada-9157-11c39906de93"
+                    ],
+                    "requiredFactIds": [
+                      "cf0a199a-a698-4a9e-9a73-23c84d733b82"
+                    ]
+                  },
+                  {
+                    "kind": "CAPTION",
+                    "text": "睡前把它放好，使用与保养提示记得先看一遍",
+                    "startMs": 9500,
+                    "endMs": 10000,
+                    "position": "BOTTOM",
+                    "fontScale": 1,
+                    "sourceBeatIds": [
+                      "38ff89ca-1b38-4ada-9157-11c39906de93"
+                    ],
+                    "requiredFactIds": [
+                      "8c3dcbc8-b6ca-4b1d-abd6-7be99bb74f5a"
+                    ]
+                  }
+                ],
+                "lighting": "暖色台灯，床头柔和，光线稳定",
+                "continuityIn": {
+                  "description": "枕头平放静止，准备最终定帧",
+                  "productState": "完整成品平铺",
+                  "environmentState": "卧室床头，暖色台灯",
+                  "stateHash": "66901e8d28bb930a07d760cb11446b09af758fd2131b56d8c7b62cb7517cf498"
+                },
+                "continuityOut": {
+                  "description": "完整成品平铺静止，画面保持约3秒，字幕收束；灯光柔和稳定",
+                  "productState": "瑶药护颈枕完整成品平铺，外观与主参考图一致",
+                  "environmentState": "深夜卧室，床头柜与床角，暖色台灯",
+                  "stateHash": "822797355337b9816215751bf7744f7457ada4c8d55c802a272107a57df3c2b8"
+                },
+                "sourceBeatIds": [
+                  "38ff89ca-1b38-4ada-9157-11c39906de93"
+                ],
+                "requiredFactIds": [
+                  "cf0a199a-a698-4a9e-9a73-23c84d733b82",
+                  "8c3dcbc8-b6ca-4b1d-abd6-7be99bb74f5a"
+                ]
+              }
+            ],
+            "aggregateStatus": "PLANNED",
+            "contentHash": "1a760c7b49ce07549e818c8bc39a74ce6ef6ebb4ea46a3808daad233d606069e"
+          }
+        ]
+      }
+    ],
+    "contentHash": "cd943ba36f693bede642672cade673e772b42f8e00a39e891a241d6a83189f8c",
+    "confirmedAt": "2026-10-07T03:51:07.001Z"
+  },
+  "generationRequests": [
+    {
+      "id": "9ee1e3b2-e039-4f39-91eb-fbb106305df8",
+      "clipId": "877cc2a9-99a6-48fe-a337-66c49297f3b1",
+      "requestHash": "202b7089e7697bbec8fc051d7cbce5f9a64f92bc048511cc1b4300a88efb841a",
+      "data": {
+        "id": "9ee1e3b2-e039-4f39-91eb-fbb106305df8",
+        "projectId": "bbcbff87-a977-4103-b2c4-d70cb8996edb",
+        "clipId": "877cc2a9-99a6-48fe-a337-66c49297f3b1",
+        "compiledPromptId": "2b82f1d4-a99c-47af-bdb7-1659b0f5d984",
+        "compiledPromptHash": "ceabbbdf05f5483a6d248c3cee45fb0fb185d5f4672694733024e472932735ac",
+        "provider": "domestic-jimeng-cli",
+        "providerIdentityHash": "2083d3ea7f9801be61ad66b15c7f6cbcf297eaede73fd2b9d02655332d904fa7",
+        "capabilityFingerprint": "b7052e77d4d6b1818100b8fe84061834d6aebff8da3067a76df011d8aba604aa",
+        "model": "seedance2.0mini",
+        "promptText": "【镜头目标】\n以深夜办公桌为冷开场，用拍压枕头与草本原料特写建立产品存在，随后转入工位收尾与颈肩状态，不做产品说明。时长 11 秒，9:16，720p。\n\n【场景与连续性】\n办公室工位桌面，深夜。开场：高角度俯拍办公室桌面，双手将枕头拍平、翻面；画面下方预留字幕安全区；无人物露脸。结束：工位灯光关闭，画面留下包与桌面的收尾状态；进入下一场景前的静止瞬间\n\n【固定身份参考】\n- 瑶药护颈枕：当前已确认产品本体；外观、颜色、形状、图案和品牌身份必须以产品主参考图为准。；保持：严格保持当前确认产品的形状、颜色、图案、材质和品牌身份\n- 办公室工位桌面：Empty high-angle overhead office desk surface identity reference: minimal desk, keyboard edge, notebook, mug, neutral lighting, no people,…；保持：Empty high-angle overhead office desk surface identity reference: minimal desk, keyboard…\n\n【按时间执行】\n0–3秒：一双不露脸的手将瑶药护颈枕拍平、翻面，动作紧凑连续；产品状态：枕头被拍压中的过程态，外观保持主参考图身份；镜头：特写，俯视，固定机位，轻微手持晃动\n3–5.5秒：硬切到草本原料分装并置的特写，原料小碟逐个入镜；产品状态：草本原料展示态，不出现产品主体；镜头：特写，俯视，固定机位\n5.5–8.5秒：收拾桌面、合上电脑、单手揉脖子后颈，把包甩上肩；产品状态：产品不在画面内；镜头：近景，平视略俯，轻微手持晃动\n8.5–11秒：关灯，画面转暗，人物轮廓离开；产品状态：产品不在画面内；镜头：中景，俯视，固定机位\n\n【产品约束】\n产品外观必须严格遵循所附确认产品参考图，不改变形状、比例、颜色、图案、材质或品牌身份。\n\n【声音】\n本镜头不请求模型原生音轨。不要生成对白、旁白、环境声或音乐；声音由后期统一处理。\n\n【禁止】\n不要在生成画面中出现任何可读文字、字幕、数字、标签、UI、CTA 或额外 Logo 文字；需要的文字全部由后期添加。\n不要增加未经确认的产品功效、认证、参数或剧情事实。\n不要生成背景音乐。",
+        "assetManifest": [
+          {
+            "assetId": "0b4cb39d-c128-450c-af6e-6aae6c22cd70",
+            "artifactHash": "8fc66a1ff99b6b48ed003505d59e44745568df15c0c7983f3bd569d4e8e5c44e",
+            "role": "PRIMARY_PRODUCT",
+            "priority": 0,
+            "required": true
+          },
+          {
+            "assetId": "production-asset:e2e7a2e7-9561-476c-8383-39c519b90d76:SET_OFFICE_DESK",
+            "artifactHash": "feea7d5bd72d0e53d1ec8f2a28c52f3b2a72e0dc312a62ccf96589754313577c",
+            "role": "ENVIRONMENT",
+            "priority": 1,
+            "required": true
+          }
+        ],
+        "durationMs": 11000,
+        "aspectRatio": "9:16",
+        "videoResolution": "720p",
+        "generateAudio": false,
+        "generationProfile": {
+          "source": "DREAMINA_CAPABILITY_REGISTRY",
+          "operation": "multimodal2video",
+          "modelMode": "EXPLICIT",
+          "requestedModelVersion": "seedance2.0mini",
+          "modelVersion": "seedance2.0mini",
+          "aspectRatioMode": "EXPLICIT",
+          "aspectRatio": "9:16",
+          "videoResolution": "720p",
+          "durationMs": 11000,
+          "referenceAudioInputCount": 0,
+          "nativeAudioOutputRequested": false,
+          "nativeAudioOutputSupported": true,
+          "commandHelpSha256": "c6b09d5a2abfe91ac7a75ca0bec3078d5483d4aa994ca2b20da354abadd687b1",
+          "registryFingerprint": "0bc9592ea7199d7b02a403d40f63a1a62276747152b7e9575d236f55f32785fb",
+          "capabilityCheckedAt": "2026-10-07T03:51:11.973Z"
+        },
+        "dreaminaOperation": "multimodal2video",
+        "inputVersionRefs": [
+          {
+            "entityType": "ProductTruth",
+            "entityId": "fc3721e4-af4d-471e-876c-48a500d82cf8",
+            "version": 2,
+            "hash": "5bc3717355b00ab1c6c76e40c57417927c36c7f131e33782c32717cfcda42d54"
+          },
+          {
+            "entityType": "CreativeBatch",
+            "entityId": "b75e26a9-882a-4173-bad1-f28e2fefeac7",
+            "version": 2,
+            "hash": "2bb8d8c52d20cd10f2946f8155e06c1c8a4cb0dc465f386770b515d3fa9201d4"
+          },
+          {
+            "entityType": "ScriptDraft",
+            "entityId": "604e1334-d36e-488e-8e1a-b2f87c334444",
+            "version": 4,
+            "hash": "a05877fb623e36fbc593e7f90aa33ede0ca71c018cf5619d37463d6c1aa41cbd"
+          },
+          {
+            "entityType": "ProductionPlan",
+            "entityId": "3769915f-3302-4868-b348-2bc4c6e8f40c",
+            "version": 4,
+            "hash": "cd943ba36f693bede642672cade673e772b42f8e00a39e891a241d6a83189f8c"
+          },
+          {
+            "entityType": "ProductionAssetSet",
+            "entityId": "e2e7a2e7-9561-476c-8383-39c519b90d76",
+            "version": 1,
+            "hash": "a608e648af5084d2ab057590cf855382bd5b7982984a4070cb814246ac700c42"
+          }
+        ],
+        "createdAt": "2026-10-07T03:51:07.137Z",
+        "requestHash": "202b7089e7697bbec8fc051d7cbce5f9a64f92bc048511cc1b4300a88efb841a"
+      }
+    },
+    {
+      "id": "e8c47a56-452d-465d-8b29-be92dbd00a79",
+      "clipId": "99ef8126-b0c7-49a8-976a-7a53c2f66bd3",
+      "requestHash": "b5f82e23e9338a8c8bf2d057ca10d14e9eab2abcbe4afe16f68cccb3f3d43c68",
+      "data": {
+        "id": "e8c47a56-452d-465d-8b29-be92dbd00a79",
+        "projectId": "bbcbff87-a977-4103-b2c4-d70cb8996edb",
+        "clipId": "99ef8126-b0c7-49a8-976a-7a53c2f66bd3",
+        "compiledPromptId": "05e6d085-6b5d-4526-b9ad-cf4a6db88096",
+        "compiledPromptHash": "b1a92aba072449b582a5603aca728c9eb62b318a2299c910bce87201710ead44",
+        "provider": "domestic-jimeng-cli",
+        "providerIdentityHash": "2083d3ea7f9801be61ad66b15c7f6cbcf297eaede73fd2b9d02655332d904fa7",
+        "capabilityFingerprint": "b7052e77d4d6b1818100b8fe84061834d6aebff8da3067a76df011d8aba604aa",
+        "model": "seedance2.0mini",
+        "promptText": "【镜头目标】\n回家开柜取枕，翻动拍压，拆开看内胆，草本原料逐项呈现，最后回到完整成品，落在使用场景与软收束。时长 10 秒，9:16，720p。\n\n【场景与连续性】\n家庭卧室床头柜与床角，深夜。开场：高角度俯拍家庭卧室床头柜与床角，双手打开柜门取出瑶药护颈枕，暖色台灯照明。结束：完整成品平铺静止，画面保持约3秒，字幕收束；灯光柔和稳定\n\n【固定身份参考】\n- 瑶药护颈枕：当前已确认产品本体；外观、颜色、形状、图案和品牌身份必须以产品主参考图为准。；保持：严格保持当前确认产品的形状、颜色、图案、材质和品牌身份\n- 内胆与草本填充展示态：Stable visual state for the opened inner lining and herbal fill of the 瑶药护颈枕, derived strictly from canonical product reference; no exterio…；保持：rectangular grey woven cushion body with visible texture；yellow piping along the outer seam；central red/yellow/green/white geometric diamond embroidery motif\n- 家庭卧室床头柜与床角：Empty high-angle overhead home bedside/cabinet surface identity reference: bedside table, bed corner, lamp, neutral warm lighting, no peopl…；保持：high-angle downward view of bedroom corner with bed on left and wooden nightstand on right；light wood nightstand with two stacked drawers and small feet；table lamp with white conical fabric shade and cylindrical wood base on nightstand\n\n【按时间执行】\n0–2秒：打开柜门，双手取出瑶药护颈枕；产品状态：枕头从柜内取出，外观保持主参考图身份；镜头：中景，俯视，固定机位\n2–3.5秒：手托住枕头翻一个面，再放上桌面；产品状态：枕头翻面后的状态，外观保持主参考图身份；镜头：特写，俯视，固定机位\n3.5–6秒：拆开外罩看内胆，草本填充碎料分装在一排小碟里，逐个入镜；产品状态：内胆与草本填充展示态，使用锁定产品状态参考；镜头：特写，俯视，轻微手持晃动\n6–7.5秒：双手连续拍、压、翻动枕头，呈现厚度、软硬与回弹的手感；随后镜头贴近内胆分层与填充；产品状态：枕头被拍压中的过程态，内胆分层可见；镜头：特写，俯视，轻微手持晃动\n7.5–9秒：枕头摆正、手掌轻压一下定型，画面静止；产品状态：完整成品平铺在床头，外观与主参考图一致；镜头：中景，俯视，固定机位\n9–10秒：画面保持静止，完整成品平铺；产品状态：完整成品平铺，外观与主参考图一致；镜头：中景，俯视，固定机位\n\n【产品约束】\n产品外观必须严格遵循所附确认产品参考图，不改变形状、比例、颜色、图案、材质或品牌身份。\n本镜头只允许依赖以下已确认产品信息：产品名称为“瑶药护颈枕”。；产品品类为草本护颈枕 / 药枕。；产品配方描述包含以下草本原料：佩兰、消山虎、草决明、土沉香、夜合欢、大风茅、首乌藤（夜交藤）、相思叶。；产品声明的使用场景为卧室睡眠及日常颈肩养护。；产品定位描述为居家草本养生寝具，结合护颈枕使用场景与瑶药草本特色。；产品描述中提及的目标人群为久坐、睡眠压力较大以及关注日常颈肩放松和居家轻养生的人群。\n\n【声音】\n本镜头不请求模型原生音轨。不要生成对白、旁白、环境声或音乐；声音由后期统一处理。\n\n【禁止】\n不要在生成画面中出现任何可读文字、字幕、数字、标签、UI、CTA 或额外 Logo 文字；需要的文字全部由后期添加。\n不要增加未经确认的产品功效、认证、参数或剧情事实。\n不要生成背景音乐。",
+        "assetManifest": [
+          {
+            "assetId": "0b4cb39d-c128-450c-af6e-6aae6c22cd70",
+            "artifactHash": "8fc66a1ff99b6b48ed003505d59e44745568df15c0c7983f3bd569d4e8e5c44e",
+            "role": "PRIMARY_PRODUCT",
+            "priority": 0,
+            "required": true
+          },
+          {
+            "assetId": "production-asset:e2e7a2e7-9561-476c-8383-39c519b90d76:PRODUCT_STATE_INNER",
+            "artifactHash": "6dac80ed4b56b5321ac4c9cf8e191d56e6f2d82c2500067cc24f02e65e261ba4",
+            "role": "PRODUCT_ANGLE",
+            "priority": 1,
+            "required": true
+          },
+          {
+            "assetId": "production-asset:e2e7a2e7-9561-476c-8383-39c519b90d76:SET_HOME_BEDSIDE",
+            "artifactHash": "b7ec4d5e478c60e703a27ec2f54e5acc15d138cc0c1374e6fc2f856230e62dd3",
+            "role": "ENVIRONMENT",
+            "priority": 2,
+            "required": true
+          }
+        ],
+        "durationMs": 10000,
+        "aspectRatio": "9:16",
+        "videoResolution": "720p",
+        "generateAudio": false,
+        "generationProfile": {
+          "source": "DREAMINA_CAPABILITY_REGISTRY",
+          "operation": "multimodal2video",
+          "modelMode": "EXPLICIT",
+          "requestedModelVersion": "seedance2.0mini",
+          "modelVersion": "seedance2.0mini",
+          "aspectRatioMode": "EXPLICIT",
+          "aspectRatio": "9:16",
+          "videoResolution": "720p",
+          "durationMs": 10000,
+          "referenceAudioInputCount": 0,
+          "nativeAudioOutputRequested": false,
+          "nativeAudioOutputSupported": true,
+          "commandHelpSha256": "c6b09d5a2abfe91ac7a75ca0bec3078d5483d4aa994ca2b20da354abadd687b1",
+          "registryFingerprint": "0bc9592ea7199d7b02a403d40f63a1a62276747152b7e9575d236f55f32785fb",
+          "capabilityCheckedAt": "2026-10-07T03:51:11.973Z"
+        },
+        "dreaminaOperation": "multimodal2video",
+        "inputVersionRefs": [
+          {
+            "entityType": "ProductTruth",
+            "entityId": "fc3721e4-af4d-471e-876c-48a500d82cf8",
+            "version": 2,
+            "hash": "5bc3717355b00ab1c6c76e40c57417927c36c7f131e33782c32717cfcda42d54"
+          },
+          {
+            "entityType": "CreativeBatch",
+            "entityId": "b75e26a9-882a-4173-bad1-f28e2fefeac7",
+            "version": 2,
+            "hash": "2bb8d8c52d20cd10f2946f8155e06c1c8a4cb0dc465f386770b515d3fa9201d4"
+          },
+          {
+            "entityType": "ScriptDraft",
+            "entityId": "604e1334-d36e-488e-8e1a-b2f87c334444",
+            "version": 4,
+            "hash": "a05877fb623e36fbc593e7f90aa33ede0ca71c018cf5619d37463d6c1aa41cbd"
+          },
+          {
+            "entityType": "ProductionPlan",
+            "entityId": "3769915f-3302-4868-b348-2bc4c6e8f40c",
+            "version": 4,
+            "hash": "cd943ba36f693bede642672cade673e772b42f8e00a39e891a241d6a83189f8c"
+          },
+          {
+            "entityType": "ProductionAssetSet",
+            "entityId": "e2e7a2e7-9561-476c-8383-39c519b90d76",
+            "version": 1,
+            "hash": "a608e648af5084d2ab057590cf855382bd5b7982984a4070cb814246ac700c42"
+          }
+        ],
+        "createdAt": "2026-10-07T03:51:07.137Z",
+        "requestHash": "b5f82e23e9338a8c8bf2d057ca10d14e9eab2abcbe4afe16f68cccb3f3d43c68"
+      }
+    }
+  ],
+  "generationAttempts": [
+    {
+      "id": "ba8bade7-b177-4354-b6b4-054c8add7280",
+      "projectId": "bbcbff87-a977-4103-b2c4-d70cb8996edb",
+      "clipId": "877cc2a9-99a6-48fe-a337-66c49297f3b1",
+      "attemptNumber": 1,
+      "generationRequestId": "9ee1e3b2-e039-4f39-91eb-fbb106305df8",
+      "requestHash": "202b7089e7697bbec8fc051d7cbce5f9a64f92bc048511cc1b4300a88efb841a",
+      "preflightReportId": "ca6c02bd-9e39-40f5-9727-04a94fda791b",
+      "userApprovalId": "b68c21da-a21e-45a0-b1ee-85d6f6ecb67f",
+      "approvalHash": "66a26574b96b905ddfb2bd36dfffc6dca6365d803a2e0aa18a9c34491cf52a1d",
+      "submissionFingerprint": "ff07cb345758c0fdeaa067a5893dbc19506e783da82d58c876a3955516fe4e9b",
+      "status": "SUCCEEDED",
+      "externalTaskId": null,
+      "providerHandleJson": "{\"externalTaskId\":\"367e17dc-8bc0-41b0-af58-e010d48186c7\",\"submitId\":\"367e17dc-8bc0-41b0-af58-e010d48186c7\"}",
+      "commandAttemptsJson": "[{\"id\":\"89a1e481-13a6-4c6f-9479-4978f089b8f9\",\"operation\":\"PROBE\",\"attemptNumber\":1,\"startedAt\":\"2026-10-07T03:51:46.039Z\",\"completedAt\":\"2026-10-07T03:51:47.858Z\",\"exitCode\":0,\"timedOut\":false,\"stdoutArtifactId\":\"dd010d7e-1c38-496b-bc42-1e28f110dd1e\",\"stderrArtifactId\":\"7e2c4be5-82b1-4bfa-8bc7-ee59df7cf0eb\",\"redactionRulesVersion\":\"p0-redact-v1\",\"parserVersion\":\"p0-provider-v1\"},{\"id\":\"f487e4de-dc65-46b2-b41b-e5c2bf8bffe6\",\"operation\":\"SUBMIT\",\"attemptNumber\":1,\"startedAt\":\"2026-10-07T03:51:47.893Z\",\"completedAt\":\"2026-10-07T03:51:51.799Z\",\"exitCode\":0,\"timedOut\":false,\"stdoutArtifactId\":\"68993ba8-c4a4-4fae-b9ee-d7fb4d2cc763\",\"stderrArtifactId\":\"044aeb98-e90f-4aa9-b7bc-63fd1978dc01\",\"redactionRulesVersion\":\"p0-redact-v1\",\"parserVersion\":\"p0-provider-v1\"},{\"id\":\"400f4a07-d0ba-43fd-a739-c7d63cf524e9\",\"operation\":\"STATUS\",\"attemptNumber\":1,\"startedAt\":\"2026-10-07T03:51:57.928Z\",\"completedAt\":\"2026-10-07T03:51:59.911Z\",\"exitCode\":0,\"timedOut\":false,\"stdoutArtifactId\":\"8a134470-0ef8-4fff-86b3-4399f05d6fc8\",\"stderrArtifactId\":\"6f1c6b9d-00a4-4567-84c0-e157a56d0f01\",\"redactionRulesVersion\":\"p0-redact-v1\",\"parserVersion\":\"p0-provider-v1\"},{\"id\":\"e29af3ce-15b4-4739-aa74-cc8dcae753dc\",\"operation\":\"STATUS\",\"attemptNumber\":2,\"startedAt\":\"2026-10-07T03:52:03.748Z\",\"completedAt\":\"2026-10-07T03:52:05.445Z\",\"exitCode\":0,\"timedOut\":false,\"stdoutArtifactId\":\"08f8b969-9dc4-41c3-8463-d1f644f6e914\",\"stderrArtifactId\":\"51b24339-8359-4217-a408-d26b69a7b58f\",\"redactionRulesVersion\":\"p0-redact-v1\",\"parserVersion\":\"p0-provider-v1\"},{\"id\":\"7907ee51-eb7c-4ab5-9f61-bdf7a0faf181\",\"operation\":\"STATUS\",\"attemptNumber\":3,\"startedAt\":\"2026-10-07T03:52:08.761Z\",\"completedAt\":\"2026-10-07T03:52:10.803Z\",\"exitCode\":0,\"timedOut\":false,\"stdoutArtifactId\":\"51081806-879c-447c-9527-34df5db26593\",\"stderrArtifactId\":\"0669cb72-83a1-4553-ab3d-2ed08f251294\",\"redactionRulesVersion\":\"p0-redact-v1\",\"parserVersion\":\"p0-provider-v1\"},{\"id\":\"d1a8fc2f-7a2b-4e7b-99ee-fa192c9ebc78\",\"operation\":\"STATUS\",\"attemptNumber\":4,\"startedAt\":\"2026-10-07T03:52:13.763Z\",\"completedAt\":\"2026-10-07T03:52:15.960Z\",\"exitCode\":0,\"timedOut\":false,\"stdoutArtifactId\":\"202b0121-3b29-499e-a64c-5f3bacee1915\",\"stderrArtifactId\":\"58377823-2ecd-4ccc-8e2e-968543d163b3\",\"redactionRulesVersion\":\"p0-redact-v1\",\"parserVersion\":\"p0-provider-v1\"},{\"id\":\"849b45bc-810d-43b4-a168-0b0c2fc55fb4\",\"operation\":\"STATUS\",\"attemptNumber\":5,\"startedAt\":\"2026-10-07T03:52:18.767Z\",\"completedAt\":\"2026-10-07T03:52:20.669Z\",\"exitCode\":0,\"timedOut\":false,\"stdoutArtifactId\":\"6f44d1c3-4d04-40a3-bb3c-ea8db773076f\",\"stderrArtifactId\":\"d8922e71-92b1-41c4-a706-1f2a65b2d291\",\"redactionRulesVersion\":\"p0-redact-v1\",\"parserVersion\":\"p0-provider-v1\"},{\"id\":\"c94bf3db-388d-451e-a548-0823c580b788\",\"operation\":\"STATUS\",\"attemptNumber\":6,\"startedAt\":\"2026-10-07T03:52:23.775Z\",\"completedAt\":\"2026-10-07T03:52:25.360Z\",\"exitCode\":0,\"timedOut\":false,\"stdoutArtifactId\":\"2173568e-b337-4736-bc41-fd20bd3a3288\",\"stderrArtifactId\":\"6b57f4b0-8715-4d40-9409-bdb07058545a\",\"redactionRulesVersion\":\"p0-redact-v1\",\"parserVersion\":\"p0-provider-v1\"},{\"id\":\"4c632545-2070-4d0d-bcba-25d13b5361d2\",\"operation\":\"STATUS\",\"attemptNumber\":7,\"startedAt\":\"2026-10-07T03:52:28.770Z\",\"completedAt\":\"2026-10-07T03:52:30.803Z\",\"exitCode\":0,\"timedOut\":false,\"stdoutArtifactId\":\"a6889ebb-bf46-47d3-b7cd-68afc4690c28\",\"stderrArtifactId\":\"1c5c1d11-2e62-470e-b5e0-ab59f2657a0c\",\"redactionRulesVersion\":\"p0-redact-v1\",\"parserVersion\":\"p0-provider-v1\"},{\"id\":\"f5878625-1a0c-4601-b002-5e81b1fcb5a0\",\"operation\":\"STATUS\",\"attemptNumber\":8,\"startedAt\":\"2026-10-07T03:52:33.779Z\",\"completedAt\":\"2026-10-07T03:52:35.508Z\",\"exitCode\":0,\"timedOut\":false,\"stdoutArtifactId\":\"47f1db88-9661-4adf-ae88-27ade6a5209f\",\"stderrArtifactId\":\"c555b966-ab21-491b-8bff-1a45fb9c7ee5\",\"redactionRulesVersion\":\"p0-redact-v1\",\"parserVersion\":\"p0-provider-v1\"},{\"id\":\"82c2bd8e-1fe8-4696-b273-ff112edd6c45\",\"operation\":\"STATUS\",\"attemptNumber\":9,\"startedAt\":\"2026-10-07T03:52:38.805Z\",\"completedAt\":\"2026-10-07T03:52:41.352Z\",\"exitCode\":0,\"timedOut\":false,\"stdoutArtifactId\":\"d8336897-1566-403b-bb89-3b0962c118a8\",\"stderrArtifactId\":\"6e53943c-f9ba-4f0f-a433-b00f0cd98447\",\"redactionRulesVersion\":\"p0-redact-v1\",\"parserVersion\":\"p0-provider-v1\"},{\"id\":\"2911afbe-32d0-43e3-bd7e-3152681161a8\",\"operation\":\"STATUS\",\"attemptNumber\":10,\"startedAt\":\"2026-10-07T03:52:43.808Z\",\"completedAt\":\"2026-10-07T03:52:45.675Z\",\"exitCode\":0,\"timedOut\":false,\"stdoutArtifactId\":\"c23425d4-e530-4064-9db9-0933ce54e7ed\",\"stderrArtifactId\":\"392bcaaf-1a38-4eb3-b362-74df264b6e6c\",\"redactionRulesVersion\":\"p0-redact-v1\",\"parserVersion\":\"p0-provider-v1\"},{\"id\":\"b88fcc5a-0cad-4b0e-a517-743ecf9455d7\",\"operation\":\"STATUS\",\"attemptNumber\":11,\"startedAt\":\"2026-10-07T03:52:48.802Z\",\"completedAt\":\"2026-10-07T03:52:50.598Z\",\"exitCode\":0,\"timedOut\":false,\"stdoutArtifactId\":\"8124e2a2-af81-42f9-aa6e-32aba71fb823\",\"stderrArtifactId\":\"e5ca5069-1ee0-4108-b4ca-e52370762562\",\"redactionRulesVersion\":\"p0-redact-v1\",\"parserVersion\":\"p0-provider-v1\"},{\"id\":\"69da7ae6-fcb3-4312-aa4b-1308bec53ec4\",\"operation\":\"STATUS\",\"attemptNumber\":12,\"startedAt\":\"2026-10-07T03:52:53.818Z\",\"completedAt\":\"2026-10-07T03:52:55.790Z\",\"exitCode\":0,\"timedOut\":false,\"stdoutArtifactId\":\"7a18fa91-8ebc-4a2e-8f7e-da72db4c1780\",\"stderrArtifactId\":\"99247c8c-f15c-46a3-9515-b54fb29ec550\",\"redactionRulesVersion\":\"p0-redact-v1\",\"parserVersion\":\"p0-provider-v1\"},{\"id\":\"df2e2f2e-f53a-4c2c-893c-7cdd2e124584\",\"operation\":\"STATUS\",\"attemptNumber\":13,\"startedAt\":\"2026-10-07T03:52:58.826Z\",\"completedAt\":\"2026-10-07T03:53:00.540Z\",\"exitCode\":0,\"timedOut\":false,\"stdoutArtifactId\":\"50350e4d-5965-4897-b980-b986daff0153\",\"stderrArtifactId\":\"34d7ab9c-e145-410a-8fd6-5bb8d588d562\",\"redactionRulesVersion\":\"p0-redact-v1\",\"parserVersion\":\"p0-provider-v1\"},{\"id\":\"4fd0aa2f-b5ae-46de-9e2e-bdad2fc9e5b5\",\"operation\":\"STATUS\",\"attemptNumber\":14,\"startedAt\":\"2026-10-07T03:53:03.837Z\",\"completedAt\":\"2026-10-07T03:53:05.813Z\",\"exitCode\":0,\"timedOut\":false,\"stdoutArtifactId\":\"462109aa-35c6-4cdb-8e9a-d3a5e5267eaf\",\"stderrArtifactId\":\"47eea115-4aac-4ffb-824a-b6096591e589\",\"redactionRulesVersion\":\"p0-redact-v1\",\"parserVersion\":\"p0-provider-v1\"},{\"id\":\"bdecd51a-4bc0-422e-b31d-e17b95cd86c1\",\"operation\":\"STATUS\",\"attemptNumber\":15,\"startedAt\":\"2026-10-07T03:53:08.843Z\",\"completedAt\":\"2026-10-07T03:53:10.521Z\",\"exitCode\":0,\"timedOut\":false,\"stdoutArtifactId\":\"97e79a5c-bf30-4d19-b5ea-d882ae78c643\",\"stderrArtifactId\":\"281c8099-e33f-4b99-b315-745845738eb3\",\"redactionRulesVersion\":\"p0-redact-v1\",\"parserVersion\":\"p0-provider-v1\"},{\"id\":\"55b42cbe-bc5e-499d-a7ba-272de044bbdf\",\"operation\":\"STATUS\",\"attemptNumber\":16,\"startedAt\":\"2026-10-07T03:53:13.853Z\",\"completedAt\":\"2026-10-07T03:53:15.730Z\",\"exitCode\":0,\"timedOut\":false,\"stdoutArtifactId\":\"44e79fd7-dcea-4289-b9b8-e427567e80d1\",\"stderrArtifactId\":\"05c3a1ce-12d9-4460-8da4-31c286554b42\",\"redactionRulesVersion\":\"p0-redact-v1\",\"parserVersion\":\"p0-provider-v1\"},{\"id\":\"e11f3b75-ebd3-4712-b0ea-ab44e1f09077\",\"operation\":\"STATUS\",\"attemptNumber\":17,\"startedAt\":\"2026-10-07T03:53:18.856Z\",\"completedAt\":\"2026-10-07T03:53:20.608Z\",\"exitCode\":0,\"timedOut\":false,\"stdoutArtifactId\":\"50d8ba54-3e99-463c-a815-0ce7a8c47da6\",\"stderrArtifactId\":\"68f8fea0-7f8b-4832-aee2-01a323277e70\",\"redactionRulesVersion\":\"p0-redact-v1\",\"parserVersion\":\"p0-provider-v1\"},{\"id\":\"702a5b52-c099-4c65-b5ef-08ea2fd0d3fa\",\"operation\":\"STATUS\",\"attemptNumber\":18,\"startedAt\":\"2026-10-07T03:53:23.877Z\",\"completedAt\":\"2026-10-07T03:53:25.749Z\",\"exitCode\":0,\"timedOut\":false,\"stdoutArtifactId\":\"badbc47d-d17a-49dd-9c49-52392af373c7\",\"stderrArtifactId\":\"89f727c1-10d3-43f4-ba58-4c5666bacbdf\",\"redactionRulesVersion\":\"p0-redact-v1\",\"parserVersion\":\"p0-provider-v1\"},{\"id\":\"71146dbe-f136-4eae-88a6-478f8660634c\",\"operation\":\"STATUS\",\"attemptNumber\":19,\"startedAt\":\"2026-10-07T03:53:28.871Z\",\"completedAt\":\"2026-10-07T03:53:30.675Z\",\"exitCode\":0,\"timedOut\":false,\"stdoutArtifactId\":\"9097e5a4-cba3-4b38-a5fd-87dddf4ae23f\",\"stderrArtifactId\":\"207ba9c0-0a42-4b1c-8d20-ae346d39fecd\",\"redactionRulesVersion\":\"p0-redact-v1\",\"parserVersion\":\"p0-provider-v1\"},{\"id\":\"381ff69a-0f55-4c4f-8218-8db1ad770f18\",\"operation\":\"STATUS\",\"attemptNumber\":20,\"startedAt\":\"2026-10-07T03:53:33.863Z\",\"completedAt\":\"2026-10-07T03:53:35.623Z\",\"exitCode\":0,\"timedOut\":false,\"stdoutArtifactId\":\"7274b245-2de5-4a84-a1d7-717844afc397\",\"stderrArtifactId\":\"af8aebdf-ee6e-40e8-a3ad-5e5954b2aba6\",\"redactionRulesVersion\":\"p0-redact-v1\",\"parserVersion\":\"p0-provider-v1\"},{\"id\":\"f853533a-2873-4975-addb-bc547ab153b1\",\"operation\":\"STATUS\",\"attemptNumber\":21,\"startedAt\":\"2026-10-07T03:53:38.866Z\",\"completedAt\":\"2026-10-07T03:53:40.963Z\",\"exitCode\":0,\"timedOut\":false,\"stdoutArtifactId\":\"0f414624-510b-4a7a-89b5-b904acfae684\",\"stderrArtifactId\":\"e8af57ff-034b-46fb-bb3f-3d7507ae9653\",\"redactionRulesVersion\":\"p0-redact-v1\",\"parserVersion\":\"p0-provider-v1\"},{\"id\":\"224a3acc-c47d-42d3-a83f-aa43b8179adc\",\"operation\":\"STATUS\",\"attemptNumber\":22,\"startedAt\":\"2026-10-07T03:53:43.893Z\",\"completedAt\":\"2026-10-07T03:53:45.647Z\",\"exitCode\":0,\"timedOut\":false,\"stdoutArtifactId\":\"d607fdcd-1355-4eee-ad79-d0f4543403cb\",\"stderrArtifactId\":\"0c8699b8-1a9e-4672-a587-06036b635ec5\",\"redactionRulesVersion\":\"p0-redact-v1\",\"parserVersion\":\"p0-provider-v1\"},{\"id\":\"cfc4bc75-107a-4f30-9ca8-0760b9775874\",\"operation\":\"STATUS\",\"attemptNumber\":23,\"startedAt\":\"2026-10-07T03:53:48.892Z\",\"completedAt\":\"2026-10-07T03:53:50.872Z\",\"exitCode\":0,\"timedOut\":false,\"stdoutArtifactId\":\"a87fc1a6-0a7e-466d-9e60-21c54e422352\",\"stderrArtifactId\":\"e88be588-d829-4365-9638-a206a08151ac\",\"redactionRulesVersion\":\"p0-redact-v1\",\"parserVersion\":\"p0-provider-v1\"},{\"id\":\"d02dba8d-c1a0-4bb8-b202-a05859b8287c\",\"operation\":\"STATUS\",\"attemptNumber\":24,\"startedAt\":\"2026-10-07T03:53:53.894Z\",\"completedAt\":\"2026-10-07T03:53:55.429Z\",\"exitCode\":0,\"timedOut\":false,\"stdoutArtifactId\":\"466be599-9af0-4c05-b0f8-8f381f93c25d\",\"stderrArtifactId\":\"8dac6db8-9404-4ddb-ac01-d435793965e5\",\"redactionRulesVersion\":\"p0-redact-v1\",\"parserVersion\":\"p0-provider-v1\"},{\"id\":\"a38fbe39-f949-46e7-b12e-95c4a41f741e\",\"operation\":\"STATUS\",\"attemptNumber\":25,\"startedAt\":\"2026-10-07T03:53:58.919Z\",\"completedAt\":\"2026-10-07T03:54:00.682Z\",\"exitCode\":0,\"timedOut\":false,\"stdoutArtifactId\":\"72077da7-dc09-4e99-98ec-f5c120df685f\",\"stderrArtifactId\":\"3ea1c5e0-648b-485f-b782-576d98bdbf04\",\"redactionRulesVersion\":\"p0-redact-v1\",\"parserVersion\":\"p0-provider-v1\"},{\"id\":\"85ab06c2-088c-49eb-96c1-0f2c99ad811d\",\"operation\":\"STATUS\",\"attemptNumber\":26,\"startedAt\":\"2026-10-07T03:54:03.921Z\",\"completedAt\":\"2026-10-07T03:54:05.528Z\",\"exitCode\":0,\"timedOut\":false,\"stdoutArtifactId\":\"e062de3b-a57b-4d9b-9b71-ca2e362b3a59\",\"stderrArtifactId\":\"52031220-bbb4-4b0c-a2bf-7d0098f80de8\",\"redactionRulesVersion\":\"p0-redact-v1\",\"parserVersion\":\"p0-provider-v1\"},{\"id\":\"134d3c01-1721-475a-b4f6-4ac30c2f3dc2\",\"operation\":\"STATUS\",\"attemptNumber\":27,\"startedAt\":\"2026-10-07T03:54:08.941Z\",\"completedAt\":\"2026-10-07T03:54:10.694Z\",\"exitCode\":0,\"timedOut\":false,\"stdoutArtifactId\":\"e7d6cb3d-1307-4c5e-93df-54d53593f9ec\",\"stderrArtifactId\":\"ab4cb13c-0b40-4ba2-952e-2499fd884afd\",\"redactionRulesVersion\":\"p0-redact-v1\",\"parserVersion\":\"p0-provider-v1\"},{\"id\":\"5a73dfe5-d1ae-4e94-9a74-dad2e2352746\",\"operation\":\"STATUS\",\"attemptNumber\":28,\"startedAt\":\"2026-10-07T03:54:13.950Z\",\"completedAt\":\"2026-10-07T03:54:15.467Z\",\"exitCode\":0,\"timedOut\":false,\"stdoutArtifactId\":\"609a4804-e5b3-4d4d-96aa-d729d9438f4e\",\"stderrArtifactId\":\"8522d930-e18c-4590-98e8-0fb8b435dfc3\",\"redactionRulesVersion\":\"p0-redact-v1\",\"parserVersion\":\"p0-provider-v1\"},{\"id\":\"010e458d-dc17-408c-bc7c-62d1297ece50\",\"operation\":\"STATUS\",\"attemptNumber\":29,\"startedAt\":\"2026-10-07T03:54:18.977Z\",\"completedAt\":\"2026-10-07T03:54:20.803Z\",\"exitCode\":0,\"timedOut\":false,\"stdoutArtifactId\":\"e6f3e495-a9a0-4b25-b84e-0bd59f0e3020\",\"stderrArtifactId\":\"1782124f-1a65-4d25-8a09-0f498212e755\",\"redactionRulesVersion\":\"p0-redact-v1\",\"parserVersion\":\"p0-provider-v1\"},{\"id\":\"785deae4-3d7f-4ee8-aebc-b670e58af74a\",\"operation\":\"STATUS\",\"attemptNumber\":30,\"startedAt\":\"2026-10-07T03:54:23.987Z\",\"completedAt\":\"2026-10-07T03:54:25.659Z\",\"exitCode\":0,\"timedOut\":false,\"stdoutArtifactId\":\"52a6932e-495d-45f2-9428-05c806240d83\",\"stderrArtifactId\":\"58953f67-a1e3-40dd-b8bd-3bb1a2b5f40c\",\"redactionRulesVersion\":\"p0-redact-v1\",\"parserVersion\":\"p0-provider-v1\"},{\"id\":\"ef8a173e-fd20-45cc-b8a8-feca2c5341ef\",\"operation\":\"STATUS\",\"attemptNumber\":31,\"startedAt\":\"2026-10-07T03:54:28.982Z\",\"completedAt\":\"2026-10-07T03:54:30.738Z\",\"exitCode\":0,\"timedOut\":false,\"stdoutArtifactId\":\"6d484810-8239-4835-bd3f-822ea9c35a2f\",\"stderrArtifactId\":\"cb4f9320-503f-400c-be74-5a6ccd8e9397\",\"redactionRulesVersion\":\"p0-redact-v1\",\"parserVersion\":\"p0-provider-v1\"},{\"id\":\"d39cabad-070b-4015-9fe9-e6c91f5607a6\",\"operation\":\"STATUS\",\"attemptNumber\":32,\"startedAt\":\"2026-10-07T03:54:33.983Z\",\"completedAt\":\"2026-10-07T03:54:35.582Z\",\"exitCode\":0,\"timedOut\":false,\"stdoutArtifactId\":\"3e52c163-e8b7-48e0-a0b3-966e552583b3\",\"stderrArtifactId\":\"fe84f14a-831e-455f-b09d-628ed604665f\",\"redactionRulesVersion\":\"p0-redact-v1\",\"parserVersion\":\"p0-provider-v1\"},{\"id\":\"b81add11-a9cf-4755-ac5c-78785443c2c3\",\"operation\":\"STATUS\",\"attemptNumber\":33,\"startedAt\":\"2026-10-07T03:54:39.004Z\",\"completedAt\":\"2026-10-07T03:54:40.794Z\",\"exitCode\":0,\"timedOut\":false,\"stdoutArtifactId\":\"ad0feb8f-c906-4297-a14c-5323692f6a19\",\"stderrArtifactId\":\"0bf5eb09-b7f9-4c17-8d8f-f4ddf6162247\",\"redactionRulesVersion\":\"p0-redact-v1\",\"parserVersion\":\"p0-provider-v1\"},{\"id\":\"be71b8e8-8ccf-4835-8c8c-d7a08f0536d8\",\"operation\":\"STATUS\",\"attemptNumber\":34,\"startedAt\":\"2026-10-07T03:54:44.017Z\",\"completedAt\":\"2026-10-07T03:54:45.740Z\",\"exitCode\":0,\"timedOut\":false,\"stdoutArtifactId\":\"760b66cc-bac6-4eda-b9ff-3c96f0e3527c\",\"stderrArtifactId\":\"8783754d-8a13-4c45-bcdf-af8127947e48\",\"redactionRulesVersion\":\"p0-redact-v1\",\"parserVersion\":\"p0-provider-v1\"},{\"id\":\"0d4a99b8-cab2-4e50-a8d9-b10f2e1fd56e\",\"operation\":\"STATUS\",\"attemptNumber\":35,\"startedAt\":\"2026-10-07T03:54:49.018Z\",\"completedAt\":\"2026-10-07T03:54:50.964Z\",\"exitCode\":0,\"timedOut\":false,\"stdoutArtifactId\":\"435aaee3-baa4-4a3b-9c0a-5d393db6f257\",\"stderrArtifactId\":\"f455c523-7ec4-4f9f-848e-47d68a48d861\",\"redactionRulesVersion\":\"p0-redact-v1\",\"parserVersion\":\"p0-provider-v1\"},{\"id\":\"b44fe317-a2f2-4be8-ba6a-a96857276cc5\",\"operation\":\"DOWNLOAD\",\"attemptNumber\":1,\"startedAt\":\"2026-10-07T03:54:50.989Z\",\"completedAt\":\"2026-10-07T03:54:56.371Z\",\"exitCode\":0,\"timedOut\":false,\"stdoutArtifactId\":\"a9383ccf-6d81-4eda-b828-13a0ec9252e6\",\"stderrArtifactId\":\"2205b265-5cd8-4e1f-b0e8-e2211745e751\",\"redactionRulesVersion\":\"p0-redact-v1\",\"parserVersion\":\"p0-provider-v1\"}]",
+      "outputArtifactId": "5c5fb18a-aeba-41e0-baae-f04362f1865e",
+      "createdAt": "2026-10-07T03:51:42.021Z",
+      "submittedAt": "2026-10-07T03:51:51.815Z",
+      "completedAt": "2026-10-07T03:54:56.389Z",
+      "errorCode": null,
+      "errorMessage": null
+    },
+    {
+      "id": "b8a240ab-9c48-4cfa-b935-a604205d1649",
+      "projectId": "bbcbff87-a977-4103-b2c4-d70cb8996edb",
+      "clipId": "99ef8126-b0c7-49a8-976a-7a53c2f66bd3",
+      "attemptNumber": 1,
+      "generationRequestId": "e8c47a56-452d-465d-8b29-be92dbd00a79",
+      "requestHash": "b5f82e23e9338a8c8bf2d057ca10d14e9eab2abcbe4afe16f68cccb3f3d43c68",
+      "preflightReportId": "372e42b6-dcf5-4d59-8506-d84cfe0f036e",
+      "userApprovalId": "1e59fbb9-7278-49b9-a50a-e606ab1a4d3f",
+      "approvalHash": "7dcedf5ad66043cd9016e2ece7c2e9e197c91940429362732595dfdea9cc205f",
+      "submissionFingerprint": "c53adff3b8fc62f44c79f56f541cf2e2b8ce7591f6b19dac4e77ce77a8c7b6d3",
+      "status": "SUCCEEDED",
+      "externalTaskId": null,
+      "providerHandleJson": "{\"externalTaskId\":\"415d9f5e-3816-42c4-8b8e-4fbb92e32e97\",\"submitId\":\"415d9f5e-3816-42c4-8b8e-4fbb92e32e97\"}",
+      "commandAttemptsJson": "[{\"id\":\"e1240ddc-1b31-49cc-b9d4-64512484da6c\",\"operation\":\"PROBE\",\"attemptNumber\":1,\"startedAt\":\"2026-10-07T03:51:51.854Z\",\"completedAt\":\"2026-10-07T03:51:53.630Z\",\"exitCode\":0,\"timedOut\":false,\"stdoutArtifactId\":\"b5818c0e-0676-42ac-8966-164e13fb3606\",\"stderrArtifactId\":\"067aa6a9-e7b8-4274-a14a-cbea7867df5c\",\"redactionRulesVersion\":\"p0-redact-v1\",\"parserVersion\":\"p0-provider-v1\"},{\"id\":\"e72a43f6-5786-47c2-822b-9c9a7254adac\",\"operation\":\"SUBMIT\",\"attemptNumber\":1,\"startedAt\":\"2026-10-07T03:51:53.648Z\",\"completedAt\":\"2026-10-07T03:51:57.898Z\",\"exitCode\":0,\"timedOut\":false,\"stdoutArtifactId\":\"0152442a-fee7-42f9-911b-905800b81a48\",\"stderrArtifactId\":\"9a72e095-1e03-4dd2-a522-a8e550478de8\",\"redactionRulesVersion\":\"p0-redact-v1\",\"parserVersion\":\"p0-provider-v1\"},{\"id\":\"7f76b7b8-dfa3-415e-ba2a-ab6f9fc89fa2\",\"operation\":\"STATUS\",\"attemptNumber\":1,\"startedAt\":\"2026-10-07T03:51:59.937Z\",\"completedAt\":\"2026-10-07T03:52:02.018Z\",\"exitCode\":0,\"timedOut\":false,\"stdoutArtifactId\":\"7743526e-415c-4cba-b84e-5b7ac64926e4\",\"stderrArtifactId\":\"c0c3d5ad-3d41-4702-a158-ba9b794cb75b\",\"redactionRulesVersion\":\"p0-redact-v1\",\"parserVersion\":\"p0-provider-v1\"},{\"id\":\"4f903995-2818-4843-897a-7caafea12e18\",\"operation\":\"STATUS\",\"attemptNumber\":2,\"startedAt\":\"2026-10-07T03:52:05.470Z\",\"completedAt\":\"2026-10-07T03:52:07.411Z\",\"exitCode\":0,\"timedOut\":false,\"stdoutArtifactId\":\"4f2250dd-9736-474f-bdcf-09e0159bd464\",\"stderrArtifactId\":\"36a95186-4bcd-4548-bfbe-206922fb511c\",\"redactionRulesVersion\":\"p0-redact-v1\",\"parserVersion\":\"p0-provider-v1\"},{\"id\":\"d70316fb-d79e-4cce-966a-d5615ae02d4e\",\"operation\":\"STATUS\",\"attemptNumber\":3,\"startedAt\":\"2026-10-07T03:52:10.830Z\",\"completedAt\":\"2026-10-07T03:52:12.473Z\",\"exitCode\":0,\"timedOut\":false,\"stdoutArtifactId\":\"ea04e4de-4452-495b-aa07-6faf3df0fd57\",\"stderrArtifactId\":\"0ed7081a-2544-43da-b558-0e5f0cb8bc4f\",\"redactionRulesVersion\":\"p0-redact-v1\",\"parserVersion\":\"p0-provider-v1\"},{\"id\":\"c586e3c6-a43a-4164-83fb-16ad4e2fb846\",\"operation\":\"STATUS\",\"attemptNumber\":4,\"startedAt\":\"2026-10-07T03:52:15.986Z\",\"completedAt\":\"2026-10-07T03:52:17.939Z\",\"exitCode\":0,\"timedOut\":false,\"stdoutArtifactId\":\"991d2f10-85ea-4219-b263-c05b6bd30635\",\"stderrArtifactId\":\"c254efe0-72d9-4034-a643-40b6eb6bde2a\",\"redactionRulesVersion\":\"p0-redact-v1\",\"parserVersion\":\"p0-provider-v1\"},{\"id\":\"6c3fdb21-7eeb-41df-8b74-f3742d7d538b\",\"operation\":\"STATUS\",\"attemptNumber\":5,\"startedAt\":\"2026-10-07T03:52:20.696Z\",\"completedAt\":\"2026-10-07T03:52:22.558Z\",\"exitCode\":0,\"timedOut\":false,\"stdoutArtifactId\":\"21b36344-b413-4fa9-afe7-11102c44402e\",\"stderrArtifactId\":\"b7851f58-e0a3-4370-80d4-30b62472ebd6\",\"redactionRulesVersion\":\"p0-redact-v1\",\"parserVersion\":\"p0-provider-v1\"},{\"id\":\"14122e30-88be-42a1-83a9-19e9402702b6\",\"operation\":\"STATUS\",\"attemptNumber\":6,\"startedAt\":\"2026-10-07T03:52:25.382Z\",\"completedAt\":\"2026-10-07T03:52:27.011Z\",\"exitCode\":0,\"timedOut\":false,\"stdoutArtifactId\":\"5be42897-f717-4df3-9ed9-cd18cebd6088\",\"stderrArtifactId\":\"08292bb0-1e2c-45b2-865f-1983bd92606c\",\"redactionRulesVersion\":\"p0-redact-v1\",\"parserVersion\":\"p0-provider-v1\"},{\"id\":\"24757e85-781c-48f8-96d4-d15fe72b3ba5\",\"operation\":\"STATUS\",\"attemptNumber\":7,\"startedAt\":\"2026-10-07T03:52:30.828Z\",\"completedAt\":\"2026-10-07T03:52:32.708Z\",\"exitCode\":0,\"timedOut\":false,\"stdoutArtifactId\":\"6c810a8a-cda3-492d-b0a9-2393dee670ff\",\"stderrArtifactId\":\"6f25d85d-479f-428a-8339-5a36e0dd6c63\",\"redactionRulesVersion\":\"p0-redact-v1\",\"parserVersion\":\"p0-provider-v1\"},{\"id\":\"926b07e4-9e54-45d3-9f79-3a36ddad052c\",\"operation\":\"STATUS\",\"attemptNumber\":8,\"startedAt\":\"2026-10-07T03:52:35.534Z\",\"completedAt\":\"2026-10-07T03:52:37.563Z\",\"exitCode\":0,\"timedOut\":false,\"stdoutArtifactId\":\"931cee66-eb58-45e4-b6e5-cd965613e3b5\",\"stderrArtifactId\":\"33daeb07-78d2-4939-95a3-26cf6e9e7c74\",\"redactionRulesVersion\":\"p0-redact-v1\",\"parserVersion\":\"p0-provider-v1\"},{\"id\":\"15a408b4-1fc5-4d9f-8013-7aa1df9aa30c\",\"operation\":\"STATUS\",\"attemptNumber\":9,\"startedAt\":\"2026-10-07T03:52:41.385Z\",\"completedAt\":\"2026-10-07T03:52:43.297Z\",\"exitCode\":0,\"timedOut\":false,\"stdoutArtifactId\":\"45d424c4-1a82-4392-a903-ae47cf08ed8f\",\"stderrArtifactId\":\"a65b7372-9d6e-4f59-b7fd-3235a2b762bd\",\"redactionRulesVersion\":\"p0-redact-v1\",\"parserVersion\":\"p0-provider-v1\"},{\"id\":\"823432b0-b27c-4941-b510-fe510cfe881e\",\"operation\":\"STATUS\",\"attemptNumber\":10,\"startedAt\":\"2026-10-07T03:52:45.701Z\",\"completedAt\":\"2026-10-07T03:52:47.281Z\",\"exitCode\":0,\"timedOut\":false,\"stdoutArtifactId\":\"ee70c2a9-8381-4d69-95e9-c929a62100dd\",\"stderrArtifactId\":\"7fc386d3-a962-4be8-916d-c15b84759411\",\"redactionRulesVersion\":\"p0-redact-v1\",\"parserVersion\":\"p0-provider-v1\"},{\"id\":\"df81a635-b1b6-4593-a373-ed099b7a7133\",\"operation\":\"STATUS\",\"attemptNumber\":11,\"startedAt\":\"2026-10-07T03:52:50.624Z\",\"completedAt\":\"2026-10-07T03:52:52.639Z\",\"exitCode\":0,\"timedOut\":false,\"stdoutArtifactId\":\"ba94ff99-2a3b-4d25-b0d6-c4246cb55bf4\",\"stderrArtifactId\":\"954feec0-2b95-4d52-9ca6-0c709f1a6b64\",\"redactionRulesVersion\":\"p0-redact-v1\",\"parserVersion\":\"p0-provider-v1\"},{\"id\":\"2c81d50a-48c0-43f3-84a7-2d680bb92d94\",\"operation\":\"STATUS\",\"attemptNumber\":12,\"startedAt\":\"2026-10-07T03:52:55.819Z\",\"completedAt\":\"2026-10-07T03:52:57.534Z\",\"exitCode\":0,\"timedOut\":false,\"stdoutArtifactId\":\"e391d004-e316-4987-8e3b-dd388fb099c0\",\"stderrArtifactId\":\"83d132b3-120f-4f49-bd2e-947fd6a1ef61\",\"redactionRulesVersion\":\"p0-redact-v1\",\"parserVersion\":\"p0-provider-v1\"},{\"id\":\"f080a9c8-cedd-4b96-a9da-67e1bf13d1ae\",\"operation\":\"STATUS\",\"attemptNumber\":13,\"startedAt\":\"2026-10-07T03:53:00.566Z\",\"completedAt\":\"2026-10-07T03:53:02.628Z\",\"exitCode\":0,\"timedOut\":false,\"stdoutArtifactId\":\"f0998380-7eb0-409c-8d8c-866f92f6d1ee\",\"stderrArtifactId\":\"0a4032c2-3d7b-4464-84f9-f1637ff82db5\",\"redactionRulesVersion\":\"p0-redact-v1\",\"parserVersion\":\"p0-provider-v1\"},{\"id\":\"8197165f-4bf3-43a9-9fa1-149972c5b191\",\"operation\":\"STATUS\",\"attemptNumber\":14,\"startedAt\":\"2026-10-07T03:53:05.839Z\",\"completedAt\":\"2026-10-07T03:53:07.826Z\",\"exitCode\":0,\"timedOut\":false,\"stdoutArtifactId\":\"62e4e776-0aca-4502-a5a3-e17bb2c21eb0\",\"stderrArtifactId\":\"68e5f39b-7bc5-41d7-af07-39fea3325144\",\"redactionRulesVersion\":\"p0-redact-v1\",\"parserVersion\":\"p0-provider-v1\"},{\"id\":\"d50fe1f6-e3f0-492d-afa5-e1952c338136\",\"operation\":\"STATUS\",\"attemptNumber\":15,\"startedAt\":\"2026-10-07T03:53:10.545Z\",\"completedAt\":\"2026-10-07T03:53:12.211Z\",\"exitCode\":0,\"timedOut\":false,\"stdoutArtifactId\":\"c9cb1cc0-b1d9-42df-abee-7974636c8355\",\"stderrArtifactId\":\"faaf7dfc-81da-44f3-8887-3304d831bd32\",\"redactionRulesVersion\":\"p0-redact-v1\",\"parserVersion\":\"p0-provider-v1\"},{\"id\":\"36b8fc22-276c-4e70-a5f4-f929e950121c\",\"operation\":\"STATUS\",\"attemptNumber\":16,\"startedAt\":\"2026-10-07T03:53:15.756Z\",\"completedAt\":\"2026-10-07T03:53:17.771Z\",\"exitCode\":0,\"timedOut\":false,\"stdoutArtifactId\":\"f1fbe04b-7eed-421d-8e3f-e526f7bd7be6\",\"stderrArtifactId\":\"207ca0b6-0aae-4e9d-95c3-cae5babae1b6\",\"redactionRulesVersion\":\"p0-redact-v1\",\"parserVersion\":\"p0-provider-v1\"},{\"id\":\"82f8ebfd-2d92-4b97-8e9a-e5957f9161f3\",\"operation\":\"STATUS\",\"attemptNumber\":17,\"startedAt\":\"2026-10-07T03:53:20.634Z\",\"completedAt\":\"2026-10-07T03:53:22.340Z\",\"exitCode\":0,\"timedOut\":false,\"stdoutArtifactId\":\"5ff24e74-275b-4273-8283-9adc87306112\",\"stderrArtifactId\":\"8455d088-b82e-4a0e-99ef-4994c3deb1ad\",\"redactionRulesVersion\":\"p0-redact-v1\",\"parserVersion\":\"p0-provider-v1\"},{\"id\":\"413971a2-b8ae-42e2-8bd7-786c57b0de29\",\"operation\":\"STATUS\",\"attemptNumber\":18,\"startedAt\":\"2026-10-07T03:53:25.776Z\",\"completedAt\":\"2026-10-07T03:53:27.647Z\",\"exitCode\":0,\"timedOut\":false,\"stdoutArtifactId\":\"f638055a-55d9-4c02-876b-ad306e466242\",\"stderrArtifactId\":\"bba837eb-7844-4eb1-92a9-b3028e6a46c0\",\"redactionRulesVersion\":\"p0-redact-v1\",\"parserVersion\":\"p0-provider-v1\"},{\"id\":\"bccacd9e-030e-4544-80cd-f88d0f0bfbb2\",\"operation\":\"STATUS\",\"attemptNumber\":19,\"startedAt\":\"2026-10-07T03:53:30.699Z\",\"completedAt\":\"2026-10-07T03:53:32.296Z\",\"exitCode\":0,\"timedOut\":false,\"stdoutArtifactId\":\"3dedc08b-19cb-484d-a743-0d1944f3d4cf\",\"stderrArtifactId\":\"16f5856e-d183-430d-a388-9dc27e3b21d8\",\"redactionRulesVersion\":\"p0-redact-v1\",\"parserVersion\":\"p0-provider-v1\"},{\"id\":\"342122f1-c7e7-484f-9eb8-ee25a1c687ba\",\"operation\":\"STATUS\",\"attemptNumber\":20,\"startedAt\":\"2026-10-07T03:53:35.652Z\",\"completedAt\":\"2026-10-07T03:53:37.584Z\",\"exitCode\":0,\"timedOut\":false,\"stdoutArtifactId\":\"90bf2a35-da54-4fa9-8aed-ebb5d8ff250d\",\"stderrArtifactId\":\"e002b20c-3796-4436-9142-4700bf0584d3\",\"redactionRulesVersion\":\"p0-redact-v1\",\"parserVersion\":\"p0-provider-v1\"},{\"id\":\"ed084e97-da49-49f1-b08c-9ea054ce1e6f\",\"operation\":\"STATUS\",\"attemptNumber\":21,\"startedAt\":\"2026-10-07T03:53:40.991Z\",\"completedAt\":\"2026-10-07T03:53:42.569Z\",\"exitCode\":0,\"timedOut\":false,\"stdoutArtifactId\":\"fe283010-1762-4b95-b9a0-8e6cf6fc9540\",\"stderrArtifactId\":\"93d68c99-c7a2-491f-adc8-ab2c57a9f935\",\"redactionRulesVersion\":\"p0-redact-v1\",\"parserVersion\":\"p0-provider-v1\"},{\"id\":\"19c2ce73-9d8c-4a7f-917f-0631f5f78166\",\"operation\":\"STATUS\",\"attemptNumber\":22,\"startedAt\":\"2026-10-07T03:53:45.672Z\",\"completedAt\":\"2026-10-07T03:53:47.532Z\",\"exitCode\":0,\"timedOut\":false,\"stdoutArtifactId\":\"0a6733ea-2006-406e-be18-7d582397e850\",\"stderrArtifactId\":\"498913d3-7bb9-446e-a872-15823a1485df\",\"redactionRulesVersion\":\"p0-redact-v1\",\"parserVersion\":\"p0-provider-v1\"},{\"id\":\"03aea702-fe1d-49d3-8bf4-731157f435d8\",\"operation\":\"STATUS\",\"attemptNumber\":23,\"startedAt\":\"2026-10-07T03:53:50.898Z\",\"completedAt\":\"2026-10-07T03:53:52.604Z\",\"exitCode\":0,\"timedOut\":false,\"stdoutArtifactId\":\"e78f149b-a354-4f67-b842-e6b62218eab3\",\"stderrArtifactId\":\"058f2f72-178a-407b-9771-a6237b43a191\",\"redactionRulesVersion\":\"p0-redact-v1\",\"parserVersion\":\"p0-provider-v1\"},{\"id\":\"b23a3aa0-f738-43bc-b066-6452091773f7\",\"operation\":\"STATUS\",\"attemptNumber\":24,\"startedAt\":\"2026-10-07T03:53:55.451Z\",\"completedAt\":\"2026-10-07T03:53:57.286Z\",\"exitCode\":0,\"timedOut\":false,\"stdoutArtifactId\":\"e76100e5-9923-4a72-9eb5-491284c3d0c2\",\"stderrArtifactId\":\"321c8f69-d2ce-4134-a860-9c698d2f960d\",\"redactionRulesVersion\":\"p0-redact-v1\",\"parserVersion\":\"p0-provider-v1\"},{\"id\":\"035a5da2-6aff-4cf7-aa8a-33a809cc27c2\",\"operation\":\"STATUS\",\"attemptNumber\":25,\"startedAt\":\"2026-10-07T03:54:00.708Z\",\"completedAt\":\"2026-10-07T03:54:02.533Z\",\"exitCode\":0,\"timedOut\":false,\"stdoutArtifactId\":\"9653d321-ffb2-4589-b789-c2db6e72ee28\",\"stderrArtifactId\":\"5efb201e-f013-478a-bd0f-2c7829e88c3c\",\"redactionRulesVersion\":\"p0-redact-v1\",\"parserVersion\":\"p0-provider-v1\"},{\"id\":\"fe5d526f-e0f4-4a71-8d67-24bdc0e15a4c\",\"operation\":\"STATUS\",\"attemptNumber\":26,\"startedAt\":\"2026-10-07T03:54:05.550Z\",\"completedAt\":\"2026-10-07T03:54:07.151Z\",\"exitCode\":0,\"timedOut\":false,\"stdoutArtifactId\":\"b8b30dcb-d0c0-40c6-9b56-480238387d7e\",\"stderrArtifactId\":\"2ba31a5b-8796-4680-ba74-a983f22e87d9\",\"redactionRulesVersion\":\"p0-redact-v1\",\"parserVersion\":\"p0-provider-v1\"},{\"id\":\"31a1d52b-9afa-4458-8686-4d59b9fe5710\",\"operation\":\"STATUS\",\"attemptNumber\":27,\"startedAt\":\"2026-10-07T03:54:10.721Z\",\"completedAt\":\"2026-10-07T03:54:12.395Z\",\"exitCode\":0,\"timedOut\":false,\"stdoutArtifactId\":\"3759c484-7357-474c-9063-05cf3ba644d3\",\"stderrArtifactId\":\"73b5d969-3ebb-4810-9574-5795dc232a8b\",\"redactionRulesVersion\":\"p0-redact-v1\",\"parserVersion\":\"p0-provider-v1\"},{\"id\":\"07888588-8d31-4de0-b034-e99b9ecdcf7a\",\"operation\":\"STATUS\",\"attemptNumber\":28,\"startedAt\":\"2026-10-07T03:54:15.488Z\",\"completedAt\":\"2026-10-07T03:54:17.052Z\",\"exitCode\":0,\"timedOut\":false,\"stdoutArtifactId\":\"011baf94-71f2-4c72-8276-35e3d2cf56c9\",\"stderrArtifactId\":\"ad58fa58-e581-469c-ad60-cbc644433da2\",\"redactionRulesVersion\":\"p0-redact-v1\",\"parserVersion\":\"p0-provider-v1\"},{\"id\":\"0a4b5565-1e85-4634-bfee-179d99b41f82\",\"operation\":\"STATUS\",\"attemptNumber\":29,\"startedAt\":\"2026-10-07T03:54:20.827Z\",\"completedAt\":\"2026-10-07T03:54:22.536Z\",\"exitCode\":0,\"timedOut\":false,\"stdoutArtifactId\":\"b4030873-282c-43cd-862e-9d09f7fd7a62\",\"stderrArtifactId\":\"dca2c3fa-67ad-417e-8923-86253c82606d\",\"redactionRulesVersion\":\"p0-redact-v1\",\"parserVersion\":\"p0-provider-v1\"},{\"id\":\"3830be45-1246-41fd-9262-c8d7ddeec7bb\",\"operation\":\"STATUS\",\"attemptNumber\":30,\"startedAt\":\"2026-10-07T03:54:25.684Z\",\"completedAt\":\"2026-10-07T03:54:27.295Z\",\"exitCode\":0,\"timedOut\":false,\"stdoutArtifactId\":\"566a14dc-85b0-47b0-b0eb-1c976df1dbc8\",\"stderrArtifactId\":\"d8af016b-b84e-41f7-b77f-27a1fc1a353d\",\"redactionRulesVersion\":\"p0-redact-v1\",\"parserVersion\":\"p0-provider-v1\"},{\"id\":\"3e2eacd3-33e5-4ca4-843a-c9d7320ecfc8\",\"operation\":\"STATUS\",\"attemptNumber\":31,\"startedAt\":\"2026-10-07T03:54:30.760Z\",\"completedAt\":\"2026-10-07T03:54:32.517Z\",\"exitCode\":0,\"timedOut\":false,\"stdoutArtifactId\":\"1ad22163-4d96-40c2-92a9-1c78b61831ec\",\"stderrArtifactId\":\"2ca66a6f-2a06-40e4-8fee-73568ceb1c94\",\"redactionRulesVersion\":\"p0-redact-v1\",\"parserVersion\":\"p0-provider-v1\"},{\"id\":\"83e27e8c-35bd-4a2f-9df2-121c2169964f\",\"operation\":\"STATUS\",\"attemptNumber\":32,\"startedAt\":\"2026-10-07T03:54:35.604Z\",\"completedAt\":\"2026-10-07T03:54:37.263Z\",\"exitCode\":0,\"timedOut\":false,\"stdoutArtifactId\":\"30e465dd-b418-4e5a-b445-e41db8cd1b2e\",\"stderrArtifactId\":\"ce624d89-1cdc-4279-9103-f8118b144cc6\",\"redactionRulesVersion\":\"p0-redact-v1\",\"parserVersion\":\"p0-provider-v1\"},{\"id\":\"66cd6e76-412a-45db-a907-a16cf843f661\",\"operation\":\"STATUS\",\"attemptNumber\":33,\"startedAt\":\"2026-10-07T03:54:40.818Z\",\"completedAt\":\"2026-10-07T03:54:42.570Z\",\"exitCode\":0,\"timedOut\":false,\"stdoutArtifactId\":\"8ed1fb74-cdb1-451d-9bef-6963d3d9a9c6\",\"stderrArtifactId\":\"0d0fd52c-3845-4b59-a4f4-79281410de02\",\"redactionRulesVersion\":\"p0-redact-v1\",\"parserVersion\":\"p0-provider-v1\"},{\"id\":\"adfe0ae7-63fc-469a-baa1-617f0de67b1c\",\"operation\":\"STATUS\",\"attemptNumber\":34,\"startedAt\":\"2026-10-07T03:54:45.761Z\",\"completedAt\":\"2026-10-07T03:54:47.530Z\",\"exitCode\":0,\"timedOut\":false,\"stdoutArtifactId\":\"8607f9e2-b07c-4778-bd2d-83cb07d6accb\",\"stderrArtifactId\":\"0201f7bc-4b71-482c-834a-7ec2569be92d\",\"redactionRulesVersion\":\"p0-redact-v1\",\"parserVersion\":\"p0-provider-v1\"},{\"id\":\"f6b7513b-44f3-4eb7-aa4a-3592abed395d\",\"operation\":\"STATUS\",\"attemptNumber\":35,\"startedAt\":\"2026-10-07T03:54:56.399Z\",\"completedAt\":\"2026-10-07T03:54:57.982Z\",\"exitCode\":0,\"timedOut\":false,\"stdoutArtifactId\":\"40ace3f5-cfca-4810-a675-dba3d34567ae\",\"stderrArtifactId\":\"6c5a2f15-d756-46b0-9e9b-5ccc84a380c3\",\"redactionRulesVersion\":\"p0-redact-v1\",\"parserVersion\":\"p0-provider-v1\"},{\"id\":\"e208c184-8e5a-4933-9ecb-40cb0f1e7ef9\",\"operation\":\"STATUS\",\"attemptNumber\":36,\"startedAt\":\"2026-10-07T03:54:59.034Z\",\"completedAt\":\"2026-10-07T03:55:00.600Z\",\"exitCode\":0,\"timedOut\":false,\"stdoutArtifactId\":\"1460a728-123f-49ae-a754-7ca5c3e682f2\",\"stderrArtifactId\":\"ffa8a399-aa22-41c7-8420-ad020ca71df4\",\"redactionRulesVersion\":\"p0-redact-v1\",\"parserVersion\":\"p0-provider-v1\"},{\"id\":\"d380c8fa-19fa-4cea-ac33-005adb3b464f\",\"operation\":\"STATUS\",\"attemptNumber\":37,\"startedAt\":\"2026-10-07T03:55:04.045Z\",\"completedAt\":\"2026-10-07T03:55:05.998Z\",\"exitCode\":0,\"timedOut\":false,\"stdoutArtifactId\":\"0d93cf2d-20a7-467d-a31d-9648eec368c8\",\"stderrArtifactId\":\"9fff3d1c-6cad-474d-956c-7875984d66e7\",\"redactionRulesVersion\":\"p0-redact-v1\",\"parserVersion\":\"p0-provider-v1\"},{\"id\":\"ded09218-0a5e-4dfc-bdbc-21214a6c8f59\",\"operation\":\"STATUS\",\"attemptNumber\":38,\"startedAt\":\"2026-10-07T03:55:09.055Z\",\"completedAt\":\"2026-10-07T03:55:10.626Z\",\"exitCode\":0,\"timedOut\":false,\"stdoutArtifactId\":\"336727ea-64a7-49a8-95a9-d18d1d754f67\",\"stderrArtifactId\":\"e3a3e373-2777-4499-a9e6-1a23e87c6c42\",\"redactionRulesVersion\":\"p0-redact-v1\",\"parserVersion\":\"p0-provider-v1\"},{\"id\":\"be0397a0-eea4-411c-afb0-dd64ec800fa9\",\"operation\":\"STATUS\",\"attemptNumber\":39,\"startedAt\":\"2026-10-07T03:55:14.086Z\",\"completedAt\":\"2026-10-07T03:55:16.065Z\",\"exitCode\":0,\"timedOut\":false,\"stdoutArtifactId\":\"7ee60f02-7799-4d13-9b01-91ae45d80235\",\"stderrArtifactId\":\"9c9efbd7-3b66-480a-a346-9a8a7844559b\",\"redactionRulesVersion\":\"p0-redact-v1\",\"parserVersion\":\"p0-provider-v1\"},{\"id\":\"aa9ef09e-e079-413e-a7ad-da9818bb577c\",\"operation\":\"DOWNLOAD\",\"attemptNumber\":1,\"startedAt\":\"2026-10-07T03:55:16.091Z\",\"completedAt\":\"2026-10-07T03:55:23.204Z\",\"exitCode\":0,\"timedOut\":false,\"stdoutArtifactId\":\"b3f4c6f9-698f-49be-ae79-963cdb482436\",\"stderrArtifactId\":\"bba9f63e-1192-4e6a-9ccc-803c24396a73\",\"redactionRulesVersion\":\"p0-redact-v1\",\"parserVersion\":\"p0-provider-v1\"}]",
+      "outputArtifactId": "6b85b51b-9a5f-4804-8599-f9bb29f18f41",
+      "createdAt": "2026-10-07T03:51:42.021Z",
+      "submittedAt": "2026-10-07T03:51:57.918Z",
+      "completedAt": "2026-10-07T03:55:23.220Z",
+      "errorCode": null,
+      "errorMessage": null
+    }
+  ],
+  "outputs": [
+    {
+      "artifact": {
+        "id": "5c5fb18a-aeba-41e0-baae-f04362f1865e",
+        "projectId": "bbcbff87-a977-4103-b2c4-d70cb8996edb",
+        "kind": "GENERATED_VIDEO",
+        "relativePath": "outputs/877cc2a9-99a6-48fe-a337-66c49297f3b1/ba8bade7-b177-4354-b6b4-054c8add7280.mp4",
+        "sha256": "9a311041e7dc8cb7faa407556ce3d4bc47d7f19c233a6891d9ef3f1ce1bd6260",
+        "sizeBytes": 11989955,
+        "mimeType": "video/mp4",
+        "integrityStatus": "READY",
+        "immutable": true,
+        "createdAt": "2026-10-07T03:54:56.335Z",
+        "updatedAt": "2026-10-07T03:54:56.364Z"
+      },
+      "file": "C:\\Users\\Administrator\\AgentDock\\Product-Video-Studio\\projects\\bbcbff87-a977-4103-b2c4-d70cb8996edb\\outputs\\877cc2a9-99a6-48fe-a337-66c49297f3b1\\ba8bade7-b177-4354-b6b4-054c8add7280.mp4",
+      "probe": {
+        "programs": [],
+        "stream_groups": [],
+        "streams": [
+          {
+            "index": 0,
+            "codec_name": "h264",
+            "codec_type": "video"
+          }
+        ],
+        "format": {
+          "duration": "11.016667"
+        }
+      }
+    },
+    {
+      "artifact": {
+        "id": "6b85b51b-9a5f-4804-8599-f9bb29f18f41",
+        "projectId": "bbcbff87-a977-4103-b2c4-d70cb8996edb",
+        "kind": "GENERATED_VIDEO",
+        "relativePath": "outputs/99ef8126-b0c7-49a8-976a-7a53c2f66bd3/b8a240ab-9c48-4cfa-b935-a604205d1649.mp4",
+        "sha256": "888438b3ca1e9b89960bc5abf068b1289836b3871f491ec6184de760e2fa7111",
+        "sizeBytes": 18485492,
+        "mimeType": "video/mp4",
+        "integrityStatus": "READY",
+        "immutable": true,
+        "createdAt": "2026-10-07T03:55:23.163Z",
+        "updatedAt": "2026-10-07T03:55:23.196Z"
+      },
+      "file": "C:\\Users\\Administrator\\AgentDock\\Product-Video-Studio\\projects\\bbcbff87-a977-4103-b2c4-d70cb8996edb\\outputs\\99ef8126-b0c7-49a8-976a-7a53c2f66bd3\\b8a240ab-9c48-4cfa-b935-a604205d1649.mp4",
+      "probe": {
+        "programs": [],
+        "stream_groups": [],
+        "streams": [
+          {
+            "index": 0,
+            "codec_name": "h264",
+            "codec_type": "video"
+          }
+        ],
+        "format": {
+          "duration": "10.016667"
+        }
+      }
+    }
+  ]
+}

@@ -7,6 +7,8 @@ export type ReferenceVideoMediaInfo = {
   width?: number;
   height?: number;
   frameRate?: number;
+  videoCodec?: string;
+  audioCodec?: string;
   hasAudio: boolean;
   sceneCutTimestampsMs: number[];
 };
@@ -79,6 +81,7 @@ export async function probeReferenceVideo(
     format?: { duration?: string };
     streams?: Array<{
       codec_type?: string;
+      codec_name?: string;
       width?: number;
       height?: number;
       avg_frame_rate?: string;
@@ -91,6 +94,7 @@ export async function probeReferenceVideo(
   }
   const video = parsed.streams?.find((item) => item.codec_type === "video");
   if (!video) throw new Error("参考文件没有可解码视频轨");
+  const audio = parsed.streams?.find((item) => item.codec_type === "audio");
   const sceneCutTimestampsMs = await detectSceneCuts(filePath);
   return {
     durationMs: Math.round(durationSeconds * 1000),
@@ -103,11 +107,73 @@ export async function probeReferenceVideo(
     ...(parseRate(video.avg_frame_rate ?? video.r_frame_rate)
       ? { frameRate: parseRate(video.avg_frame_rate ?? video.r_frame_rate)! }
       : {}),
+    ...(typeof video.codec_name === "string" && video.codec_name
+      ? { videoCodec: video.codec_name.toLowerCase() }
+      : {}),
+    ...(typeof audio?.codec_name === "string" && audio.codec_name
+      ? { audioCodec: audio.codec_name.toLowerCase() }
+      : {}),
     hasAudio: Boolean(
-      parsed.streams?.some((item) => item.codec_type === "audio")
+      audio
     ),
     sceneCutTimestampsMs
   };
+}
+
+export function referenceVideoNeedsBrowserPreview(
+  media: ReferenceVideoMediaInfo
+): boolean {
+  return media.videoCodec !== "h264";
+}
+
+export async function createReferenceVideoBrowserPreview(input: {
+  filePath: string;
+  outputPath: string;
+}): Promise<void> {
+  await fs.mkdir(path.dirname(input.outputPath), { recursive: true });
+  const result = await exec(
+    "ffmpeg",
+    [
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      "-y",
+      "-i",
+      input.filePath,
+      "-map",
+      "0:v:0",
+      "-map",
+      "0:a?",
+      "-vf",
+      "scale=1280:720:force_original_aspect_ratio=decrease",
+      "-c:v",
+      "libx264",
+      "-preset",
+      "veryfast",
+      "-crf",
+      "23",
+      "-pix_fmt",
+      "yuv420p",
+      "-c:a",
+      "aac",
+      "-b:a",
+      "128k",
+      "-movflags",
+      "+faststart",
+      input.outputPath
+    ],
+    180_000
+  );
+  if (result.exitCode !== 0) {
+    throw new Error(
+      "ffmpeg 无法生成浏览器兼容的参考视频预览：" +
+        result.stderr.slice(0, 500)
+    );
+  }
+  const stat = await fs.stat(input.outputPath);
+  if (!stat.size) {
+    throw new Error("参考视频浏览器兼容预览为空");
+  }
 }
 
 async function detectSceneCuts(filePath: string): Promise<number[]> {

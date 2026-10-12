@@ -10,6 +10,7 @@ import {
 } from "../../domain/schemas.js";
 import { DomainValidationError } from "../../domain/validation.js";
 import type { ProductFlowService } from "./product-flow.js";
+import { buildClipContinuityGraph, affectedContinuationClipIds } from "./clip-continuity-engine.js";
 
 export class ReviewService {
   constructor(
@@ -102,7 +103,8 @@ export class ReviewService {
             item.generationAttemptId === currentAttempt.id &&
             item.outputArtifactId === currentArtifact.id &&
             item.outputArtifactHash === currentArtifact.sha256 &&
-            (item.decision === "ACCEPT" || item.decision === "REDO")
+            (item.decision === "ACCEPT" || item.decision === "REDO" ||
+              item.decision === "STALE")
         )
         .sort((a, b) => b.decidedAt.localeCompare(a.decidedAt))[0];
       if (matchingReview?.decision === "ACCEPT") {
@@ -217,6 +219,9 @@ export class ReviewService {
     if (!attempt.outputArtifactId) {
       throw new DomainValidationError("生成任务已完成，但没有可用输出视频");
     }
+    if (source === "AI_VISUAL_GATE" && attempt.errorCode === "OUTPUT_RATIO_MISMATCH") {
+      throw new DomainValidationError("生成视频真实画幅与项目要求不一致，禁止AI自动采用；请人工审片后决定是否重做。");
+    }
     const artifact = await this.artifacts.findById(attempt.outputArtifactId);
     if (
       !artifact ||
@@ -263,10 +268,52 @@ export class ReviewService {
     await this.review.createDecision(decision);
 
     if (input.decision === "REDO") {
-      await this.generation.markSubmissionChainStale(
-        input.projectId,
+      // A local redo must not revoke unrelated clips that already succeeded.
+      await this.generation.markRequestChainStale(
+        attempt.generationRequestId,
         now.toISOString()
       );
+      // V8 continuity opt-in: redo of a source invalidates only descendants
+      // that actually depend on it. Preserve the immutable MP4s and audit trail.
+      if (process.env.PVS_SCENE_CONTINUITY_V1 === "1" &&
+          workspace.productionPlan.v8Source) {
+        const graph=buildClipContinuityGraph(workspace.productionPlan);
+        const affected=affectedContinuationClipIds(graph,clip.id);
+        const decisions=await this.review.listDecisions(input.projectId);
+        for (const affectedId of affected) {
+          const nextClip=clips.find(c=>c.id===affectedId);
+          if (!nextClip) continue;
+          const output=this.latestSuccessfulAttemptForClip(
+            attempts,input.projectId,affectedId
+          );
+          if (!output?.outputArtifactId) continue;
+          const outputArtifact=await this.artifacts.findById(output.outputArtifactId);
+          if (!outputArtifact || outputArtifact.integrityStatus!=="READY" ||
+              !outputArtifact.sha256) continue;
+          const latest=decisions.filter(d=>d.clipId===affectedId &&
+            d.clipHash===nextClip.contentHash &&
+            d.generationAttemptId===output.id)
+            .sort((a,b)=>b.decidedAt.localeCompare(a.decidedAt))[0];
+          if (latest?.decision!=="ACCEPT") continue;
+          const decidedAt=new Date(Math.max(
+            now.getTime(),Date.parse(latest.decidedAt)+1
+          )).toISOString();
+          const stale=reviewDecisionSchema.parse({
+            id:randomUUID(),projectId:input.projectId,clipId:affectedId,
+            clipHash:nextClip.contentHash,
+            generationAttemptId:output.id,
+            outputArtifactId:outputArtifact.id,
+            outputArtifactHash:outputArtifact.sha256,
+            decision:"STALE",source:"CONTINUITY_DEPENDENCY",
+            note:"上游镜头 "+clip.id+" 已重新制作，本片段继承的连续性证据需要重新审核",
+            decidedAt
+          });
+          await this.review.createDecision(stale);
+          await this.generation.markRequestChainStale(
+            output.generationRequestId, decidedAt
+          );
+        }
+      }
       const project = await this.productFlow.setProjectStatus(
         input.projectId,
         "GENERATION_REVIEW"

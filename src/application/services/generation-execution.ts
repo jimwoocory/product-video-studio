@@ -1,3 +1,4 @@
+import type { V8PaidRequestGuard } from "./v8-paid-request-guard.js";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
@@ -21,6 +22,8 @@ import {
 import { DomainValidationError } from "../../domain/validation.js";
 import { LocalArtifactStore } from "../../adapters/store/local-artifact-store.js";
 import { inspectMedia } from "../../adapters/media/inspect-media.js";
+import { assessGeneratedMediaAspectRatio } from "./generated-media-spec-qc.js";
+import { captureActualClipTailFrame } from "./actual-tail-frame-capture.js";
 import { sha256Bytes } from "../../domain/hashing.js";
 import { withSerialOperation } from "./serial-operation.js";
 import { assertAttemptBinding } from "./submission-service.js";
@@ -40,7 +43,27 @@ export class GenerationExecutionService {
     private readonly projectsRoot: string,
     private readonly review?: Pick<ReviewRepository, "listDecisions">,
     private readonly references?: CreativeReferenceGuard,
-    private readonly inspectOutputMedia: typeof inspectMedia = inspectMedia
+    private readonly inspectOutputMedia: typeof inspectMedia = inspectMedia,
+    private readonly sanitizeOutputAudio: (
+      file: string,
+      request: GenerationRequest,
+      tempDir: string
+    ) => Promise<{
+      path: string;
+      nativeAudioState:
+        | "NOT_REQUESTED"
+        | "PRESERVED_VERIFIED_NO_MUSIC"
+        | "PRESERVED_V3_NATIVE_BGM_SUSPECTED"
+        | "STRIPPED_MUSIC_OR_UNCERTAIN"
+        | "ABSENT";
+      reason?: string;
+    }> = async (file, request) => ({
+      path: file,
+      nativeAudioState: request.generateAudio
+        ? "PRESERVED_VERIFIED_NO_MUSIC"
+        : "NOT_REQUESTED"
+    }),
+    private readonly v8Guard?: V8PaidRequestGuard
   ) {}
 
   private async requireAttempt(id: string): Promise<GenerationAttempt> {
@@ -129,7 +152,10 @@ export class GenerationExecutionService {
       stdoutArtifactId: stdoutArtifact.id,
       stderrArtifactId: stderrArtifact.id,
       exitCode: last.exitCode,
-      timedOut: evidence.some((item) => item.timedOut),
+      // A logical provider operation may contain a bounded recovery fallback.
+      // Preserve all intermediate evidence in the artifacts above, but the
+      // command record reflects the final outcome of that logical operation.
+      timedOut: last.timedOut,
       argvRedacted: last.argvRedacted
     };
   }
@@ -378,6 +404,10 @@ export class GenerationExecutionService {
       throw new DomainValidationError("本次生成确认链不完整");
     }
     assertAttemptBinding({ attempt, request, preflight, approval });
+    if (request.v8Binding) {
+      if (!this.v8Guard) throw new DomainValidationError("V8 提交校验器未配置，禁止付费提交");
+      await this.v8Guard(request);
+    }
     if(!request.agentTaskId)await this.references?.assertExpected(attempt.projectId,request.inputVersionRefs.find(r=>r.entityType==="CreativeReferenceSet"));
 
     const allArtifacts = await this.artifacts.listByProject(attempt.projectId);
@@ -654,9 +684,24 @@ export class GenerationExecutionService {
         command,
         "DOWNLOAD"
       );
+      const sanitized = await this.sanitizeOutputAudio(
+        downloaded.path,
+        request,
+        tempDir
+      );
+      const artifactSourcePath = sanitized.path;
+      const mediaSpecification = request.imageBindings?.length
+        ? assessGeneratedMediaAspectRatio(request, await this.inspectOutputMedia(artifactSourcePath))
+        : undefined;
+      const strictV2Audio = request.inputVersionRefs.some(
+        ref => ref.entityType === "ProductionAssetSet"
+      );
+      const strictV3NativeAudio =
+        request.audioPolicy === "V3_NATIVE_NO_BGM";
       if (
         request.generateAudio &&
-        !(await this.inspectOutputMedia(downloaded.path)).hasAudio
+        !(await this.inspectOutputMedia(artifactSourcePath)).hasAudio &&
+        (!strictV2Audio || strictV3NativeAudio)
       ) {
         await this.finishCommand(attempt.id, command, {
           ...evidence,
@@ -672,7 +717,7 @@ export class GenerationExecutionService {
             "已要求模型原生声音，但下载的视频没有音轨；该结果不会进入审片或剪辑。"
         });
       }
-      const bytes = await fs.readFile(downloaded.path);
+      const bytes = await fs.readFile(artifactSourcePath);
       const artifact = await new LocalArtifactStore(
         projectRoot,
         this.artifacts
@@ -690,10 +735,48 @@ export class GenerationExecutionService {
         completedAt: new Date().toISOString(),
         exitCode: evidence.exitCode ?? 0
       });
+      // This is a zero-credit, local read of the actual downloaded video.
+      // No generated frame is marked reviewed without a human/visual QC gate.
+      let tailCaptureProblem: string | undefined;
+      if (request.v8Binding && request.imageBindings?.length) {
+        try {
+          await captureActualClipTailFrame({
+            projectId: attempt.projectId, projectsRoot: this.projectsRoot,
+            attempt: { ...attempt, outputArtifactId: artifact.id },
+            videoArtifact: artifact, artifacts: this.artifacts
+          });
+        } catch (error) {
+          tailCaptureProblem = error instanceof Error ? error.message : String(error);
+        }
+      }
+      const ratioWarning = mediaSpecification?.status === "RATIO_MISMATCH" ||
+        mediaSpecification?.status === "RATIO_UNVERIFIED";
+      const v3AudioWarning =
+        sanitized.nativeAudioState ===
+        "PRESERVED_V3_NATIVE_BGM_SUSPECTED";
       return this.workflow.updateGenerationAttemptStatus(attempt.id, {
         status: attempt.status,
         outputArtifactId: artifact.id,
-        completedAt: new Date().toISOString()
+        completedAt: new Date().toISOString(),
+        ...(ratioWarning
+          ? {
+              errorCode: "OUTPUT_RATIO_MISMATCH",
+              errorMessage: mediaSpecification!.detail
+            }
+          : tailCaptureProblem
+          ? {
+              errorCode: "CONTINUITY_TAILFRAME_UNAVAILABLE",
+              errorMessage: "生成视频已保存，但无法提取可核验的真实尾帧：" + tailCaptureProblem + "。强连续的下一段必须暂停。"
+            }
+          : v3AudioWarning
+          ? {
+              errorCode:
+                "V3_NATIVE_BGM_REVIEW_REQUIRED",
+              errorMessage:
+                sanitized.reason ??
+                "原生音轨疑似包含 BGM；已保留对白/OS/环境声/音效，请审听后决定是否重做本镜头。"
+            }
+          : {})
       });
     } catch (error) {
       await fs.rm(tempPath, { force: true }).catch(() => undefined);

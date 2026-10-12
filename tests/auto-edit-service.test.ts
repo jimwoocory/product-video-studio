@@ -82,8 +82,12 @@ test("automatic editing page and audio HTTP controls validate uploads without ch
     const w = await f.productFlow.getWorkspace(f.projectId);
     const html = await (await fetch(base+"/projects/"+f.projectId+"/auto-edit")).text();
     for (const match of html.matchAll(/<script>([\s\S]*?)<\/script>/g)) new Script(match[1]!);
-    const metadata = await (await fetch(base+"/api/projects/"+f.projectId+"/post-production")).json() as {audioAssets: unknown[]};
-    assert.equal(metadata.audioAssets.length, 3);
+    const metadata = await (await fetch(base+"/api/projects/"+f.projectId+"/post-production")).json() as {audioAssets: Array<{name:string;source?:string}>};
+    assert.equal(metadata.audioAssets.length, 6);
+    assert.equal(metadata.audioAssets.filter(item => item.source === "BUILTIN_BGM").length, 3);
+    assert.ok(metadata.audioAssets.some(item => item.name.includes("温暖叙事")));
+    assert.ok(metadata.audioAssets.some(item => item.name.includes("轻快产品")));
+    assert.ok(metadata.audioAssets.some(item => item.name.includes("克制工艺")));
     const bytes = await fs.readFile(path.join(f.projectsRoot,f.projectId,f.toneArtifacts[0]!.relativePath));
     const uploaded = await fetch(base+"/api/projects/"+f.projectId+"/post-production/audio", {method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({filename:"配音 test.wav",base64:bytes.toString("base64")})});
     assert.equal(uploaded.status,201);

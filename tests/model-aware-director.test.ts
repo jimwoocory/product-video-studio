@@ -16,6 +16,10 @@ import { renderDirectorGenerationControls } from "../src/web/director-generation
 import { renderProjectPage } from "../src/web/workbench-ui.js";
 import { H, ISO } from "./fixtures.js";
 import { directorCase, modelRegistry } from "./model-aware-fixtures.js";
+import {
+  productionAssetSetSchema,
+  productionAssetSetRef
+} from "../src/domain/production-strategy.js";
 
 async function generate(c: ReturnType<typeof directorCase>) {
   const requests: StructuredAiRequest[] = [];
@@ -76,6 +80,29 @@ test("long-clip splitting preserves complete narration exactly once", async () =
   assert.equal(speech.length, 1);
   assert.equal(speech[0]!.dialogueOrNarration.kind, "NARRATION");
   assert.ok(speech[0]!.endMs - speech[0]!.startMs >= 3500);
+});
+
+test("director fills missing narration timing metadata deterministically instead of failing the smart run", async () => {
+  const c = directorCase(15000, 15);
+  c.proposal.scenes[0]!.clips[0]!.segments[0]!.dialogueOrNarration = {
+    kind: "NARRATION",
+    text: "用真实产品细节自然推进剧情。"
+  } as any;
+  const { plan, requests } = await generate(c);
+  const speech = plan.scenes[0]!.clips[0]!.segments[0]!.dialogueOrNarration;
+  assert.equal(speech.kind, "NARRATION");
+  assert.ok(speech.estimatedDurationMs > 0);
+  assert.equal(speech.estimatorVersion, "director-text-estimator-v1");
+  assert.match(requests[0]!.instructions, /estimatedDurationMs and estimatorVersion/);
+  assert.deepEqual(
+    (requests[0]!.outputContract as any).scenes[0].clips[0].segments[0].dialogueOrNarration,
+    {
+      kind: "NARRATION|DIALOGUE|NONE",
+      text: "required when kind is NARRATION or DIALOGUE",
+      estimatedDurationMs: 1800,
+      estimatorVersion: "director-text-estimator-v1"
+    }
+  );
 });
 
 test("long speech cannot be silently truncated, duplicated or treated as a safe split", async () => {
@@ -160,12 +187,169 @@ test("compiled prompt consistently binds actual model, 16:9, resolution, audio p
   assert.match(prompt.promptText, /aspect_ratio=16:9/);
   assert.doesNotMatch(prompt.promptText, /aspect_ratio=9:16/);
   assert.match(prompt.promptText, /video_resolution=720p/);
+  assert.match(prompt.promptText, /background_music_policy=FORBIDDEN_IN_MODEL_OUTPUT/);
+  assert.match(prompt.promptText, /Do NOT generate background music/);
+  assert.match(prompt.promptText, /No BGM, no music, no musical score, no soundtrack/);
   assert.match(prompt.promptText, /POST_PRODUCTION_AUDIO_CUES/);
   assert.match(prompt.promptText, /Do not change logo/);
   assert.match(prompt.promptText, /fact-1: Feature one/);
   assert.match(prompt.compilerTemplateVersion, /seedance2.0mini-text2video/);
   assert.deepEqual(prompt.generationProfile, input.generationProfile);
   assert.equal(compileSeedancePrompt(input).compiledPromptHash, prompt.compiledPromptHash);
+});
+
+test("V2 compiled prompt sends a clean director prompt while retaining internal audit mappings", async () => {
+  const c = directorCase();
+  const productionSetBase = {
+    id: "production-set-v2",
+    projectId: c.input.productTruth.projectId,
+    version: 1,
+    strategyRef: {
+      entityType: "ProductionStrategy",
+      entityId: "strategy-v2",
+      version: 1,
+      hash: H.f
+    },
+    selectedCreativeId: "creative-1",
+    status: "READY" as const,
+    entries: [
+      {
+        key: "PRODUCT_MAIN",
+        referenceAssetId: "asset-1",
+        kind: "PRODUCT" as const,
+        label: "当前产品",
+        description: "严格使用产品主参考图",
+        purpose: "保持产品身份",
+        required: true,
+        reuseScope: "RUN" as const,
+        source: "PRODUCT_INPUT" as const,
+        status: "READY" as const,
+        artifactIds: ["artifact-product"],
+        sourceReferenceAssetIds: ["asset-1"],
+        identityLock: ["保持产品形状、颜色和图案"],
+        confidence: "HIGH" as const,
+        reviewSummary: "产品主图已确认"
+      },
+      {
+        key: "CHARACTER_A",
+        referenceAssetId: "production-asset:character-a",
+        kind: "CHARACTER" as const,
+        label: "女主",
+        description: "年轻成年女性，深色短发，灰色家居服",
+        purpose: "跨镜头保持同一女主身份",
+        required: true,
+        reuseScope: "MULTI_CLIP" as const,
+        source: "DREAMINA_GENERATED" as const,
+        status: "READY" as const,
+        artifactIds: ["production-asset:character-a"],
+        sourceReferenceAssetIds: [],
+        identityLock: ["深色短发", "灰色家居服", "同一成年女性面部身份"],
+        confidence: "HIGH" as const,
+        reviewSummary: "身份参考清晰"
+      }
+    ],
+    createdAt: ISO,
+    updatedAt: ISO
+  };
+  const productionAssetSet = productionAssetSetSchema.parse({
+    ...productionSetBase,
+    contentHash: H.f
+  });
+  const script = {
+    ...structuredClone(c.input.script),
+    productionAssetSetRef: productionAssetSetRef(productionAssetSet),
+    contentHash: H.one
+  };
+  const proposal = structuredClone(c.proposal);
+  proposal.scenes[0]!.clips[0]!.referenceAssets = [
+    {
+      assetId: "asset-1",
+      role: "PRIMARY_PRODUCT",
+      priority: 0,
+      required: true
+    },
+    {
+      assetId: "production-asset:character-a",
+      role: "CHARACTER",
+      priority: 1,
+      required: true
+    }
+  ];
+  const generator = new HermesProductDirectorGenerator({
+    id: "v2-prompt-fixture",
+    version: "1",
+    generateJson: async () => proposal
+  });
+  const draft = await generator.generate({
+    ...c.input,
+    script,
+    productionAssetSet
+  });
+  const plan = confirmProductionPlanDraft(draft);
+  const clip = plan.scenes[0]!.clips[0]!;
+  const profile = resolveGenerationProfile(c.registry, {
+    operation: "multimodal2video",
+    requestedModelVersion: c.target.requestedModelVersion,
+    aspectRatio: c.target.aspectRatio,
+    videoResolution: c.target.videoResolution,
+    nativeAudioOutputRequested: false,
+    durationMs: clip.durationMs,
+    referenceAudioInputCount: 0
+  });
+  const prompt = compileSeedancePrompt({
+    id: "compiled-v2",
+    version: 1,
+    createdAt: ISO,
+    productTruth: c.input.productTruth,
+    creativeBatch: c.input.creativeBatch,
+    script,
+    productionPlan: plan,
+    productionAssetSet,
+    clipId: clip.id,
+    generationProfile: profile,
+    assets: [
+      {
+        id: "asset-1",
+        artifactId: "artifact-product",
+        type: "image",
+        source: "user_upload",
+        sha256: H.a,
+        mimeType: "image/png",
+        sizeBytes: 1000,
+        createdAt: ISO
+      },
+      {
+        id: "production-asset:character-a",
+        artifactId: "production-asset:character-a",
+        type: "image",
+        source: "generated",
+        sha256: H.b,
+        mimeType: "image/jpeg",
+        sizeBytes: 1000,
+        createdAt: ISO
+      }
+    ]
+  });
+  assert.equal(prompt.compilerTemplateVersion, "seedance-model-prompt-v2-1");
+  assert.ok(prompt.auditContractHash);
+  assert.deepEqual(
+    prompt.productionAssetSetRef,
+    productionAssetSetRef(productionAssetSet)
+  );
+  assert.match(prompt.promptText, /【镜头目标】/);
+  assert.match(prompt.promptText, /【固定身份参考】/);
+  assert.match(prompt.promptText, /女主/);
+  assert.match(prompt.promptText, /不要生成背景音乐/);
+  assert.doesNotMatch(prompt.promptText, /compiler_template/i);
+  assert.doesNotMatch(prompt.promptText, /capability_fingerprint/i);
+  assert.doesNotMatch(prompt.promptText, /command_help_sha256/i);
+  assert.doesNotMatch(prompt.promptText, /fact-1/);
+  assert.doesNotMatch(prompt.promptText, /seg-1/);
+  assert.doesNotMatch(
+    prompt.promptText,
+    /[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/i
+  );
+  assert.ok(prompt.factMapping.some(item => item.factId === "fact-1"));
 });
 
 test("model-aware compiler never sends exact overlay copy to Dreamina pixels", async () => {

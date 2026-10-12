@@ -17,8 +17,8 @@ export function renderPostProductionControls(input: { projectId: string; setting
     <label class="field">系统音色<select class="post-voice"><option value="">按文本语言选择</option></select></label>
     <label class="field">本机配音语速<select class="post-rate">${[-2,-1,0,1,2,3].map(rate => `<option value="${rate}">${rate === 0 ? "标准" : rate > 0 ? "加快 " + rate : "放慢 " + Math.abs(rate)}</option>`).join("")}</select></label>
   </div><p class="muted post-voice-status">正在读取已安装系统音色…</p>
-  <div class="row"><label class="field">背景音乐<select class="post-bgm post-audio-select"><option value="">不添加背景音乐</option></select></label>
-    <label class="field">背景音乐音量（0–1）<input class="post-bgm-volume" type="number" min="0" max="1" step="any" value="${settings.bgmVolume}"></label>
+  <div class="row"><label class="field">后期统一背景音乐<select class="post-bgm post-audio-select"><option value="">不添加背景音乐</option></select><span class="muted">这里的音乐只在最终剪辑阶段铺到整条成片，不会交给 Seedance 分段生成。</span></label>
+    <label class="field">背景音乐音量（0–1）<input class="post-bgm-volume" type="number" min="0" max="1" step="any" value="${settings.bgmArtifactId ? settings.bgmVolume : ""}" placeholder="未启用" ${settings.bgmArtifactId ? "" : "disabled"}></label>
     <label class="field">原视频音量（0–2）<input class="post-source-volume" type="number" min="0" max="2" step="any" value="${settings.sourceVolume}"></label></div>
   <p><label><input class="post-captions" type="checkbox" ${settings.captions ? "checked" : ""}> 按分镜台词与配音时段自动排字幕</label></p>
   <p><label><input class="post-cta" type="checkbox" ${settings.cta ? "checked" : ""}> 使用已确认脚本中的行动引导</label></p>
@@ -54,6 +54,18 @@ export const postProductionBrowserScript = `<script>
  for(const root of document.querySelectorAll('.post-production-settings')){
    const settings=JSON.parse(root.dataset.settings),base='/api/projects/'+encodeURIComponent(root.dataset.project)+'/post-production';
    root.querySelector('.post-mode').value=settings.narrationMode;root.querySelector('.post-rate').value=String(settings.speechRate);
+   const bgmSelect=root.querySelector('.post-bgm'),bgmVolume=root.querySelector('.post-bgm-volume');
+   let lastBgmVolume=Number(settings.bgmVolume)>0?Number(settings.bgmVolume):0.22;
+   const syncBgm=()=>{
+     if(bgmSelect.value){
+       bgmVolume.disabled=false;
+       if(bgmVolume.value==='')bgmVolume.value=String(lastBgmVolume);
+     }else{
+       if(bgmVolume.value!=='')lastBgmVolume=Number(bgmVolume.value)||lastBgmVolume;
+       bgmVolume.value='';
+       bgmVolume.disabled=true;
+     }
+   };
    let first=true;
    const load=async()=>{
      const response=await fetch(base);const data=await response.json();if(!response.ok)throw new Error(data.message||'后期素材读取失败');
@@ -67,9 +79,12 @@ export const postProductionBrowserScript = `<script>
        for(const a of data.audioAssets)select.add(new Option(a.name,a.id));
        if(chosen&&!data.audioAssets.some(a=>a.id===chosen))select.add(new Option('所选音频当前不可用',chosen));select.value=chosen;
      }
+     syncBgm();
      first=false;
    };
    load().catch(e=>root.querySelector('.post-error').textContent=e.message);
+   bgmSelect.addEventListener('change',()=>{syncBgm();root.dataset.dirty='1';});
+   bgmVolume.addEventListener('input',()=>{if(bgmVolume.value!=='')lastBgmVolume=Number(bgmVolume.value)||lastBgmVolume;});
    root.addEventListener('input',()=>{root.dataset.dirty='1';});root.addEventListener('change',()=>{root.dataset.dirty='1';});
    root.querySelector('.post-upload').addEventListener('change',async e=>{
      const file=e.target.files?.[0];if(!file)return;const status=root.querySelector('.post-upload-status');

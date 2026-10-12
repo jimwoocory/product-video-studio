@@ -18,6 +18,21 @@ import {
   directorClipBounds,
   planModelAwareClipDurations
 } from "../../application/services/director-generation-target.js";
+import {
+  productionAssetSetRef,
+  type ProductionAssetEntry
+} from "../../domain/production-strategy.js";
+
+function productionAssetRole(
+  kind: ProductionAssetEntry["kind"]
+): "PRIMARY_PRODUCT" | "STYLE" | "ENVIRONMENT" | "CHARACTER" | "OTHER" | "PRODUCT_ANGLE" {
+  if (kind === "PRODUCT") return "PRIMARY_PRODUCT";
+  if (kind === "STYLE") return "STYLE";
+  if (kind === "SET") return "ENVIRONMENT";
+  if (kind === "CHARACTER") return "CHARACTER";
+  if (kind === "PRODUCT_STATE") return "PRODUCT_ANGLE";
+  return "OTHER";
+}
 
 const stateProposalSchema = z.object({
   description: z.string().trim().min(1),
@@ -25,7 +40,41 @@ const stateProposalSchema = z.object({
   environmentState: z.string().trim().min(1)
 });
 
-const dialogueSchema = z.discriminatedUnion("kind", [
+const DIRECTOR_SPEECH_ESTIMATOR_VERSION = "director-text-estimator-v1";
+
+function estimateSpeechDurationMs(text: string): number {
+  const normalized = text.trim();
+  const hanCount = (normalized.match(/[\u3400-\u9fff]/g) ?? []).length;
+  const latinWords = normalized
+    .replace(/[\u3400-\u9fff]/g, " ")
+    .split(/\s+/)
+    .filter(Boolean).length;
+  const punctuationCount = (normalized.match(/[，。！？；：,.!?;:]/g) ?? []).length;
+  return Math.max(
+    600,
+    Math.ceil((hanCount * 270 + latinWords * 380 + punctuationCount * 120) / 100) * 100
+  );
+}
+
+const dialogueSchema = z.preprocess((value) => {
+  if (!value || typeof value !== "object") return value;
+  const candidate = value as Record<string, unknown>;
+  if (candidate.kind !== "DIALOGUE" && candidate.kind !== "NARRATION") return value;
+  if (typeof candidate.text !== "string" || !candidate.text.trim()) return value;
+  return {
+    ...candidate,
+    estimatedDurationMs:
+      typeof candidate.estimatedDurationMs === "number" &&
+      Number.isInteger(candidate.estimatedDurationMs) &&
+      candidate.estimatedDurationMs > 0
+        ? candidate.estimatedDurationMs
+        : estimateSpeechDurationMs(candidate.text),
+    estimatorVersion:
+      typeof candidate.estimatorVersion === "string" && candidate.estimatorVersion.trim()
+        ? candidate.estimatorVersion
+        : DIRECTOR_SPEECH_ESTIMATOR_VERSION
+  };
+}, z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("NONE") }),
   z.object({
     kind: z.enum(["DIALOGUE", "NARRATION"]),
@@ -33,15 +82,44 @@ const dialogueSchema = z.discriminatedUnion("kind", [
     estimatedDurationMs: z.number().int().positive(),
     estimatorVersion: z.string().trim().min(1)
   })
-]);
+]));
 
-const ambientSchema = z.discriminatedUnion("kind", [
+const ambientSchema = z.preprocess((value) => {
+  if (typeof value === "string") {
+    const text = value.trim();
+    if (!text || text.toUpperCase() === "NONE") {
+      return { kind: "NONE" };
+    }
+    return {
+      kind: "AMBIENT",
+      description: text
+    };
+  }
+  if (!value || typeof value !== "object") return value;
+  const candidate = value as Record<string, unknown>;
+  if (candidate.kind === "NONE") return { kind: "NONE" };
+  const description =
+    typeof candidate.description === "string"
+      ? candidate.description.trim()
+      : typeof candidate.text === "string"
+        ? candidate.text.trim()
+        : typeof candidate.sound === "string"
+          ? candidate.sound.trim()
+          : "";
+  if (description) {
+    return {
+      kind: "AMBIENT",
+      description
+    };
+  }
+  return value;
+}, z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("NONE") }),
   z.object({
     kind: z.literal("AMBIENT"),
     description: z.string().trim().min(1)
   })
-]);
+]));
 
 const postProductionTextCueProposalSchema = z.object({
   kind: z.enum(["CAPTION", "CTA", "LEGAL", "LABEL"]),
@@ -67,6 +145,22 @@ const segmentProposalSchema = z.object({
   dialogueOrNarration: dialogueSchema,
   ambientSound: ambientSchema,
   postProductionText: z.array(postProductionTextCueProposalSchema).max(12).default([]),
+  v8: z.object({
+    sourceShotId: z.string().trim().min(1),
+    sourceBeatId: z.string().trim().min(1),
+    sourceActionHash: z.string().regex(/^[a-f0-9]{64}$/i),
+    shotFunction: z.enum(["ESTABLISH", "SPEECH", "REACTION", "ACTION"]),
+    spoken: z.object({
+      speaker: z.string().trim().min(1),
+      mode: z.enum(["ONSCREEN", "OFFSCREEN", "OS"]),
+      exactText: z.string().refine(s => s.trim().length > 0),
+      sourceLineText: z.string().min(1).optional(), sourcePartIndex: z.number().int().positive().optional(),
+      sourcePartCount: z.number().int().positive().optional(),
+      tone: z.string().trim().min(1),
+      delivery: z.string().trim().min(1)
+    }).strict().optional(),
+    audienceKnowledgeChange: z.string().trim().min(1).optional()
+  }).strict().optional(),
   lighting: z.string().trim().min(1),
   continuityIn: stateProposalSchema,
   continuityOut: stateProposalSchema,
@@ -199,10 +293,33 @@ function resizeClipTimingToWholeSecond(
 function normalizeClipDurationsForDreamina(
   proposal: DirectorProposal,
   projectTargetDurationMs: number,
-  generationTarget?: DirectorGenerationTarget
+  generationTarget?: DirectorGenerationTarget,
+  desiredDurationsMs?: number[]
 ): DirectorProposal {
   const next = structuredClone(proposal);
   const { minSeconds, maxSeconds } = directorClipBounds(generationTarget);
+  if (desiredDurationsMs) {
+    const clips = next.scenes.flatMap((scene) => scene.clips);
+    if (clips.length !== desiredDurationsMs.length) {
+      throw new DomainValidationError(
+        "Director V3 ProductionPlan Clip 数量与 Clip Contract 不一致"
+      );
+    }
+    desiredDurationsMs.forEach((durationMs, index) => {
+      const seconds = durationMs / 1000;
+      if (
+        !Number.isInteger(seconds) ||
+        seconds < minSeconds ||
+        seconds > maxSeconds
+      ) {
+        throw new DomainValidationError(
+          "Director V3 Clip Contract 时长超出当前模型能力"
+        );
+      }
+      resizeClipTimingToWholeSecond(clips[index]!, durationMs);
+    });
+    return next;
+  }
   if (generationTarget) {
     for (const scene of next.scenes) {
       scene.clips = scene.clips.flatMap((clip) => splitDirectorClip(clip, minSeconds, maxSeconds));
@@ -393,7 +510,13 @@ export class HermesProductDirectorGenerator implements ProductDirectorGenerator 
     assertReferenceBinding(input.script.creativeReferenceSetRef,input.creativeContext?.references,input.productTruth);
     assertReferenceBinding(input.creativeBatch.creativeReferenceSetRef,input.creativeContext?.references,input.productTruth);
     const bounds = directorClipBounds(input.generationTarget);
-    const clipDurationPlanMs = input.generationTarget
+    const clipDurationPlanMs = input.v8DirectorDecision
+      ? input.v8DirectorDecision.clips.map(clip => clip.durationMs)
+      : input.directorV3Plan
+      ? input.directorV3Plan.clipContracts.map(
+          (contract) => contract.durationMs
+        )
+      : input.generationTarget
       ? planModelAwareClipDurations(input.projectTargetDurationMs, input.generationTarget)
       : undefined;
     const facts = [
@@ -405,11 +528,18 @@ export class HermesProductDirectorGenerator implements ProductDirectorGenerator 
       task:
         "Generate a Product Director ProductionPlan draft with Scene -> Clip -> Segment structure.",
       instructions: [
-        "The total Clip duration must be close to projectTargetDurationMs.",
+        input.directorV3Plan
+          ? "The total Clip duration MUST equal the authoritative Director V3 clipContracts total. The overall user-requested projectTargetDurationMs permits an evidence-based ±10% narrative deviation; never arbitrarily stretch dialogue/actions merely to hit the original target."
+          : "The total Clip duration must be close to projectTargetDurationMs.",
         `Each Clip must be ${bounds.minSeconds}-${bounds.maxSeconds} whole seconds and contain at least one Segment. Never output fractional-second Clip durations such as 4500 or 5500.`,
         input.generationTarget
-          ? "Honor generationTarget and clipDurationPlanMs. Plan for the selected model, ratio, resolution and per-command reference limits BEFORE writing shot actions. Each clip should express one main product action; use multiple clips for complex changes. The slot total must equal projectTargetDurationMs. Keep complete speech inside one clip, and do not duplicate narration across clips. Native audio and reference audio are independent; when nativeAudioOutputRequested=false, narration/ambient fields are post-production audio cues, not a promise of model audio output."
+          ? "Honor generationTarget and clipDurationPlanMs. Plan for the selected model, ratio, resolution and per-command reference limits BEFORE writing shot actions. Each clip should express one main product action; use multiple clips for complex changes. The slot total MUST equal the provided clipDurationPlanMs sum, not the original requested target if Director V3 has selected a different natural total within ±10%. Keep complete speech inside one clip, and do not duplicate narration across clips. Native audio and reference audio are independent; when nativeAudioOutputRequested=false, narration/ambient fields are post-production audio cues, not a promise of model audio output."
           : "Legacy plan: no explicit generation target has been selected.",
+        input.v8DirectorDecision
+          ? "V8 DirectorDecision is the single authoritative shot/voice/timing list. Output exactly one ProductionPlan Clip per V8 clip in the same order and duration. Output exactly one Segment per source Shot, with exact startMs/endMs, sourceBeatIds, and v8 metadata. Set subjectAction to the exact visibleAction; put visual refinements in composition, camera and lighting. Preserve source ambience/sfx verbatim in ambientSound.description and each postProductionText on its assigned shot with sourceBeatIds and a legal time window. Honor visualGuidance without changing action or audience knowledge. Copy supplied sourceShotId, sourceBeatId, sourceActionHash, shotFunction, spoken speaker/mode/exactText/tone/delivery and audienceKnowledgeChange verbatim. ProductDirector may enrich composition, eye lines, camera, blocking, lighting and sound effects only; never change dialogue, reveal timing, action meaning, Clip/Shot counts or timing."
+          : input.directorV3Plan
+          ? "Director V3 clipContracts are authoritative. Output exactly one ProductionPlan Clip per clipContract, in the same order and exact duration. Do not merge or split contracts. Each output Clip sourceBeatIds must exactly match its contract. Each contract location is the location of the Scene containing that Clip. Keep the contract's one clear story purpose and bounded actions; do not re-introduce micro-actions removed by Script QA."
+          : "No Director V3 Clip Contract is active.",
         "Within each Clip, Segments must start at 0, end at durationMs, be contiguous, ordered, and have no gap or overlap.",
         "Adjacent Segment continuityOut and continuityIn objects must be exactly identical.",
         "The first Segment continuityIn must equal Clip openingState; the last continuityOut must equal Clip closingState.",
@@ -419,9 +549,16 @@ export class HermesProductDirectorGenerator implements ProductDirectorGenerator 
         "Product Truth HARD forbidden changes are immutable and will be injected by code; do not attempt to rewrite them.",
         "Confirmed usageRules are hard directing constraints. Do not depict wearing/install position, operation, charging, waterproof/environment behavior, function effect, usage scenario or product state that conflicts with them.",
         "Audio fields are mandatory and must explicitly use NONE when absent.",
+        input.directorV3Plan
+          ? "Director V3 compatibility rule: ProductionPlan ambientSound.kind must be only AMBIENT or NONE. Encode natural ambience, foley and interaction/SFX together in ambientSound.description; never output SFX, FOLEY, NATURAL, ENVIRONMENT or other kind values. The separate V3 Clip Contract remains the source of truth for ambience versus SFX in the final Seedance Prompt."
+          : "Use only AMBIENT or NONE for ambientSound.kind.",
+        "For every dialogueOrNarration with kind DIALOGUE or NARRATION, return text, estimatedDurationMs and estimatorVersion. estimatedDurationMs must be a positive integer that fits inside the Segment; use estimatorVersion='director-text-estimator-v1'. For NONE, return only {kind:'NONE'}.",
         "Never ask the video model to render readable words, letters, numbers, brand/model labels, subtitles, disclaimers, UI copy or CTA inside generated pixels. Exact visible copy must exist ONLY in Segment.postProductionText. Visual fields may reserve a clean text-safe area but must not quote or spell the copy. Dialogue captions are created later from dialogueOrNarration and should not be duplicated in postProductionText.",
         "Use postProductionText kinds as follows: LABEL for exact product/brand/model labels, LEGAL for qualifiers/disclaimers, CAPTION for non-dialogue editorial copy, CTA for exact call-to-action copy. Every cue must stay inside its Segment and cite the sourceBeatIds/requiredFactIds needed for its claim.",
         "Reference asset IDs may only come from referenceAssets.",
+        input.productionAssetSet
+          ? "productionAssetSet contains locked reusable production identities for this run. Reuse CHARACTER/SET/PROP/PRODUCT_STATE/STYLE references whenever the corresponding identity appears. Do not redesign or silently replace a locked production asset."
+          : "No dedicated production asset set is bound to this plan.",
         "When a clip shows the product and uses research references, also include canonicalImageId as PRIMARY_PRODUCT. Research angles, usage and scene images never replace the canonical product identity image.",
         input.referenceVideoProfile
           ? "Use referenceVideoProfile only as reusable directing structure and method. Do not copy source-specific shot content, wording, character identity, brand expression or protected creative elements."
@@ -432,6 +569,68 @@ export class HermesProductDirectorGenerator implements ProductDirectorGenerator 
         projectTargetDurationMs: input.projectTargetDurationMs,
         ...(input.creativeContext ? { creativeContext: input.creativeContext } : {}),
         ...(input.generationTarget ? { generationTarget: input.generationTarget, clipDurationPlanMs } : {}),
+        ...(input.v8DirectorDecision ? {
+          v8DirectorDecision: {
+            sourceScriptHash: input.v8DirectorDecision.sourceScriptHash,
+            screenplayHash: input.v8DirectorDecision.screenplayHash,
+            targetDurationMs: input.v8DirectorDecision.targetDurationMs,
+            clips: input.v8DirectorDecision.clips.map(clip => ({
+              order:clip.order, durationMs:clip.durationMs,
+              location:clip.location,
+              openingState:clip.openingState,
+              closingState:clip.closingState,
+              sourceBeatIds:clip.sourceBeatIds,
+              shots:clip.shots.map(shot => ({
+                sourceShotId:shot.shotId,
+                sourceBeatId:shot.sourceBeatId,
+                sourceActionHash:hashValue(shot.visibleAction),
+                startMs:shot.startMs,endMs:shot.endMs,
+                shotFunction:shot.shotFunction,
+                visibleAction:shot.visibleAction,
+                ambience:shot.ambience, sfx:shot.sfx, postProductionText:shot.postProductionText, visualGuidance:shot.visualGuidance,
+                ...(shot.actorObjective ? { actorObjective:shot.actorObjective } : {}),
+                ...(shot.spoken ? { spoken:{
+                  speaker:shot.spoken.speaker,mode:shot.spoken.mode,
+                  exactText:shot.spoken.exactText,
+                  tone:shot.spoken.tone,delivery:shot.spoken.delivery,
+                  speechEstimatedMs:shot.spoken.speechEstimatedMs,
+                  ...(shot.spoken.sourceLineText !== undefined ? {
+                    sourceLineText:shot.spoken.sourceLineText,
+                    sourcePartIndex:shot.spoken.sourcePartIndex,
+                    sourcePartCount:shot.spoken.sourcePartCount
+                  } : {})
+                } } : {}),
+                ...(shot.audienceKnowledgeChange ? {
+                  audienceKnowledgeChange:shot.audienceKnowledgeChange
+                } : {})
+              }))
+            }))
+          }
+        } : {}),
+        ...(input.directorV3Plan
+          ? {
+              directorV3Plan: {
+                version: input.directorV3Plan.version,
+                clipContracts:
+                  input.directorV3Plan.clipContracts.map(
+                    (contract) => ({
+                      order: contract.order,
+                      sourceBeatIds: contract.sourceBeatIds,
+                      purpose: contract.purpose,
+                      location: contract.location,
+                      durationMs: contract.durationMs,
+                      openingState: contract.openingState,
+                      closingState: contract.closingState,
+                      actions: contract.actions,
+                      camera: contract.camera,
+                      productStateChanges:
+                        contract.productStateChanges,
+                      audio: contract.audio
+                    })
+                  )
+              }
+            }
+          : {}),
         selectedCreativeId: input.selectedCreativeId,
         selectedCreative: input.creativeBatch.concepts.find(
           (item) => item.id === input.selectedCreativeId
@@ -441,14 +640,48 @@ export class HermesProductDirectorGenerator implements ProductDirectorGenerator 
           purpose: beat.purpose,
           text: beat.text,
           estimatedDurationMs: beat.estimatedDurationMs,
-          requiredFactIds: beat.requiredFactIds
+          requiredFactIds: beat.requiredFactIds,
+          ...(beat.videoIntent
+            ? { videoIntent: beat.videoIntent }
+            : {})
         })),
         allowedFacts: facts,
         canonicalImageId: input.productTruth.canonicalImageId,
-        referenceAssets: [...input.productTruth.referenceImageIds.map((assetId) => ({
-          assetId,
-          suggestedRole: "PRIMARY_PRODUCT"
-        })), ...(input.creativeContext?.references?.entries.map(e=>({assetId:e.assetId,suggestedRole:e.role,description:e.description}))??[])],
+        referenceAssets: [
+          ...input.productTruth.referenceImageIds.map((assetId) => ({
+            assetId,
+            suggestedRole: "PRIMARY_PRODUCT"
+          })),
+          ...(input.creativeContext?.references?.entries.map(e=>({
+            assetId:e.assetId,
+            suggestedRole:e.role,
+            description:e.description
+          }))??[]),
+          ...(input.productionAssetSet?.entries
+            .filter(entry => entry.status === "READY")
+            .map(entry => ({
+              assetId: entry.referenceAssetId,
+              suggestedRole: productionAssetRole(entry.kind),
+              description:
+                entry.label +
+                "；" +
+                entry.description +
+                (entry.identityLock.length
+                  ? "；身份锁定：" + entry.identityLock.join("；")
+                  : "")
+            })) ?? [])
+        ],
+        productionAssets: input.productionAssetSet?.entries
+          .filter(entry => entry.status === "READY")
+          .map(entry => ({
+            key: entry.key,
+            assetId: entry.referenceAssetId,
+            kind: entry.kind,
+            label: entry.label,
+            description: entry.description,
+            identityLock: entry.identityLock,
+            reuseScope: entry.reuseScope
+          })),
         logoAssetId: input.productTruth.logoAssetId,
         forbiddenChanges: input.productTruth.forbiddenChanges,
         usageRules: (input.productTruth.usageRules ?? [])
@@ -527,8 +760,33 @@ export class HermesProductDirectorGenerator implements ProductDirectorGenerator 
                     composition: "string",
                     subjectAction: "string",
                     productState: "string",
-                    dialogueOrNarration: { kind: "NONE" },
-                    ambientSound: { kind: "NONE" },
+                    dialogueOrNarration: {
+                      kind: "NARRATION|DIALOGUE|NONE",
+                      text: "required when kind is NARRATION or DIALOGUE",
+                      estimatedDurationMs: 1800,
+                      estimatorVersion: DIRECTOR_SPEECH_ESTIMATOR_VERSION
+                    },
+                    ambientSound: {
+                      kind: "AMBIENT|NONE",
+                      description: "required when kind is AMBIENT; combine natural ambience and interaction/SFX description here"
+                    },
+                    v8: input.v8DirectorDecision ? {
+                      sourceShotId: "exact sourceShotId from v8DirectorDecision",
+                      sourceBeatId: "exact sourceBeatId from v8DirectorDecision",
+                      sourceActionHash: "exact sha256 sourceActionHash from v8DirectorDecision",
+                      shotFunction: "ESTABLISH|SPEECH|REACTION|ACTION",
+                      spoken: {
+                        speaker: "only when the source Shot speaks",
+                        mode: "ONSCREEN|OFFSCREEN|OS",
+                        exactText: "exact per-shot speech fragment; never replace with the full line",
+                        tone: "exact script delivery tone",
+                        delivery: "exact script delivery parameters",
+                        sourceLineText: "copy original full utterance when present in decision",
+                        sourcePartIndex: "copy 1-based speech part index when present",
+                        sourcePartCount: "copy total speech part count when present"
+                      },
+                      audienceKnowledgeChange: "only when explicitly present on source Shot"
+                    } : undefined,
                     postProductionText: [
                       {
                         kind: "LABEL|LEGAL|CAPTION|CTA",
@@ -567,16 +825,60 @@ export class HermesProductDirectorGenerator implements ProductDirectorGenerator 
       }
     });
 
-    const proposal = normalizeClipDurationsForDreamina(
+    // V8 timings are immutable. Never silently resize source shots as V3's
+    // whole-second normalizer does; the conformance gate rejects any drift.
+    const proposal = input.v8DirectorDecision ? directorProposalSchema.parse(generation.data) : normalizeClipDurationsForDreamina(
       directorProposalSchema.parse(generation.data),
       input.projectTargetDurationMs,
-      input.generationTarget
+      input.generationTarget,
+      input.directorV3Plan?.clipContracts.map(
+        (contract) => contract.durationMs
+      )
     );
+    if (input.directorV3Plan) {
+      const planned = proposal.scenes.flatMap((scene) =>
+        scene.clips.map((clip) => ({
+          scene,
+          clip
+        }))
+      );
+      input.directorV3Plan.clipContracts.forEach(
+        (contract, index) => {
+          const actual = planned[index];
+          if (!actual) {
+            throw new DomainValidationError(
+              "Director V3 缺少 Clip Contract 对应的正式分镜"
+            );
+          }
+          if (actual.clip.durationMs !== contract.durationMs) {
+            throw new DomainValidationError(
+              "Director V3 正式分镜时长与 Clip Contract 不一致"
+            );
+          }
+          if (
+            hashValue(actual.clip.sourceBeatIds) !==
+            hashValue(contract.sourceBeatIds)
+          ) {
+            throw new DomainValidationError(
+              "Director V3 正式分镜使用了错误的 ScriptBeat 范围"
+            );
+          }
+          if (actual.scene.location !== contract.location) {
+            throw new DomainValidationError(
+              "Director V3 正式分镜场景与 Clip Contract 不一致"
+            );
+          }
+        }
+      );
+    }
     const allowedBeatIds = new Set(input.script.beats.map((beat) => beat.id));
     const allowedFactIds = new Set(facts.map((fact) => fact.id));
     const allowedAssetIds = new Set([
       ...input.productTruth.referenceImageIds,
       ...(input.creativeContext?.references?.entries.map(e=>e.assetId)??[]),
+      ...(input.productionAssetSet?.entries
+        .filter(entry => entry.status === "READY")
+        .map(entry => entry.referenceAssetId) ?? []),
       ...(input.productTruth.logoAssetId ? [input.productTruth.logoAssetId] : [])
     ]);
 
@@ -752,6 +1054,9 @@ export class HermesProductDirectorGenerator implements ProductDirectorGenerator 
         hash: input.script.contentHash
       },
       ...(referenceSetRef(input.creativeContext?.references)?{creativeReferenceSetRef:referenceSetRef(input.creativeContext?.references)}:{}),
+      ...(input.productionAssetSet
+        ? { productionAssetSetRef: productionAssetSetRef(input.productionAssetSet) }
+        : {}),
       ...(input.referenceVideoProfile?.status === "ACTIVE"
         ? {
             referenceVideoProfileRef: {

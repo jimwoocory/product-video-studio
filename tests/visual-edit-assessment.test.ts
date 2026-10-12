@@ -7,7 +7,8 @@ import { promisify } from "node:util";
 import { randomUUID } from "node:crypto";
 import { referenceFixture } from "./creative-reference-fixture.js";
 import { makeValidClip, H } from "./fixtures.js";
-import { VisualEditAssessmentService } from "../src/application/services/visual-edit-assessment.js";
+import { hashValue } from "../src/domain/hashing.js";
+import { VisualEditAssessmentService, applyClipVisibilityPolicy, VISUAL_EDIT_EVALUATOR_VERSION } from "../src/application/services/visual-edit-assessment.js";
 import type { StructuredAiRequest } from "../src/application/ports/structured-ai-runtime.js";
 import { PrismaReviewRepository } from "../src/adapters/db/prisma-review-repository.js";
 
@@ -34,6 +35,10 @@ async function generatedVideo(f: Awaited<ReturnType<typeof referenceFixture>>, n
 function passProposal(index = 1) {
   return {
     productIdentity: "PASS",
+    productPresence: "PRESENT",
+    visibilityCompliance: "PASS",
+    sceneConfidence: "HIGH",
+    storyActionAlignment: "PASS",
     productStability: "PASS",
     usageCompliance: "PASS",
     visualQuality: "PASS",
@@ -97,6 +102,111 @@ test("visual edit assessment binds canonical product, uses fixed-duration candid
   } finally {
     await f.cleanup();
   }
+});
+
+test("visibility-aware visual gate accepts a product-free story, still rejects an absent required product", { timeout: 120_000 }, async () => {
+  const f = await referenceFixture();
+  try {
+    const video = await generatedVideo(f, "story-only-clip-v2", 12);
+    const calls: StructuredAiRequest[] = [];
+    const service = new VisualEditAssessmentService({
+      artifacts: f.artifacts,
+      productInput: f.productInput,
+      projectsRoot: f.projectsRoot,
+      runtime: {
+        id:"VISIBILITY_MOCK", version:"1",
+        async generateJson(request: StructuredAiRequest) {
+          calls.push(request);
+          return {
+            ...passProposal(1),
+            productPresence:"ABSENT",
+            productIdentity:"UNCERTAIN",
+            productStability:"UNCERTAIN",
+            confidence:"MEDIUM",
+            sceneConfidence:"HIGH",
+            reasons:["故事画面构图清晰，但没有商品，旧规则无法判断产品"]
+          };
+        }
+      }
+    });
+    const pureStory = {...makeValidClip(),id:"clip-story-no-product",productVisibility:"NONE" as const};
+    const story = await service.assess({
+      projectId:f.projectId,truth:f.truth,clip:pureStory,attemptId:"v2-story",
+      outputArtifactId:video.id
+    });
+    assert.equal(story.assessment.evaluatorVersion,VISUAL_EDIT_EVALUATOR_VERSION);
+    assert.equal(story.assessment.productVisibility,"NONE");
+    assert.equal(story.assessment.productPresence,"ABSENT");
+    assert.equal(story.assessment.checks.productIdentity,"NOT_APPLICABLE");
+    assert.equal(story.assessment.checks.productStability,"NOT_APPLICABLE");
+    assert.equal(story.assessment.status,"PASS");
+    assert.equal(story.assessment.confidence,"HIGH");
+    assert.equal(story.assessment.autoAcceptEligible,true);
+    assert.equal(story.assessment.audioTrackPresent,false);
+    const cached=await service.assess({
+      projectId:f.projectId,truth:f.truth,clip:pureStory,attemptId:"v2-story",
+      outputArtifactId:video.id
+    });
+    assert.equal(cached.assessment.contentHash,story.assessment.contentHash);
+    assert.equal(calls.length,1);
+    const current=await service.readCurrentSummaries({
+      projectId:f.projectId,truthHash:f.truth.contentHash,
+      clips:[{id:pureStory.id,contentHash:pureStory.contentHash}],
+      attempts:[{id:"v2-story",clipId:pureStory.id,outputArtifactId:video.id}]
+    });
+    assert.equal(current[0]?.status,"PASS");
+    assert.equal(current[0]?.productIdentity,"NOT_APPLICABLE");
+    assert.equal(current[0]?.storyActionAlignment,"PASS");
+    const oldBase={
+      ...story.assessment,id:"visual-old-fixture",clipId:"clip-old-fixture",
+      clipHash:H.a,attemptId:"attempt-old-fixture",
+      evaluatorVersion:"p1f06-visual-edit-v1",createdAt:new Date().toISOString()
+    };
+    const {contentHash:_oldHash,...oldWithoutHash}=oldBase;
+    await f.store.writeImmutable({
+      id:"visual-old-snapshot",projectId:f.projectId,
+      kind:"STRUCTURED_SNAPSHOT",immutable:true,
+      relativePath:"post-production/visual-assessments/old-test.json",
+      mimeType:"application/json",
+      bytes:Buffer.from(JSON.stringify({
+        ...oldWithoutHash,contentHash:hashValue(oldWithoutHash)
+      }))
+    });
+    const stale=await service.readCurrentSummaries({
+      projectId:f.projectId,truthHash:f.truth.contentHash,
+      clips:[{id:"clip-old-fixture",contentHash:H.a}],
+      attempts:[{id:"attempt-old-fixture",clipId:"clip-old-fixture",outputArtifactId:video.id}]
+    });
+    assert.equal(stale[0]?.status,"OUTDATED");
+    assert.equal(stale[0]?.autoAcceptEligible,false);
+    const required={...makeValidClip(),id:"clip-required-clear",productVisibility:"CLEAR" as const};
+    const missing=await service.assess({
+      projectId:f.projectId,truth:f.truth,clip:required,attemptId:"v2-required",
+      outputArtifactId:video.id
+    });
+    assert.equal(missing.assessment.checks.productIdentity,"BLOCKED");
+    assert.equal(missing.assessment.status,"BLOCKED");
+    assert.equal(missing.assessment.autoAcceptEligible,false);
+    assert.equal(calls.length,2);
+  } finally {await f.cleanup();}
+});
+
+test("visual policy rejects unwanted products and HERO clips with insufficient product framing",()=>{
+  const proposal=passProposal(0);
+  const unexpected=applyClipVisibilityPolicy({productVisibility:"NONE"},{...proposal,productPresence:"PRESENT",reasons:[...proposal.reasons]});
+  assert.equal(unexpected.productIdentity,"BLOCKED");
+  const uncertainty=applyClipVisibilityPolicy({productVisibility:"NONE"},{
+    ...proposal,productPresence:"UNCERTAIN",confidence:"HIGH",reasons:[...proposal.reasons]
+  });
+  assert.equal(uncertainty.productIdentity,"UNCERTAIN");
+  const partial=applyClipVisibilityPolicy({productVisibility:"HERO"},{
+    ...proposal,visibilityCompliance:"BLOCKED",confidence:"HIGH",reasons:[...proposal.reasons]
+  });
+  assert.equal(partial.productIdentity,"BLOCKED");
+  const lowScene=applyClipVisibilityPolicy({productVisibility:"NONE"},{
+    ...proposal,productPresence:"ABSENT",confidence:"HIGH",sceneConfidence:"MEDIUM",reasons:[...proposal.reasons]
+  });
+  assert.equal(lowScene.confidence,"MEDIUM");
 });
 
 test("visual edit assessment fails closed on uncertain/blocked evidence and invalid window index", { timeout: 120_000 }, async () => {

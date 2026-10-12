@@ -20,6 +20,7 @@ import { PrismaResearchRepository } from "../adapters/db/prisma-research-reposit
 import { PrismaTimelineRepository } from "../adapters/db/prisma-timeline-repository.js";
 import { PrismaPublishRepository } from "../adapters/db/prisma-publish-repository.js";
 import { PrismaDouyinOpsRepository } from "../adapters/db/prisma-douyin-ops-repository.js";
+import { PrismaProjectDeletionService } from "../adapters/db/prisma-project-deletion-service.js";
 import { prisma } from "../adapters/db/prisma-client.js";
 import { LocalArtifactStore } from "../adapters/store/local-artifact-store.js";
 import { LocalProductInputStore } from "../adapters/store/local-product-input-store.js";
@@ -43,8 +44,19 @@ import { HttpWebResearchProvider } from "../adapters/research/http-web-research-
 import { ExternalBrowserResearchProvider } from "../adapters/research/external-browser-research-provider.js";
 import { HybridBrowserResearchProvider } from "../adapters/research/public-search-research-provider.js";
 import { DefaultResearchMediaAnalyzer } from "../adapters/research/research-media-analyzer.js";
-import { DouyinCliMarketVideoMediaFetcher, DouyinCliMarketVideoSearchProvider } from "../adapters/research/douyin-cli-market-video-provider.js";
-import { ProductFlowService } from "../application/services/product-flow.js";
+import { YhtDouyinOpsMarketVideoMediaFetcher, YhtDouyinOpsMarketVideoSearchProvider } from "../adapters/research/yht-douyin-ops-market-video-provider.js";
+import {
+  DouyinBrowserMarketVideoSearchProvider,
+  DouyinBrowserMarketVideoMediaFetcher,
+  FallbackMarketVideoMediaFetcher,
+  FallbackMarketVideoSearchProvider,
+  SystemChromeDouyinSearchRuntime
+} from "../adapters/research/douyin-browser-market-video-provider.js";
+import {
+  WindowsDouyinResearchAuthLauncher,
+  type DouyinResearchAuthLauncher
+} from "../adapters/research/douyin-research-auth-launcher.js";
+import { ProductFlowService, type ProjectWorkspace } from "../application/services/product-flow.js";
 import { loadGenerationConfig } from "../application/config/generation-config.js";
 import { AiGenerationService } from "../application/services/ai-generation.js";
 import { AiSettingsService, p1AiSteps } from "../application/services/ai-settings-service.js";
@@ -58,16 +70,31 @@ import {handleCreativeReferenceHttp} from "./creative-reference-http.js";
 import { BatchGenerationService } from "../application/services/batch-generation-service.js";
 import { SmartGenerationService } from "../application/services/smart-generation-service.js";
 import { ApplicationSmartProduction } from "../application/services/smart-production-adapter.js";
+import { createV8PaidRequestGuard } from "../application/services/v8-paid-request-guard.js";
 import { PrismaSmartRunRepository } from "../adapters/db/prisma-smart-run-repository.js";
-import { startSmartGenerationWorker } from "../application/services/smart-generation-worker.js";
+import { resolveSmartWorkerPolicy, startSmartGenerationWorker } from "../application/services/smart-generation-worker.js";
 import { handleSmartGenerationHttp } from "./smart-generation-http.js";
 import { handleAutoEditHttp } from "./auto-edit-http.js";
 import { handleDouyinOpsHttp } from "./douyin-ops-http.js";
+import { publicApiError } from "./public-api-error.js";
 import { AutoEditService } from "../application/services/auto-edit-service.js";
 import { VisualEditAssessmentService } from "../application/services/visual-edit-assessment.js";
 import { WindowsSpeechSynthesis } from "../adapters/media/windows-speech-synthesis.js";
-import { ReferenceVideoAnalysisService } from "../application/services/reference-video-analysis.js";
+import { inspectMedia } from "../adapters/media/inspect-media.js";
+import { GeneratedAudioQcService } from "../application/services/generated-audio-qc.js";
+import { DomesticJimengImageProvider } from "../adapters/image/domestic-jimeng-image-provider.js";
+import { ProductionPlannerService } from "../application/services/production-planner.js";
+import { ProductionAssetService } from "../application/services/production-asset-service.js";
+import { assertProductionAssetBinding, findProductionRunForPlan, findProductionSetForRequest } from "../application/services/production-asset-context.js";
+import { ScriptFeasibilityService } from "../application/services/script-feasibility-service.js";
+import { V8DetailedScreenplayService } from "../application/services/v8-detailed-screenplay-service.js";
+import { DirectorV3PlannerService } from "../application/services/director-v3-planner-service.js";
+import {
+  ReferenceVideoAnalysisService,
+  referenceVideoBrowserPreviewRelativePath
+} from "../application/services/reference-video-analysis.js";
 import { ResearchService } from "../application/services/research-service.js";
+import type { MarketVideoSearchProvider } from "../application/ports/market-video-provider.js";
 import { TaskCenterService } from "../application/services/task-center-service.js";
 import { SystemHealthService } from "../application/services/system-health-service.js";
 import { ProductDirectorService } from "../application/services/product-director.js";
@@ -78,6 +105,7 @@ import { ReviewService } from "../application/services/review-service.js";
 import { ProjectSnapshotService } from "../application/services/project-snapshot.js";
 import { RecoveryService } from "../application/services/recovery-service.js";
 import { resolveWorkflowNavigation } from "../application/services/workflow-navigation.js";
+import { resolveWorkflowReadModel } from "../application/services/workflow-read-model.js";
 import { inspectFinalAccess, inspectTimelineAccess } from "../application/services/workflow-step-access.js";
 import { FinalAssemblyService } from "../application/services/final-assembly-service.js";
 import { FinalQcService } from "../application/services/final-qc-service.js";
@@ -115,7 +143,7 @@ import {
 import type { WorkflowRepository } from "../application/ports/workflow-repository.js";
 import type { ArtifactRepository } from "../application/ports/artifact-repository.js";
 import type { GenerationRepository } from "../application/ports/generation-repository.js";
-import type { ProductInputStore } from "../application/ports/product-input-store.js";
+import type { ProductInputStore, ProductInputSnapshot } from "../application/ports/product-input-store.js";
 import type { ReviewRepository } from "../application/ports/review-repository.js";
 import type { ProviderAuditRepository } from "../application/ports/provider-audit-repository.js";
 import type { FinalOutputRepository } from "../application/ports/final-output-repository.js";
@@ -162,6 +190,7 @@ export type WebDependencies = {
   dreaminaCapability: DreaminaAgentCapabilityService;
   agentMode: AgentModeService;
   smartGeneration?: SmartGenerationService;
+  productionAssets?: ProductionAssetService;
   batchGeneration?: BatchGenerationService;
   creativeReferences?: CreativeReferenceService;
   collectCreativeReferences?: (projectId:string)=>Promise<{mediaCount:number;failures:string[]}>;
@@ -169,6 +198,8 @@ export type WebDependencies = {
   visualEditAssessment?: VisualEditAssessmentService;
   referenceVideo: ReferenceVideoAnalysisService;
   research: ResearchService;
+  douyinResearchAuth?: DouyinResearchAuthLauncher;
+  douyinMarketVideoSearch?: MarketVideoSearchProvider;
   taskCenter: TaskCenterService;
   health: SystemHealthService;
   productInput: ProductInputStore;
@@ -188,6 +219,7 @@ export type WebDependencies = {
   douyinPublish: DouyinPublishService;
   snapshots: ProjectSnapshotService;
   recovery: RecoveryService;
+  projectDeletion: PrismaProjectDeletionService;
   projectsRoot: string;
   provider: DomesticJimengCliProvider;
 };
@@ -213,11 +245,25 @@ export function createDefaultDependencies(): WebDependencies {
     {assertExpected:(projectId,expected)=>creativeReferences.assertExpected(projectId,expected)}
   );
   const projectsRoot = path.resolve(process.env.PROJECTS_ROOT ?? "projects");
+  const projectDeletion = new PrismaProjectDeletionService(prisma, projectsRoot);
   const productInput = new LocalProductInputStore(projectsRoot, artifacts);
   const resolveGenerationAssets: ResolveGenerationAssets = async (request) => {
     const snapshot = await productInput.latest(request.projectId);
     const referenceSet=request.agentTaskId?null:await creativeReferences.assertExpected(request.projectId,request.inputVersionRefs.find(r=>r.entityType==="CreativeReferenceSet"));
-    const availableAssets=[...(snapshot?.assets??[]),...CreativeReferenceService.assets(referenceSet)];
+    const generatedReferences = request.assetManifest.filter(item => item.assetId.startsWith("production-asset:"));
+    let boundProductionAssets: AssetRef[] = [];
+    if (generatedReferences.length) {
+      const setRef = request.inputVersionRefs.find(ref => ref.entityType === "ProductionAssetSet");
+      const set = findProductionSetForRequest(
+        request.projectId, setRef, await smartGeneration.list(request.projectId)
+      );
+      assertProductionAssetBinding(request.projectId, set ?? undefined, generatedReferences.map(item => item.assetId));
+      if (!set) throw new DomainValidationError("本轮制作资产版本不存在，无法继续该镜头；原视频未改变");
+      boundProductionAssets = await productionAssets.toAssetRefs(
+        set, new Set(generatedReferences.map(item => item.assetId))
+      );
+    }
+    const availableAssets=[...(snapshot?.assets??[]),...CreativeReferenceService.assets(referenceSet),...boundProductionAssets];
     const projectRoot = path.resolve(projectsRoot, request.projectId);
     const resolved = [];
     for (const manifest of [...request.assetManifest].sort(
@@ -291,6 +337,7 @@ export function createDefaultDependencies(): WebDependencies {
     projectsRoot
   });
   creativeReferences=new CreativeReferenceService({repo:new PrismaCreativeReferenceRepository(prisma),artifacts,productInput,productFlow,runtime:aiRuntime,projectsRoot});
+  const generatedAudioQc = new GeneratedAudioQcService(aiRuntime);
   const researchMediaAnalyzer=new DefaultResearchMediaAnalyzer(aiRuntime,{allowPrivateNetwork:process.env.PVS_RESEARCH_ALLOW_PRIVATE==="1"},creativeReferences);
   const referenceVideo = new ReferenceVideoAnalysisService(
     referenceVideos,
@@ -298,6 +345,27 @@ export function createDefaultDependencies(): WebDependencies {
     aiRuntime,
     projectsRoot
   );
+  const douyinResearchOpsRuntime =
+    new YhtDouyinOpsRuntime();
+  const douyinBrowserResearchRuntime =
+    new SystemChromeDouyinSearchRuntime();
+  const douyinMarketVideoSearch = new FallbackMarketVideoSearchProvider(
+    new YhtDouyinOpsMarketVideoSearchProvider(
+      douyinResearchOpsRuntime
+    ),
+    new DouyinBrowserMarketVideoSearchProvider(
+      douyinBrowserResearchRuntime
+    )
+  );
+  const douyinMarketVideoMediaFetcher =
+    new FallbackMarketVideoMediaFetcher(
+      new YhtDouyinOpsMarketVideoMediaFetcher(
+        douyinResearchOpsRuntime
+      ),
+      new DouyinBrowserMarketVideoMediaFetcher(
+        douyinBrowserResearchRuntime
+      )
+    );
   const research = new ResearchService(
     researchRepo,
     new HttpWebResearchProvider({
@@ -311,13 +379,14 @@ export function createDefaultDependencies(): WebDependencies {
     productFlow,
     researchMediaAnalyzer,
     {
-      searchProvider: new DouyinCliMarketVideoSearchProvider(),
-      mediaFetcher: new DouyinCliMarketVideoMediaFetcher(),
+      searchProvider: douyinMarketVideoSearch,
+      mediaFetcher: douyinMarketVideoMediaFetcher,
       artifacts,
       referenceVideo,
       projectsRoot
     }
   );
+  const douyinResearchAuth = new WindowsDouyinResearchAuthLauncher();
   const generationConfig = loadGenerationConfig();
   const dreaminaCapability = new DreaminaAgentCapabilityService(provider);
   const preflight = new GenerationPreflightService(
@@ -331,7 +400,9 @@ export function createDefaultDependencies(): WebDependencies {
     dreaminaCapability,
     creativeReferences
   );
-  const approval = new ApprovalService(generation, workflow);
+  const smartRunRepository = new PrismaSmartRunRepository(prisma);
+  const v8PaidGuard = createV8PaidRequestGuard(smartRunRepository);
+  const approval = new ApprovalService(generation, workflow, v8PaidGuard);
   const execution = new GenerationExecutionService(
     generation,
     workflow,
@@ -340,7 +411,11 @@ export function createDefaultDependencies(): WebDependencies {
     provider,
     projectsRoot,
     review,
-    creativeReferences
+    creativeReferences,
+    inspectMedia,
+    (file, request, tempDir) =>
+      generatedAudioQc.sanitize(file, request, tempDir),
+    v8PaidGuard
   );
   const agentMode = new AgentModeService(
     agentTasks,
@@ -521,13 +596,24 @@ export function createDefaultDependencies(): WebDependencies {
       )
   );
   const productDirector = new ProductDirectorService(new HermesProductDirectorGenerator(aiRuntime), aiRuntime,creativeReferences);
+  const scriptFeasibility = new ScriptFeasibilityService(aiRuntime);
+  const v8Screenplay = new V8DetailedScreenplayService(aiRuntime);
+  const directorV3Planner = new DirectorV3PlannerService();
+  const productionPlanner = new ProductionPlannerService(aiRuntime);
+  const productionAssets = new ProductionAssetService(
+    artifacts,
+    new DomesticJimengImageProvider(),
+    aiRuntime,
+    projectsRoot
+  );
   const batchGeneration = new BatchGenerationService(productFlow, generation, workflow, review, execution);
   const autoEdit = new AutoEditService({ productFlow, workflow, review, artifacts, timelines: timelineRepo, projectsRoot, speech: new WindowsSpeechSynthesis(), visualReview: visualEditAssessment });
-  const smartGeneration = new SmartGenerationService(new PrismaSmartRunRepository(prisma), new ApplicationSmartProduction({
+  const smartGeneration = new SmartGenerationService(smartRunRepository, new ApplicationSmartProduction({
     productFlow, productInput, artifacts, aiGeneration, productDirector, referenceVideo, research,
     generation, workflow, review, dreaminaCapability, preflight, approval, execution, batchGeneration,
     finalOutput, renderEngine, timeline, projectsRoot, creativeReferences,
     reviewService, visualReview: visualEditAssessment,
+    productionPlanner, productionAssets, scriptFeasibility, directorV3Planner, v8Screenplay,
     autoEdit: async run => {
       const result = await autoEdit.create({ projectId: run.projectId, attemptIds: run.attemptIds, expectedPlanHash: run.productionPlan!.contentHash,
         settings: run.postProduction ?? run.options.postProduction ?? { bgmArtifactId: run.options.bgmArtifactId, allowSilentOutput: run.options.allowSilentOutput } });
@@ -564,12 +650,15 @@ export function createDefaultDependencies(): WebDependencies {
     agentMode,
     referenceVideo,
     research,
+    douyinResearchAuth,
+    douyinMarketVideoSearch,
     taskCenter,
     health,
     productInput,
     aiGeneration,
     productDirector,
     smartGeneration,
+    productionAssets,
     batchGeneration,
     autoEdit,
     preflight,
@@ -586,6 +675,7 @@ export function createDefaultDependencies(): WebDependencies {
     douyinPublish,
     snapshots,
     recovery,
+    projectDeletion,
     projectsRoot,
     provider
   };
@@ -864,11 +954,41 @@ export async function persistPreflightProviderAudit(
 export function createAppServer(
   deps: WebDependencies = createDefaultDependencies()
 ): http.Server {
+  const activeResearchProjects = new Set<string>();
+  const smartWorkerPolicy = resolveSmartWorkerPolicy();
+  // UX-R1: all user-facing next actions are projected from existing project and
+  // SmartRun facts; requesting the projection never creates or resumes a task.
+  async function readWorkflow(
+    workspace: ProjectWorkspace,
+    input?: ProductInputSnapshot | null,
+    selectedRunId?: string | null
+  ) {
+    if (!deps.smartGeneration) return undefined;
+    const [runs, timeline, assembly] = await Promise.all([
+      deps.smartGeneration.list(workspace.project.id),
+      deps.timeline.latestTimeline(workspace.project.id),
+      deps.finalOutput.latestAssembly(workspace.project.id)
+    ]);
+    return resolveWorkflowReadModel({
+      project: workspace.project,
+      runs,
+      productInputPresent: Boolean(input),
+      productImagePresent: Boolean(input?.assets.some(asset => asset.type === "image")),
+      productTruthConfirmed: workspace.productTruth?.status === "CONFIRMED",
+      productTruthDraftPresent: Boolean(workspace.productTruth),
+      selectedRunId,
+      timelineStatus: timeline?.status,
+      timelinePlanHash: timeline?.productionPlanHash,
+      finalAssemblyStatus: assembly?.status,
+      finalAssemblyPlanHash: assembly?.productionPlanHash,
+      projectPlanHash: workspace.project.currentProductionPlanRef?.hash
+    });
+  }
   const server = http.createServer(async (req, res) => {
     try {
       const url = new URL(req.url ?? "/", "http://localhost");
       if (await handleCreativeReferenceHttp(req,res,url,deps)) return;
-      if (await handleSmartGenerationHttp(req, res, url, deps)) return;
+      if (await handleSmartGenerationHttp(req, res, url, { ...deps, smartWorkerPolicy })) return;
       if (await handleAutoEditHttp(req, res, url, deps)) return;
       if (await handleDouyinOpsHttp(req, res, url, deps)) return;
 
@@ -1748,6 +1868,13 @@ export function createAppServer(
       );
       if (req.method === "POST" && researchRunMatch) {
         const projectId = researchRunMatch[1]!;
+        if (activeResearchProjects.has(projectId)) {
+          return json(res, 409, {
+            error: "RESEARCH_ALREADY_RUNNING",
+            message:
+              "当前项目已有研究任务正在运行，请等待当前研究完成后再重试。"
+          });
+        }
         const body = (await readJson(req)) as {
           mode?: unknown;
           goal?: unknown;
@@ -1830,24 +1957,120 @@ export function createAppServer(
           marketVideoRaw.count <= 30
             ? marketVideoRaw.count
             : 12;
-        const result = await deps.research.startRun({
-          projectId,
-          mode: body.mode,
-          goal:
-            typeof body.goal === "string"
-              ? body.goal
-              : "",
-          sourceUrls,
-          queries,
-          marketVideo: {
-            enabled: marketVideoRaw.enabled !== false,
-            sort: marketSort,
-            timeRange: marketTimeRange,
-            count: marketCount
-          }
+        activeResearchProjects.add(projectId);
+        try {
+          const savedInput = await deps.productInput.latest(projectId);
+          const result = await deps.research.startRun({
+            projectId,
+            ...(savedInput ? { productInput: {
+              productName: savedInput.productName,
+              ...(savedInput.brand ? { brand: savedInput.brand } : {}),
+              ...(savedInput.category ? { category: savedInput.category } : {})
+            } } : {}),
+            mode: body.mode,
+            goal:
+              typeof body.goal === "string"
+                ? body.goal
+                : "",
+            sourceUrls,
+            queries,
+            marketVideo: {
+              enabled: marketVideoRaw.enabled !== false,
+              sort: marketSort,
+              timeRange: marketTimeRange,
+              count: marketCount
+            }
+          });
+          await refreshProjectSnapshot(deps, projectId);
+          return json(res, 201, result);
+        } finally {
+          activeResearchProjects.delete(projectId);
+        }
+      }
+
+      const researchDouyinAuthMatch = url.pathname.match(
+        /^\/api\/projects\/([^/]+)\/research\/douyin-auth\/launch$/
+      );
+      if (req.method === "POST" && researchDouyinAuthMatch) {
+        const projectId = researchDouyinAuthMatch[1]!;
+        if (!(await deps.productFlow.getProject(projectId))) {
+          return json(res, 404, { error: "PROJECT_NOT_FOUND" });
+        }
+        if (!deps.douyinResearchAuth) {
+          return json(res, 503, {
+            error: "DOUYIN_AUTH_LAUNCHER_UNAVAILABLE",
+            message: "当前环境不能直接拉起抖音登录/验证窗口。"
+          });
+        }
+        const body = (await readJson(req)) as { query?: unknown };
+        const query =
+          typeof body.query === "string" && body.query.trim()
+            ? body.query.trim()
+            : "护颈枕";
+        const launched = await deps.douyinResearchAuth.launch(query);
+        return json(res, 202, {
+          started: launched.started,
+          alreadyRunning: launched.alreadyRunning,
+          message: launched.alreadyRunning
+            ? "PVS 抖音研究独立浏览器已经打开，请在该窗口中完成登录/验证。"
+            : "已打开 PVS 抖音研究独立浏览器。它与日常 Edge / Chrome Profile 隔离，不会关闭或重启你正在使用的浏览器。"
         });
-        await refreshProjectSnapshot(deps, projectId);
-        return json(res, 201, result);
+      }
+
+      const researchDouyinAuthSyncMatch = url.pathname.match(
+        /^\/api\/projects\/([^/]+)\/research\/douyin-auth\/sync$/
+      );
+      if (req.method === "POST" && researchDouyinAuthSyncMatch) {
+        const projectId = researchDouyinAuthSyncMatch[1]!;
+        if (!(await deps.productFlow.getProject(projectId))) {
+          return json(res, 404, { error: "PROJECT_NOT_FOUND" });
+        }
+        if (!deps.douyinResearchAuth) {
+          return json(res, 503, {
+            error: "DOUYIN_AUTH_LAUNCHER_UNAVAILABLE",
+            message: "当前环境不能同步抖音搜索验证会话。"
+          });
+        }
+        if (!deps.douyinMarketVideoSearch) {
+          return json(res, 503, {
+            error: "DOUYIN_SEARCH_PROVIDER_UNAVAILABLE",
+            message: "当前环境不能验证抖音搜索风控是否已经解除。"
+          });
+        }
+        const body = (await readJson(req)) as { query?: unknown };
+        const query =
+          typeof body.query === "string" && body.query.trim()
+            ? body.query.trim()
+            : "护颈枕";
+        const synced = await deps.douyinResearchAuth.syncCookies();
+        const probe = await deps.douyinMarketVideoSearch.search({
+          projectId,
+          queries: [query],
+          sort: "MOST_LIKED",
+          timeRange: "ANY",
+          count: 1
+        });
+        if (probe.status === "BLOCKED") {
+          return json(res, 409, {
+            error:
+              probe.code === "RISK_CONTROL"
+                ? "DOUYIN_VERIFICATION_STILL_BLOCKED"
+                : "DOUYIN_SEARCH_STILL_BLOCKED",
+            code: probe.code,
+            message:
+              probe.code === "RISK_CONTROL"
+                ? "验证尚未解除：抖音搜索仍然触发平台风控。请继续在打开的抖音搜索页完成人工验证，确认搜索结果可以正常显示后再重试。"
+                : probe.message,
+            requiredUserAction: probe.requiredUserAction
+          });
+        }
+        return json(res, 200, {
+          synced: true,
+          cookieCount: synced.cookieCount,
+          verified: true,
+          message:
+            "抖音搜索验证已解除，已同步当前搜索会话，准备重新研究。"
+        });
       }
 
       const marketVideoAnalyzeMatch = url.pathname.match(
@@ -1931,7 +2154,15 @@ export function createAppServer(
           images?: unknown;
           logo?: unknown;
           forbiddenChanges?: unknown;
+          deferTruth?: unknown;
         };
+        const deferTruth = body.deferTruth === true;
+        if (body.deferTruth !== undefined && typeof body.deferTruth !== "boolean") {
+          throw new DomainValidationError("产品事实审核顺序参数无效");
+        }
+        if (deferTruth && project.currentProductTruthRef) {
+          throw new DomainValidationError("当前项目已有产品事实版本。请先处理原事实和已启动任务，不能跳过版本审核。");
+        }
         const productName = requireString(body.productName, "productName");
         const featureDescription = requireString(
           body.featureDescription,
@@ -2093,6 +2324,17 @@ export function createAppServer(
           forbiddenChanges
         });
 
+        // New-project user workflow: preserve input first, allow optional research,
+        // then generate a truth DRAFT for explicit review. Never auto-confirm facts.
+        // Existing projects use the original versioned truth workflow unchanged.
+        if (deferTruth) {
+          return json(res, 201, {
+            project,
+            productInput: snapshot,
+            pendingTruth: true,
+            nextStep: "RESEARCH_OPTIONAL_THEN_TRUTH_REVIEW"
+          });
+        }
         const truthVersion = await deps.productFlow.nextVersion(
           projectId,
           "ProductTruth",
@@ -2170,22 +2412,8 @@ export function createAppServer(
                 >)
               : {}
           );
-          let project = await deps.productFlow.confirmProductTruth(confirmed);
-          const creativeVersion = await deps.productFlow.nextVersion(
-            projectId,
-            "CreativeBatch",
-            "creative-batch"
-          );
-          const referenceVideoProfile =
-            await deps.referenceVideo.latest(projectId);
-          const batch = await deps.aiGeneration.generateCreativeBatch(
-            confirmed,
-            creativeVersion,
-            workspace.project.targetDurationMs,
-            referenceVideoProfile
-          );
-          project = await deps.productFlow.activateCreativeBatch(batch);
-          return json(res, 200, { project, productTruth: confirmed, creativeBatch: batch });
+          const project = await deps.productFlow.confirmProductTruth(confirmed);
+          return json(res, 200, { project, productTruth: confirmed });
         }
         return json(res, 200, {
           project: await deps.productFlow.confirmProductTruth(body as ProductTruth)
@@ -2685,12 +2913,40 @@ export function createAppServer(
         const selectedClips = workspace.productionPlan.scenes
           .flatMap((scene) => scene.clips)
           .filter((clip) => !clipIds?.length || clipIds.includes(clip.id));
+        if (!selectedClips.length || (clipIds?.length && selectedClips.length !== new Set(clipIds).size)) {
+          throw new DomainValidationError("选择的镜头已经改变或不存在，请刷新页面重新选择");
+        }
+        const referencedAssetIds = selectedClips.flatMap(clip => clip.referenceAssets.map(ref => ref.assetId));
+        const smartRuns = await deps.smartGeneration?.list(projectId) ?? [];
+        const savedRun = findProductionRunForPlan(projectId, workspace.productionPlan, smartRuns);
+        const assetSet = savedRun?.productionAssetSet;
+        assertProductionAssetBinding(projectId, assetSet, referencedAssetIds);
+        if (referencedAssetIds.some(id => id.startsWith("production-asset:")) && !deps.productionAssets) {
+          throw new DomainValidationError("当前程序没有制作资产读取服务，无法安全重新检查该镜头");
+        }
+        const generatedAssets = assetSet?.status === "READY" && deps.productionAssets
+          ? await deps.productionAssets.toAssetRefs(assetSet, new Set(referencedAssetIds))
+          : [];
+        const referenceSet = await deps.creativeReferences?.assertExpected(
+          projectId, workspace.productionPlan.creativeReferenceSetRef
+        ) ?? null;
+        const confirmedReferences = [
+          ...CreativeReferenceService.assets(referenceSet),
+          ...generatedAssets
+        ];
+        const knownAssets = [...productInput.assets, ...confirmedReferences];
+        if (savedRun?.options.directorVersion === 3 && (
+          !savedRun.directorV3Plan ||
+          selectedClips.some(clip => !savedRun.seedancePromptDrafts?.some(draft => draft.clipId === clip.id))
+        )) {
+          throw new DomainValidationError("Director V3 镜头合同或最终提示词不完整，请返回原智能生成任务检查后重试");
+        }
         const requiredReferenceAssetIds = selectedClips
           .flatMap((clip) => clip.referenceAssets)
           .filter(
             (usage) =>
               usage.required ||
-              productInput.assets.some((asset) => asset.id === usage.assetId)
+              knownAssets.some((asset) => asset.id === usage.assetId)
           )
           .map((usage) => usage.assetId);
         const referenceImageValidation =
@@ -2698,7 +2954,7 @@ export function createAppServer(
             projectsRoot: deps.projectsRoot,
             projectId,
             snapshot: productInput,
-            confirmedReferenceAssets: CreativeReferenceService.assets(await deps.creativeReferences?.assertExpected(projectId,workspace.productionPlan.creativeReferenceSetRef)??null),
+            confirmedReferenceAssets: confirmedReferences,
             artifacts: deps.artifacts,
             requiredAssetIds: requiredReferenceAssetIds
           });
@@ -2712,10 +2968,19 @@ export function createAppServer(
           creativeBatch: workspace.creativeBatch,
           script: workspace.script,
           productionPlan: workspace.productionPlan,
-          assets: productInput.assets,
+          assets: [...productInput.assets, ...generatedAssets],
+          ...(assetSet?.status === "READY" ? { productionAssetSet: assetSet } : {}),
+          ...(savedRun?.options.directorVersion === 3 && savedRun.directorV3Plan
+            ? { directorV3Plan: savedRun.directorV3Plan,
+                promptV3Overrides: Object.fromEntries(
+                  (savedRun.seedancePromptDrafts ?? []).map(draft => [draft.clipId, draft.promptText])
+                ) }
+            : {}),
           ...(clipIds?.length ? { clipIds } : {}),
           inputBlockers: referenceImageValidation.blockers,
-          ...(generationSettings ? { generationSettings } : {}),
+          ...(generationSettings ?? savedRun?.options.generationSettings
+            ? { generationSettings: generationSettings ?? savedRun?.options.generationSettings }
+            : {}),
           acceptedDuplicateSubmissionRisk:
             body.acceptedDuplicateSubmissionRisk === true
         });
@@ -3573,7 +3838,7 @@ export function createAppServer(
       );
       if (req.method === "GET" && artifactContentMatch) {
         const artifact = await deps.artifacts.findById(
-          artifactContentMatch[1]!
+          decodeURIComponent(artifactContentMatch[1]!)
         );
         if (
           !artifact ||
@@ -3618,7 +3883,59 @@ export function createAppServer(
             blockerLists[index]?.length ?? 0
           ])
         );
-        return html(res, 200, renderProjectsPage(projects, blockerCounts));
+        const resumeStates = deps.smartGeneration
+          ? await Promise.all(projects.map(async project => {
+              const [runs, input, workspace, timeline, assembly] = await Promise.all([
+                deps.smartGeneration!.list(project.id),
+                deps.productInput.latest(project.id),
+                deps.productFlow.getWorkspace(project.id),
+                deps.timeline.latestTimeline(project.id),
+                deps.finalOutput.latestAssembly(project.id)
+              ]);
+              return [project.id, resolveWorkflowReadModel({
+                project, runs,
+                productInputPresent: Boolean(input),
+                productImagePresent: Boolean(input?.assets.some(asset => asset.type === "image")),
+                productTruthConfirmed: workspace?.productTruth?.status === "CONFIRMED",
+                productTruthDraftPresent: Boolean(workspace?.productTruth),
+                timelineStatus: timeline?.status,
+                timelinePlanHash: timeline?.productionPlanHash,
+                finalAssemblyStatus: assembly?.status,
+                finalAssemblyPlanHash: assembly?.productionPlanHash,
+                projectPlanHash: project.currentProductionPlanRef?.hash
+              })] as const;
+            }))
+          : [];
+        return html(res, 200, renderProjectsPage(projects, blockerCounts, new Map(resumeStates)));
+      }
+
+      const deleteProjectMatch = url.pathname.match(
+        /^\/api\/projects\/([^/]+)$/
+      );
+      if (req.method === "DELETE" && deleteProjectMatch) {
+        const projectId = decodeURIComponent(deleteProjectMatch[1]!);
+        const body = (await readJson(req)) as { confirmName?: unknown };
+        if (
+          typeof body.confirmName !== "string" ||
+          !body.confirmName.trim()
+        ) {
+          throw new DomainValidationError("请输入项目名称完成二次确认");
+        }
+        const result = await deps.projectDeletion.deleteProject({
+          projectId,
+          confirmName: body.confirmName
+        });
+        return json(res, 200, {
+          deleted: true,
+          projectId: result.projectId,
+          projectName: result.projectName,
+          ...(result.fileCleanupPending
+            ? {
+                warning:
+                  "项目记录已删除，但部分本地文件仍在删除暂存区等待系统清理。"
+              }
+            : {})
+        });
       }
 
       if (req.method === "GET" && url.pathname === "/agent") {
@@ -3640,8 +3957,21 @@ export function createAppServer(
         );
       }
 
-      const projectAgentPageMatch = url.pathname.match(
+      const legacyProjectAgentPageMatch = url.pathname.match(
         /^\/projects\/([^/]+)\/agent$/
+      );
+      if (req.method === "GET" && legacyProjectAgentPageMatch) {
+        const projectId = legacyProjectAgentPageMatch[1]!;
+        const referenceArtifactId = url.searchParams.get("referenceArtifactId")?.trim();
+        const location = referenceArtifactId
+          ? `/projects/${projectId}/smart?useReference=1`
+          : `/projects/${projectId}/smart`;
+        res.writeHead(302, { location });
+        return res.end();
+      }
+
+      const projectAgentPageMatch = url.pathname.match(
+        /^\/projects\/([^/]+)\/single-video$/
       );
       if (req.method === "GET" && projectAgentPageMatch) {
         const projectId = projectAgentPageMatch[1]!;
@@ -3714,11 +4044,13 @@ export function createAppServer(
             }
           })
         );
+        const workflow = await readWorkflow(workspace, await deps.productInput.latest(projectId), url.searchParams.get("fromSmartRun") ?? url.searchParams.get("activeRun"));
         return html(
           res,
           200,
           renderAgentProjectPage({
             workspace,
+            navigation: resolveWorkflowNavigation({project:workspace.project,currentPage:null,...(workflow ? {workflow} : {})}),
             tasks,
             artifacts: verifiedArtifacts,
             ...(prefillReference ? { prefillReference } : {})
@@ -3735,17 +4067,36 @@ export function createAppServer(
         if (!workspace) {
           return json(res, 404, { error: "PROJECT_NOT_FOUND" });
         }
-        const [profile, history] = await Promise.all([
+        const [profile, history, projectArtifacts] = await Promise.all([
           deps.referenceVideo.latest(projectId),
-          deps.referenceVideo.list(projectId)
+          deps.referenceVideo.list(projectId),
+          deps.artifacts.listByProject(projectId, "OTHER")
         ]);
+        const workflow = await readWorkflow(workspace, await deps.productInput.latest(projectId), url.searchParams.get("fromSmartRun") ?? url.searchParams.get("activeRun"));
+        const previewArtifactId = profile
+          ? projectArtifacts.find(
+              (artifact) =>
+                artifact.relativePath ===
+                  referenceVideoBrowserPreviewRelativePath(
+                    profile.videoArtifactHash
+                  ) &&
+                artifact.integrityStatus === "READY" &&
+                artifact.mimeType === "video/mp4"
+            )?.id
+          : undefined;
         return html(
           res,
           200,
           renderReferenceVideoPage({
             workspace,
+            navigation: resolveWorkflowNavigation({
+              project: workspace.project,
+              currentPage: null,
+              ...(workflow ? { workflow } : {})
+            }),
             profile,
-            history
+            history,
+            ...(previewArtifactId ? { previewArtifactId } : {})
           })
         );
       }
@@ -3759,20 +4110,24 @@ export function createAppServer(
         if (!workspace) {
           return json(res, 404, { error: "PROJECT_NOT_FOUND" });
         }
-        const [researchData, blockers] = await Promise.all([
+        const [researchData, blockers, projectInput] = await Promise.all([
           deps.research.pageData(projectId),
-          deps.workflow.listOpenBlockers(projectId)
+          deps.workflow.listOpenBlockers(projectId),
+          deps.productInput.latest(projectId)
         ]);
+        const workflow = await readWorkflow(workspace, projectInput, url.searchParams.get("fromSmartRun") ?? url.searchParams.get("activeRun"));
         return html(
           res,
           200,
           renderResearchPage({
             workspace,
+            productInput: projectInput,
             ...researchData,
             navigation: resolveWorkflowNavigation({
               project: workspace.project,
               currentPage: "research",
-              blockers
+              blockers,
+              ...(workflow ? { workflow } : {})
             })
           })
         );
@@ -3812,11 +4167,13 @@ export function createAppServer(
           deps.aiSettings.listStepOverrides(projectId),
           deps.aiSettings.listExecutions(projectId)
         ]);
+        const workflow = await readWorkflow(workspace, await deps.productInput.latest(projectId), url.searchParams.get("fromSmartRun") ?? url.searchParams.get("activeRun"));
         return html(
           res,
           200,
           renderProjectModelSettingsPage({
             workspace,
+            navigation: resolveWorkflowNavigation({project:workspace.project,currentPage:null,...(workflow ? {workflow} : {})}),
             providers,
             systemPreference,
             projectPreference,
@@ -3891,6 +4248,7 @@ export function createAppServer(
           deps.review.listDecisions(projectId),
           deps.providerAudit.listCommandAttempts(projectId)
         ]);
+        const workflow = await readWorkflow(workspace, productInput, url.searchParams.get("fromSmartRun") ?? url.searchParams.get("activeRun"));
         let blockers = persistedBlockers;
         let probe;
         let timeline;
@@ -3920,7 +4278,8 @@ export function createAppServer(
             const navigation = resolveWorkflowNavigation({
               project: workspace.project,
               currentPage: "timeline",
-              blockers
+              blockers,
+              ...(workflow ? { workflow } : {})
             });
             return html(
               res,
@@ -3942,7 +4301,8 @@ export function createAppServer(
             const navigation = resolveWorkflowNavigation({
               project: workspace.project,
               currentPage: "final",
-              blockers
+              blockers,
+              ...(workflow ? { workflow } : {})
             });
             return html(
               res,
@@ -3976,6 +4336,7 @@ export function createAppServer(
           project: workspace.project,
           currentPage: kind,
           blockers,
+          ...(workflow ? { workflow } : {}),
           ...(timeline ? { timeline } : {}),
           ...(finalAssembly ? { finalAssemblyStatus: finalAssembly.status } : {})
         });
@@ -4016,7 +4377,7 @@ export function createAppServer(
         req.method === "GET" && !requestUrl.pathname.startsWith("/api/");
       const projectPageMatch = requestUrl.pathname.match(/^\/projects\/([^/]+)/);
       const backHref = projectPageMatch
-        ? `/projects/${projectPageMatch[1]!}/product`
+        ? `/projects/${projectPageMatch[1]!}/smart`
         : "/projects";
       if (error instanceof DomainValidationError || error instanceof ZodError) {
         if (browserPageRequest) {
@@ -4050,19 +4411,23 @@ export function createAppServer(
           })
         );
       }
-      return json(res, 500, {
-        error: "INTERNAL_ERROR",
-        message: error instanceof Error ? error.message : String(error)
-      });
+      return json(res, 500, publicApiError(error));
     }
   });
   let stopSmartWorker: (() => void) | undefined;
   server.once("listening", () => {
-    if (deps.smartGeneration && process.env.NODE_ENV !== "test" && process.env.PVS_SMART_WORKER_DISABLED !== "1") {
+    if (deps.smartGeneration && process.env.NODE_ENV !== "test" && smartWorkerPolicy.mode !== "DISABLED") {
       let warned = false;
-      stopSmartWorker = startSmartGenerationWorker(deps.smartGeneration, { onError: () => {
-        if (!warned) { warned = true; console.error("一键成片执行器遇到阻塞，请核对新增迁移与任务检查点；不会自动重提失败生成。"); }
-      } });
+      stopSmartWorker = startSmartGenerationWorker(deps.smartGeneration, {
+        policy: smartWorkerPolicy,
+        ...(smartWorkerPolicy.mode === "SCOPED" ? { scope: smartWorkerPolicy.scope } : {}),
+        onError: (error) => {
+          if (!warned) {
+            warned = true;
+            console.error("一键成片执行器遇到阻塞；不会自动重提失败生成。", error);
+          }
+        }
+      });
     }
   });
   server.once("close", () => stopSmartWorker?.());

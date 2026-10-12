@@ -301,7 +301,24 @@ export const scriptBeatSchema = z.object({
   purpose: z.enum(["HOOK", "PAIN", "PRODUCT", "FEATURE", "PROOF", "RESULT", "CTA", "OTHER"]),
   text: nonEmptyStringSchema,
   estimatedDurationMs: z.number().int().positive(),
-  requiredFactIds: z.array(entityIdSchema)
+  requiredFactIds: z.array(entityIdSchema),
+  videoIntent: z.object({
+    location: nonEmptyStringSchema,
+    storyAction: nonEmptyStringSchema,
+    productRole: nonEmptyStringSchema,
+    stateIn: nonEmptyStringSchema,
+    stateOut: nonEmptyStringSchema,
+    productStateIn: z.string().trim().min(1).optional(),
+    productStateOut: z.string().trim().min(1).optional(),
+    dialogue: z.string().trim().min(1).optional(),
+    os: z.string().trim().min(1).optional(),
+    audioIntent: z.object({
+      ambience: z.array(nonEmptyStringSchema).default([]),
+      sfx: z.array(nonEmptyStringSchema).default([]),
+      bgm: z.literal(false)
+    }).strict(),
+    postProductionText: z.array(nonEmptyStringSchema).default([])
+  }).strict().optional()
 });
 
 export const scriptDraftSchema = z.object({
@@ -313,6 +330,7 @@ export const scriptDraftSchema = z.object({
   creativeBatchRef: versionRefSchema,
   referenceVideoProfileRef: versionRefSchema.optional(),
   creativeReferenceSetRef: versionRefSchema.optional(),
+  productionAssetSetRef: versionRefSchema.optional(),
   selectedCreativeId: entityIdSchema,
   targetDurationMs: z.number().int().min(10000).max(120000),
   aiExecution: aiExecutionRefSchema.optional(),
@@ -402,6 +420,26 @@ export const segmentSchema = z.object({
   dialogueOrNarration: dialogueOrNarrationSchema,
   ambientSound: ambientSoundSchema,
   postProductionText: z.array(postProductionTextCueSchema).max(12).default([]),
+  // Opt-in metadata for V8 scenes; older production plans remain unchanged.
+  v8: z.object({
+    sourceShotId: nonEmptyStringSchema,
+    sourceBeatId: entityIdSchema,
+    sourceActionHash: sha256Schema,
+    shotFunction: z.enum(["ESTABLISH", "SPEECH", "REACTION", "ACTION"]),
+    spoken: z.object({
+      speaker: nonEmptyStringSchema,
+      mode: z.enum(["ONSCREEN", "OFFSCREEN", "OS"]),
+      // Retain spaces inside a literal spoken fragment (important for
+      // punctuation-boundary splits); older V8 plans have no part metadata.
+      exactText: z.string().refine(s => s.trim().length > 0),
+      tone: nonEmptyStringSchema,
+      delivery: nonEmptyStringSchema,
+      sourceLineText: z.string().refine(s => s.trim().length > 0).optional(),
+      sourcePartIndex: z.number().int().positive().optional(),
+      sourcePartCount: z.number().int().positive().optional()
+    }).strict().optional(),
+    audienceKnowledgeChange: nonEmptyStringSchema.optional()
+  }).strict().optional(),
   lighting: nonEmptyStringSchema,
   continuityIn: continuityStateSchema,
   continuityOut: continuityStateSchema,
@@ -549,7 +587,10 @@ export const productionPlanSchema = z.object({
   scriptRef: versionRefSchema,
   referenceVideoProfileRef: versionRefSchema.optional(),
   creativeReferenceSetRef: versionRefSchema.optional(),
+  productionAssetSetRef: versionRefSchema.optional(),
   generationTarget: directorGenerationTargetSchema.optional(),
+  v8Source: z.object({ screenplayHash: sha256Schema, directorDecisionHash: sha256Schema,
+    directorRecordHash: sha256Schema }).strict().optional(),
   selectedCreativeId: entityIdSchema,
   visualDirection: nonEmptyStringSchema,
   soundDirection: nonEmptyStringSchema,
@@ -592,6 +633,33 @@ export const inputAssetManifestEntrySchema = z.object({
     frameIndex: z.number().int().nonnegative()
   }).optional()
 });
+
+/** Explicit, versioned image ordinal -> asset file mapping. Legacy requests omit it. */
+export const imageAssetBindingSchema = z.object({
+  imageIndex: z.number().int().positive(),
+  assetName: nonEmptyStringSchema,
+  assetId: entityIdSchema,
+  artifactHash: sha256Schema,
+  providerSlot: z.enum(["REFERENCE_IMAGE", "FIRST_FRAME", "LAST_FRAME"]),
+  referencedByPrompt: z.boolean()
+}).strict();
+
+/** Derived from an immutable user-accepted MP4 tail, not an unverified @ mention. */
+export const continuitySourceBindingSchema = z.object({
+  version: z.literal("continuity-source-binding-1"),
+  sourceClipId: entityIdSchema,
+  sourceAttemptId: entityIdSchema,
+  sourceVideoArtifactId: entityIdSchema,
+  sourceVideoSha256: sha256Schema,
+  tailFrameArtifactId: entityIdSchema,
+  tailFrameSha256: sha256Schema,
+  reviewDecisionId: entityIdSchema,
+  reviewDecisionHash: sha256Schema,
+  reviewedEvidenceArtifactId: entityIdSchema,
+  reviewedEvidenceHash: sha256Schema,
+  contractHash: sha256Schema,
+  relationship: z.enum(["HARD_CONTINUITY", "SAME_SCENE_CUT"])
+}).strict();
 
 export const dreaminaVideoOperationSchema = z.enum([
   "text2video",
@@ -677,6 +745,11 @@ export const generationProfileSchema = z
     }
   });
 
+export const v8RequestBindingSchema = z.object({
+  runId: entityIdSchema, screenplayHash: sha256Schema, directorRecordHash: sha256Schema,
+  promptRecordHash: sha256Schema, promptPackageHash: sha256Schema
+}).strict();
+
 export const compiledPromptSchema = z.object({
   id: entityIdSchema,
   projectId: entityIdSchema,
@@ -694,8 +767,17 @@ export const compiledPromptSchema = z.object({
   segmentHashes: z.record(z.string(), sha256Schema),
   compilerTemplateVersion: nonEmptyStringSchema,
   creativeReferenceSetRef: versionRefSchema.optional(),
+  productionAssetSetRef: versionRefSchema.optional(),
+  auditContractHash: sha256Schema.optional(),
   generationProfile: generationProfileSchema.optional(),
+  v8Binding: v8RequestBindingSchema.optional(),
+  audioPolicy: z.enum([
+    "V2_STRICT",
+    "V3_NATIVE_NO_BGM"
+  ]).optional(),
   promptText: nonEmptyStringSchema,
+  imageBindings: z.array(imageAssetBindingSchema).optional(),
+  continuitySource: continuitySourceBindingSchema.optional(),
   inputAssetManifest: z.array(inputAssetManifestEntrySchema),
   factMapping: z.array(promptFactMappingSchema),
   segmentMapping: z.array(z.object({ segmentId: entityIdSchema, promptSection: nonEmptyStringSchema })),
@@ -759,11 +841,18 @@ export const generationRequestSchema = z.object({
   capabilityFingerprint: sha256Schema,
   model: videoModelSchema,
   promptText: nonEmptyStringSchema,
+  imageBindings: z.array(imageAssetBindingSchema).optional(),
+  continuitySource: continuitySourceBindingSchema.optional(),
   assetManifest: z.array(inputAssetManifestEntrySchema),
   durationMs: z.number().int().min(1000).max(120000),
   aspectRatio: videoAspectRatioSchema,
   videoResolution: videoResolutionSchema.optional(),
   generateAudio: z.boolean(),
+  v8Binding: v8RequestBindingSchema.optional(),
+  audioPolicy: z.enum([
+    "V2_STRICT",
+    "V3_NATIVE_NO_BGM"
+  ]).optional(),
   generationProfile: generationProfileSchema.optional(),
   dreaminaOperation: dreaminaVideoOperationSchema.optional(),
   agentTaskId: entityIdSchema.optional(),
@@ -934,8 +1023,8 @@ export const reviewDecisionSchema = z.object({
   generationAttemptId: entityIdSchema.optional(),
   outputArtifactId: entityIdSchema.optional(),
   outputArtifactHash: sha256Schema.optional(),
-  decision: z.enum(["ACCEPT", "REDO", "SKIP", "USE"]),
-  source: z.enum(["USER", "AI_VISUAL_GATE"]).optional(),
+  decision: z.enum(["ACCEPT", "REDO", "SKIP", "USE", "STALE"]),
+  source: z.enum(["USER", "AI_VISUAL_GATE", "CONTINUITY_DEPENDENCY"]).optional(),
   visualAssessment: z.object({
     artifactId: entityIdSchema,
     artifactHash: sha256Schema,
@@ -945,7 +1034,7 @@ export const reviewDecisionSchema = z.object({
   note: nonEmptyStringSchema.optional(),
   decidedAt: isoDateTimeSchema
 }).superRefine((value, ctx) => {
-  const outputBound = value.decision === "ACCEPT" || value.decision === "REDO";
+  const outputBound = value.decision === "ACCEPT" || value.decision === "REDO" || value.decision === "STALE";
   if (
     outputBound &&
     (!value.generationAttemptId || !value.outputArtifactId || !value.outputArtifactHash)
@@ -953,6 +1042,12 @@ export const reviewDecisionSchema = z.object({
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       message: `${value.decision} ReviewDecision requires generationAttemptId, outputArtifactId and outputArtifactHash`
+    });
+  }
+  if ((value.decision === "STALE") !== (value.source === "CONTINUITY_DEPENDENCY")) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Only the continuity dependency engine may record STALE review decisions"
     });
   }
   if (value.source === "AI_VISUAL_GATE") {

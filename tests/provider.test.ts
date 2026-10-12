@@ -183,3 +183,102 @@ test("verified runtime enables full provider contract without guessed commands",
     await fs.rm(dir, { recursive: true, force: true });
   }
 });
+
+test("download recovers from CLI internal timeout by using fresh official result URL without resubmitting", async () => {
+  const { createHash } = await import("node:crypto");
+  const { ISO, H } = await import("./fixtures.js");
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "pvs-dreamina-download-recovery-"));
+  const executable = path.join(dir, "dreamina.exe");
+  const output = path.join(dir, "recovered.mp4");
+  const recoveredBytes = Buffer.from("recovered-video-bytes", "utf8");
+  await fs.writeFile(executable, "verified-binary", "utf8");
+  const executableSha256 = createHash("sha256")
+    .update(await fs.readFile(executable))
+    .digest("hex");
+  const runtime = {
+    identity: {
+      id: "provider-identity-download-recovery",
+      provider: "domestic-jimeng-cli" as const,
+      officialSourceUrl: "https://www.dreamina.com/",
+      publisher: "verified-test-publisher",
+      executablePath: executable,
+      executableSha256,
+      cliVersion: "1.0.0",
+      rawVersionArtifactId: "artifact-version",
+      rawHelpArtifactId: "artifact-help",
+      officialLoginOrigins: ["https://www.dreamina.com/"],
+      capabilityFingerprint: H.a,
+      verificationStatus: "VERIFIED" as const,
+      verifiedAt: ISO
+    },
+    versionArgs: ["--version"],
+    helpArgs: ["--help"],
+    parseProbe: () => ({
+      cliVersion: "1.0.0",
+      supportedOperations: ["status", "download"],
+      supportedModels: ["seedance-2.0"],
+      supportedDurationsMs: [4000, 15000]
+    }),
+    status: {
+      buildArgs: () => ["query_result", "--submit_id", "task-1"],
+      parse: () => ({ status: "SUCCEEDED" as const })
+    },
+    download: {
+      buildArgs: (_handle: { externalTaskId?: string }, target: string) => [
+        "query_result", "--submit_id", "task-1", "--download_dir", path.dirname(target)
+      ],
+      outputMode: "DIRECTORY" as const
+    }
+  };
+  const calls: string[][] = [];
+  const runner = async (_exe: string, args: readonly string[]) => {
+    calls.push([...args]);
+    if (args.includes("--download_dir")) {
+      return {
+        stdout: "",
+        stderr: "context deadline exceeded (Client.Timeout while reading body)",
+        exitCode: 1,
+        timedOut: true
+      };
+    }
+    return {
+      stdout: JSON.stringify({
+        gen_status: "success",
+        result_json: {
+          videos: [{ video_url: "https://cdn.example.test/result.mp4" }]
+        }
+      }),
+      stderr: "",
+      exitCode: 0,
+      timedOut: false
+    };
+  };
+  let directDownloads = 0;
+  const provider = new DomesticJimengCliProvider(
+    async () => executable,
+    runtime,
+    runner,
+    async () => [],
+    async (url, target, timeoutMs) => {
+      directDownloads += 1;
+      assert.equal(url, "https://cdn.example.test/result.mp4");
+      assert.equal(timeoutMs, 300_000);
+      await fs.writeFile(target, recoveredBytes);
+    }
+  );
+  try {
+    const downloaded = await provider.download({ externalTaskId: "task-1" }, output);
+    assert.equal(downloaded.sizeBytes, recoveredBytes.length);
+    assert.equal(await fs.readFile(output, "utf8"), recoveredBytes.toString("utf8"));
+    assert.equal(directDownloads, 1);
+    assert.equal(calls.filter(call => call.includes("--download_dir")).length, 1);
+    assert.equal(calls.filter(call => !call.includes("--download_dir")).length, 1);
+    assert.ok(calls.every(call => !call.includes("submit")));
+    const evidence = provider.drainCommandEvidence("DOWNLOAD");
+    assert.equal(evidence.at(-1)?.exitCode, 0);
+    assert.equal(evidence.at(-1)?.timedOut, false);
+    assert.match(evidence.at(-1)?.stdoutRedacted ?? "", /direct HTTPS download/);
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});

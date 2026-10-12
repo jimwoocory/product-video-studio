@@ -86,6 +86,7 @@ export type ResolvedAiModel = {
     | "STEP_OVERRIDE"
     | "PROJECT_DEFAULT"
     | "SYSTEM_DEFAULT"
+    | "PROVIDER_DEFAULT"
     | "CAPABILITY_FALLBACK"
     | "HERMES_FALLBACK";
   providerId: string;

@@ -11,6 +11,8 @@ import { AutoEditBlocked, postProductionSettingsSchema } from "../domain/auto-ed
 import { LocalArtifactStore } from "../adapters/store/local-artifact-store.js";
 import { inspectMedia } from "../adapters/media/inspect-media.js";
 import { renderPostProductionControls, postProductionBrowserScript } from "./post-production-ui.js";
+import { pvsGlobalStyles, renderPvsGlobalHeader } from "./pvs-global-shell.js";
+import { BUILTIN_BGM_LIBRARY, builtinBgmArtifactId, renderBuiltinBgmWav } from "../application/services/builtin-bgm-library.js";
 const escaped = (value: unknown) => String(value ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
 const send = (res: ServerResponse, code: number, value: unknown) => { res.writeHead(code, { "content-type": "application/json; charset=utf-8" }); res.end(JSON.stringify(value)); };
 async function readBody(req: IncomingMessage, maximum = 200_000) {
@@ -18,6 +20,46 @@ async function readBody(req: IncomingMessage, maximum = 200_000) {
   for await (const chunk of req) { const b = Buffer.from(chunk); size += b.length; if (size > maximum) throw new AutoEditBlocked("REQUEST_TOO_LARGE", "请求文件过大"); chunks.push(b); }
   try { return JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}"); }
   catch { throw new AutoEditBlocked("INVALID_JSON", "请求格式无效"); }
+}
+
+async function ensureBuiltinBgmAssets(input: {
+  projectId: string;
+  projectsRoot: string;
+  artifacts: ArtifactRepository;
+}) {
+  const root = path.resolve(input.projectsRoot, input.projectId);
+  const store = new LocalArtifactStore(root, input.artifacts);
+  const result: Array<{
+    id: string;
+    sha256?: string;
+    name: string;
+    mimeType: string;
+    source: "BUILTIN_BGM";
+  }> = [];
+  for (const def of BUILTIN_BGM_LIBRARY) {
+    const id = builtinBgmArtifactId(input.projectId, def.key);
+    let artifact = await input.artifacts.findById(id);
+    if (!artifact) {
+      artifact = await store.writeImmutable({
+        id,
+        projectId: input.projectId,
+        kind: "OTHER",
+        immutable: true,
+        relativePath: "post-production/bgm-library/" + def.filename,
+        bytes: renderBuiltinBgmWav(def),
+        mimeType: "audio/wav"
+      });
+    }
+    if (artifact.projectId !== input.projectId || artifact.integrityStatus !== "READY") continue;
+    result.push({
+      id: artifact.id,
+      sha256: artifact.sha256,
+      name: def.label,
+      mimeType: artifact.mimeType ?? "audio/wav",
+      source: "BUILTIN_BGM"
+    });
+  }
+  return result;
 }
 
 export async function handleAutoEditHttp(req: IncomingMessage, res: ServerResponse, url: URL, d: {
@@ -42,7 +84,7 @@ export async function handleAutoEditHttp(req: IncomingMessage, res: ServerRespon
       const current = await d.timeline.latestTimeline(projectId);
       const data = { projectId, planHash: w.productionPlan?.contentHash, replaceTimeline: current && current.status !== "STALE" ? { id: current.id, hash: current.contentHash } : null };
       res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
-      res.end(`<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>自动剪辑 · ${escaped(w.project.name)}</title><style>body{font:16px/1.6 system-ui;background:#f5f6f8;color:#17212b;margin:0}main{max-width:1060px;margin:30px auto;padding:0 20px}.card{background:white;padding:24px;border:1px solid #d6dce2;border-radius:12px;margin:20px 0}.row{display:flex;gap:16px;flex-wrap:wrap}.field{display:flex;flex-direction:column;min-width:180px;flex:1}input,select,button{font:inherit}input[type=number]{max-width:160px}select{padding:9px;max-width:100%}button{padding:10px 16px;margin:12px 12px 0 0;cursor:pointer}button:disabled{opacity:.5}a{color:#245b91}.muted{color:#64717f;font-size:14px}.error{color:#a32323}.post-binding{border-bottom:1px solid #ddd;padding:12px 0}label{margin-right:10px}</style></head><body><main data-state="${escaped(JSON.stringify(data))}"><nav><a href="/projects/${encodeURIComponent(projectId)}/smart">一键成片</a> · <a href="/projects/${encodeURIComponent(projectId)}/generate">审片</a> · <a href="/projects/${encodeURIComponent(projectId)}/timeline">手工时间线</a></nav><h1>自动剪辑</h1><p>${escaped(w.project.name)}</p><p>按已确认分镜与已采用视频创建新的剪辑决策和时间线。保留原视频，不重提生成，不自动发布。</p><section class="card">
+      res.end(`<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>自动剪辑 · ${escaped(w.project.name)}</title><style>body{font:16px/1.6 system-ui;background:#f5f6f8;color:#17212b;margin:0}main{max-width:1060px;margin:30px auto;padding:0 20px}.card{background:white;padding:24px;border:1px solid #d6dce2;border-radius:12px;margin:20px 0}.row{display:flex;gap:16px;flex-wrap:wrap}.field{display:flex;flex-direction:column;min-width:180px;flex:1}input,select,button{font:inherit}input[type=number]{max-width:160px}select{padding:9px;max-width:100%}button{padding:10px 16px;margin:12px 12px 0 0;cursor:pointer}button:disabled{opacity:.5}a{color:#245b91}.muted{color:#64717f;font-size:14px}.error{color:#a32323}.post-binding{border-bottom:1px solid #ddd;padding:12px 0}label{margin-right:10px}${pvsGlobalStyles}</style></head><body>${renderPvsGlobalHeader("studio", { project: { id: projectId, name: w.project.name } })}<main data-state="${escaped(JSON.stringify(data))}"><nav><a href="/projects/${encodeURIComponent(projectId)}/smart">一键成片</a> · <a href="/projects/${encodeURIComponent(projectId)}/generate">审片</a> · <a href="/projects/${encodeURIComponent(projectId)}/timeline">手工时间线</a></nav><h1>自动剪辑</h1><p>${escaped(w.project.name)}</p><p>按已确认分镜与已采用视频创建新的剪辑决策和时间线。保留原视频，不重提生成，不自动发布。</p><section class="card">
       ${renderPostProductionControls({ projectId, plan: w.productionPlan })}
       ${data.replaceTimeline ? '<p><label><input id="replace-timeline" type="checkbox"> 我明确同意创建新的自动时间线；当前手工版本保留为历史版本。</label></p>' : ""}
       <button id="run-auto-edit">生成自动剪辑草稿</button><p id="auto-edit-message" role="status"></p><pre id="auto-edit-warnings" style="white-space:pre-wrap"></pre><div id="auto-edit-next"></div></section></main>
@@ -51,9 +93,12 @@ export async function handleAutoEditHttp(req: IncomingMessage, res: ServerRespon
     }
     if (!action) { send(res, 405, { message: "不支持此操作" }); return true; }
     if (action[2] === "post-production" && !action[3] && req.method === "GET") {
-      const audioAssets = (await d.artifacts.listByProject(projectId)).filter(a => a.integrityStatus === "READY" && a.mimeType?.startsWith("audio/")).map(a => ({
-        id: a.id, sha256: a.sha256, name: path.basename(a.relativePath), mimeType: a.mimeType
-      }));
+      const builtinBgm = await ensureBuiltinBgmAssets({ projectId, projectsRoot: d.projectsRoot, artifacts: d.artifacts });
+      const builtinIds = new Set(builtinBgm.map(item => item.id));
+      const projectAudio = (await d.artifacts.listByProject(projectId))
+        .filter(a => !builtinIds.has(a.id) && a.integrityStatus === "READY" && a.mimeType?.startsWith("audio/"))
+        .map(a => ({ id: a.id, sha256: a.sha256, name: path.basename(a.relativePath), mimeType: a.mimeType, source: "PROJECT_AUDIO" as const }));
+      const audioAssets = [...builtinBgm, ...projectAudio];
       const timeline = await d.timeline.latestTimeline(projectId);
       send(res, 200, { voices: await d.autoEdit.voices(), audioAssets, timeline: timeline ? { id: timeline.id, hash: timeline.contentHash, status: timeline.status, productionPlanHash: timeline.productionPlanHash } : null }); return true;
     }

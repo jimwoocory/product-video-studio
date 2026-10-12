@@ -9,6 +9,7 @@ import {
   generationRequestSchema,
   preflightReportSchema,
   type AssetRef,
+  type CompiledPrompt,
   type CreativeBatch,
   type GenerationRequest,
   type PreflightReport,
@@ -21,6 +22,9 @@ import {
 import { hashValue } from "../../domain/hashing.js";
 import { computeGenerationRequestHash } from "./hash-contracts.js";
 import { compileSeedancePrompt } from "./prompt-compiler.js";
+import { assertNamedImageAspectRatio } from "./asset-image-bindings.js";
+import { firstSourceIndependentClipIds } from "./clip-continuity-engine.js";
+import { compileReviewedContinuityInput, type SourceBinding } from "./continuity-request-compiler.js";
 import { blockerFromProviderProbe } from "./provider-blocker.js";
 import { DomainValidationError } from "../../domain/validation.js";
 import type { StructuredAiRuntime } from "../ports/structured-ai-runtime.js";
@@ -31,12 +35,17 @@ import {
   assertDirectorPlanTarget,
   assertDirectorSettingsMatch,
   assertProfileMatchesDirectorTarget,
+  assertReviewedFirstFrameProfileMatchesDirectorTarget,
   standardClipOperation
 } from "./director-generation-target.js";
 import {
   resolveGenerationProfile,
   type DreaminaAgentCapabilityService
 } from "./dreamina-agent-capability.js";
+import type { ProductionAssetSet } from "../../domain/production-strategy.js";
+import type { SmartGenerationRun } from "../../domain/smart-generation.js";
+import { assertV8PromptBinding } from "./v8-production-binding.js";
+import type { DirectorV3Plan } from "../../domain/director-v3.js";
 
 export type RunPreflightInput = {
   projectId: string;
@@ -44,6 +53,12 @@ export type RunPreflightInput = {
   creativeBatch: CreativeBatch;
   script: ScriptDraft;
   productionPlan: ProductionPlan;
+  productionAssetSet?: ProductionAssetSet;
+  directorV3Plan?: DirectorV3Plan;
+  promptV3Overrides?: Record<string, string>;
+  v8Run?: SmartGenerationRun;
+  /** Only the adapter may supply latest, explicitly accepted, immutable tail evidence. */
+  continuitySources?: Record<string, SourceBinding>;
   assets: AssetRef[];
   clipIds?: string[];
   inputBlockers?: string[];
@@ -65,6 +80,20 @@ export type RunPreflightResult = {
   costEstimate: PreflightReport["costEstimate"];
   overallStatus: "PASS" | "BLOCKED";
 };
+
+function clipRequestsNativeAudio(
+  clip: ProductionPlan["scenes"][number]["clips"][number],
+  globallyRequested: boolean,
+  nativeByDefault = false
+): boolean {
+  if (!globallyRequested) return false;
+  if (nativeByDefault) return true;
+  return clip.segments.some(
+    (segment) =>
+      segment.dialogueOrNarration.kind !== "NONE" ||
+      segment.ambientSound.kind !== "NONE"
+  );
+}
 
 function reportHash(
   report: Omit<PreflightReport, "reportHash">
@@ -234,6 +263,10 @@ export class GenerationPreflightService {
   }
 
   async run(input: RunPreflightInput): Promise<RunPreflightResult> {
+    if (input.v8Run) assertV8PromptBinding(input.v8Run);
+    if ((input.productionPlan.v8Source || input.productionPlan.scenes.some(s => s.clips.some(c => c.segments.some(s => s.v8)))) && !input.v8Run) {
+      throw new DomainValidationError("V8 正式分镜需要当前任务中明确采用的 PromptPackage，不能绕过人工审核直接预检");
+    }
     const references=await this.references?.assertExpected(input.projectId,input.productionPlan.creativeReferenceSetRef);
     for(const artifact of [input.creativeBatch,input.script,input.productionPlan])assertReferenceBinding(artifact.creativeReferenceSetRef,references,input.productTruth);
     if(references)input={...input,assets:[...input.assets.filter(a=>!a.id.startsWith("research-ref-")),...CreativeReferenceService.assets(references)]};
@@ -249,13 +282,43 @@ export class GenerationPreflightService {
         nativeAudioOutputRequested: directorTarget.nativeAudioOutputRequested
       } };
     }
+    const allClips = input.productionPlan.scenes.flatMap(scene => scene.clips);
+    const requestedClipIds = input.clipIds?.length ? new Set(input.clipIds) : null;
+    const clips = requestedClipIds
+      ? allClips.filter(clip => requestedClipIds.has(clip.id))
+      : allClips;
+    if (!clips.length) throw new DomainValidationError("请至少选择一个有效的当前镜头");
+    if (requestedClipIds && clips.length !== requestedClipIds.size) {
+      throw new DomainValidationError("所选镜头已失效，请刷新页面后重新选择");
+    }
+
+    if (input.v8Run?.v8Prompts?.imageBindingMode === "V1") {
+      const firstWave = new Set(firstSourceIndependentClipIds(input.v8Run.v8Prompts.packages));
+      for (const clip of clips) {
+        const incoming = input.v8Run.v8Prompts.packages.find(p=>p.clipId===clip.id)?.incomingContinuity;
+        const source = input.continuitySources?.[clip.id];
+        if (!firstWave.has(clip.id)) {
+          if (!incoming || !source || source.sourceClipId!==incoming.sourceClipId ||
+              source.contractHash!==incoming.contractHash ||
+              source.relationship!==incoming.relationship) {
+            throw new DomainValidationError("后续视频缺少来自已审核真实尾帧的有效来源与转场契约，不能生成。");
+          }
+        } else if (source) {
+          throw new DomainValidationError("独立镜头不能伪造上一视频的尾帧来源。");
+        }
+      }
+      if (Object.keys(input.continuitySources??{}).some(id=>!clips.some(c=>c.id===id))) {
+        throw new DomainValidationError("连续性凭据包含不属于本批次的镜头。");
+      }
+    }
     const existingAttempts = await this.workflowRepo.listGenerationAttempts(
       input.projectId
     );
     const hasUnknownSubmission = existingAttempts.some(
       (item) =>
-        item.status === "SUBMISSION_OUTCOME_UNKNOWN" ||
-        item.status === "RECONCILING"
+        clips.some(clip => clip.id === item.clipId) &&
+        (item.status === "SUBMISSION_OUTCOME_UNKNOWN" ||
+          item.status === "RECONCILING")
     );
     if (
       hasUnknownSubmission &&
@@ -273,46 +336,12 @@ export class GenerationPreflightService {
       );
     }
 
-    await this.generationRepo.markSubmissionChainStale(
-      input.projectId,
-      now.toISOString()
-    );
+    // Check the full replacement before mutating any previous approval or
+    // submitted request. One invalid reference must not stale all clips.
     const probe = await this.provider.probe();
 
-    if (probe.code === "READY") {
-      const open = await this.workflowRepo.listOpenBlockers(input.projectId);
-      for (const item of open) {
-        if (
-          item.scope === "PROVIDER" &&
-          (item.reasonCode === "DREAMINA_NOT_FOUND" ||
-            item.reasonCode === "PROVIDER_IDENTITY_UNVERIFIED" ||
-            item.reasonCode === "PROVIDER_CHANGED")
-        ) {
-          await this.workflowRepo.resolveBlocker(item.id, now.toISOString());
-        }
-      }
-    }
-
-    await this.reconcileReferenceAssetBlockers(
-      input.projectId,
-      input.inputBlockers ?? [],
-      now.toISOString()
-    );
-
     const requests: GenerationRequest[] = [];
-    const allClips = input.productionPlan.scenes.flatMap((scene) => scene.clips);
-    const requestedClipIds = input.clipIds?.length
-      ? new Set(input.clipIds)
-      : null;
-    const clips = requestedClipIds
-      ? allClips.filter((clip) => requestedClipIds.has(clip.id))
-      : allClips;
-    if (!clips.length) {
-      throw new Error("Preflight requires at least one current Clip");
-    }
-    if (requestedClipIds && clips.length !== requestedClipIds.size) {
-      throw new Error("Preflight clipIds contain unknown or stale Clip ids");
-    }
+    const compiledPrompts: CompiledPrompt[] = [];
     let capabilityRegistry;
     if (input.generationSettings && probe.code === "READY") {
       if (!this.dreaminaCapability) {
@@ -330,7 +359,14 @@ export class GenerationPreflightService {
     }
 
     for (const clip of clips) {
-      const dreaminaOperation = standardClipOperation(clip.referenceAssets.length);
+      const continuitySource = input.continuitySources?.[clip.id];
+      const dreaminaOperation = continuitySource?.relationship==="HARD_CONTINUITY"
+        ? "image2video" as const : standardClipOperation(clip.referenceAssets.length);
+      const nativeAudioOutputRequested = clipRequestsNativeAudio(
+        clip,
+        input.generationSettings?.nativeAudioOutputRequested ?? false,
+        Boolean(input.directorV3Plan)
+      );
       const referenceAudioInputCount = clip.referenceAssets.filter((usage) => {
         const asset = input.assets.find((item) => item.id === usage.assetId);
         return asset?.mimeType?.startsWith("audio/") === true;
@@ -345,11 +381,14 @@ export class GenerationPreflightService {
               videoResolution: input.generationSettings.videoResolution,
               durationMs: clip.durationMs,
               referenceAudioInputCount,
-              nativeAudioOutputRequested:
-                input.generationSettings.nativeAudioOutputRequested
+              nativeAudioOutputRequested
             })
           : undefined;
-      if (directorTarget && generationProfile) assertProfileMatchesDirectorTarget(directorTarget, generationProfile);
+      if (directorTarget && generationProfile) {
+        if (continuitySource?.relationship === "HARD_CONTINUITY") {
+          assertReviewedFirstFrameProfileMatchesDirectorTarget(directorTarget, generationProfile);
+        } else assertProfileMatchesDirectorTarget(directorTarget, generationProfile);
+      }
       const requestModel =
         generationProfile?.modelVersion ??
         (input.generationSettings &&
@@ -371,8 +410,23 @@ export class GenerationPreflightService {
         input.projectId,
         `compiled-prompt:${clip.id}`
       );
-      const compiled = compileSeedancePrompt({
+      let compiled: CompiledPrompt;
+      try {
+        compiled = compileSeedancePrompt({
+        ...(input.v8Run ? { v8Run: input.v8Run } : {}),
         creativeReferenceSet: references,
+        ...(input.productionAssetSet
+          ? { productionAssetSet: input.productionAssetSet }
+          : {}),
+        ...(input.directorV3Plan
+          ? { directorV3Plan: input.directorV3Plan }
+          : {}),
+        ...(input.promptV3Overrides?.[clip.id]
+          ? {
+              promptV3Override:
+                input.promptV3Overrides[clip.id]
+            }
+          : {}),
         id: randomUUID(),
         version,
         createdAt: now.toISOString(),
@@ -382,6 +436,7 @@ export class GenerationPreflightService {
         productionPlan: input.productionPlan,
         clipId: clip.id,
         model: requestModel,
+        dreaminaOperation,
         ...(generationProfile ? { generationProfile } : {}),
         aspectRatio: requestAspectRatio,
         ...(requestVideoResolution
@@ -391,8 +446,28 @@ export class GenerationPreflightService {
           ? { generateAudio: requestGenerateAudio }
           : {}),
         assets: input.assets
-      });
-      await this.generationRepo.saveCompiledPrompt(compiled);
+        });
+      } catch (error) {
+        if (error instanceof Error && /Required reference asset missing|production-asset:/i.test(error.message)) {
+          throw new DomainValidationError("当前镜头缺少已确认的角色、场景或产品参考图。请检查制作资产绑定后重新预检；原视频和授权未发生变化。");
+        }
+        throw error;
+      }
+      if (compiled.imageBindings?.length) {
+        assertNamedImageAspectRatio({
+          promptText: compiled.promptText,
+          requestedRatio: requestAspectRatio,
+          aspectRatioMode: generationProfile?.aspectRatioMode
+        });
+      }
+      if (continuitySource) {
+        compiled=compileReviewedContinuityInput({compiled,source:continuitySource});
+        if (compiled.imageBindings?.length) {
+          assertNamedImageAspectRatio({promptText:compiled.promptText,requestedRatio:requestAspectRatio,
+            aspectRatioMode:generationProfile?.aspectRatioMode});
+        }
+      }
+      compiledPrompts.push(compiled);
 
       const requestWithoutHash = {
         id: randomUUID(),
@@ -405,6 +480,9 @@ export class GenerationPreflightService {
         capabilityFingerprint: probe.capabilityFingerprint,
         model: requestModel,
         promptText: compiled.promptText,
+        ...(compiled.imageBindings ? { imageBindings: compiled.imageBindings } : {}),
+        ...(compiled.continuitySource ? {continuitySource:compiled.continuitySource} : {}),
+        ...(compiled.v8Binding ? { v8Binding: compiled.v8Binding } : {}),
         assetManifest: compiled.inputAssetManifest,
         dreaminaOperation,
         durationMs: compiled.generationParams.durationMs,
@@ -413,13 +491,17 @@ export class GenerationPreflightService {
           ? { videoResolution: requestVideoResolution }
           : {}),
         generateAudio: compiled.generationParams.generateAudio,
+        ...(compiled.audioPolicy
+          ? { audioPolicy: compiled.audioPolicy }
+          : {}),
         ...(generationProfile ? { generationProfile } : {}),
         inputVersionRefs: [
           compiled.productTruthRef,
           compiled.creativeBatchRef,
           compiled.scriptRef,
           compiled.productionPlanRef,
-          ...(compiled.creativeReferenceSetRef?[compiled.creativeReferenceSetRef]:[])
+          ...(compiled.creativeReferenceSetRef?[compiled.creativeReferenceSetRef]:[]),
+          ...(compiled.productionAssetSetRef?[compiled.productionAssetSetRef]:[])
         ],
         createdAt: now.toISOString()
       };
@@ -427,7 +509,7 @@ export class GenerationPreflightService {
         ...requestWithoutHash,
         requestHash: computeGenerationRequestHash(requestWithoutHash)
       });
-      requests.push(await this.generationRepo.createGenerationRequest(request));
+      requests.push(request);
     }
 
     let costEstimate: PreflightReport["costEstimate"] = {
@@ -507,7 +589,7 @@ export class GenerationPreflightService {
         ...base,
         reportHash: reportHash(base)
       });
-      reports.push(await this.generationRepo.createPreflightReport(report));
+      reports.push(report);
 
       if (!firstBlocker && blockers.length) {
         firstBlocker = blockers[0]!.startsWith("REFERENCE_")
@@ -524,6 +606,48 @@ export class GenerationPreflightService {
       }
     }
 
+    // Blocked checks are returned to the user for diagnostics only. They do
+    // not create a current request or invalidate a successful prior chain.
+    if (reports.every(report => report.status === "PASS")) {
+      if (this.generationRepo.replacePreflightChain) {
+        await this.generationRepo.replacePreflightChain({
+          projectId: input.projectId,
+          clipIds: clips.map(clip => clip.id),
+          staleAt: now.toISOString(),
+          compiledPrompts,
+          requests,
+          reports
+        });
+      } else {
+        // Legacy/in-memory test repositories. Production uses the atomic
+        // implementation, which also protects against partial DB writes.
+        const old = await this.generationRepo.listCurrentGenerationRequests(input.projectId);
+        for (const request of old.filter(item => clips.some(clip => clip.id === item.clipId))) {
+          await this.generationRepo.markRequestChainStale(request.id, now.toISOString());
+        }
+        for (const prompt of compiledPrompts) await this.generationRepo.saveCompiledPrompt(prompt);
+        for (const request of requests) await this.generationRepo.createGenerationRequest(request);
+        for (const report of reports) await this.generationRepo.createPreflightReport(report);
+      }
+    }
+    if (probe.code === "READY") {
+      const open = await this.workflowRepo.listOpenBlockers(input.projectId);
+      for (const item of open) {
+        if (
+          item.scope === "PROVIDER" &&
+          (item.reasonCode === "DREAMINA_NOT_FOUND" ||
+            item.reasonCode === "PROVIDER_IDENTITY_UNVERIFIED" ||
+            item.reasonCode === "PROVIDER_CHANGED")
+        ) {
+          await this.workflowRepo.resolveBlocker(item.id, now.toISOString());
+        }
+      }
+    }
+    await this.reconcileReferenceAssetBlockers(
+      input.projectId,
+      input.inputBlockers ?? [],
+      now.toISOString()
+    );
     await this.reconcileCapabilityBlockers(
       input.projectId,
       reports.flatMap(item => item.blockers),

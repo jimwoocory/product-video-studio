@@ -1,5 +1,6 @@
 import type { PrismaClient } from "@prisma/client";
-import type { GenerationRepository } from "../../application/ports/generation-repository.js";
+import type { GenerationRepository, PreparedPreflightChain } from "../../application/ports/generation-repository.js";
+import { DomainValidationError } from "../../domain/validation.js";
 import {
   compiledPromptSchema,
   generationRequestSchema,
@@ -13,6 +14,85 @@ import {
 
 export class PrismaGenerationRepository implements GenerationRepository {
   constructor(private readonly db: PrismaClient) {}
+
+  async replacePreflightChain(chain: PreparedPreflightChain): Promise<void> {
+    const clips = [...new Set(chain.clipIds)];
+    if (
+      clips.length === 0 ||
+      chain.compiledPrompts.length !== chain.requests.length ||
+      chain.reports.length !== chain.requests.length ||
+      chain.requests.length !== clips.length
+    ) {
+      throw new DomainValidationError("生成前检查的镜头和结果数量不一致，原授权未改变");
+    }
+    const requests = chain.requests.map(value => generationRequestSchema.parse(value));
+    const reports = chain.reports.map(value => preflightReportSchema.parse(value));
+    const prompts = chain.compiledPrompts.map(value => compiledPromptSchema.parse(value));
+    if (
+      requests.some(request => request.projectId !== chain.projectId || !clips.includes(request.clipId)) ||
+      new Set(requests.map(request => request.clipId)).size !== clips.length ||
+      reports.some(report => report.projectId !== chain.projectId || report.status !== "PASS" ||
+        !requests.some(request => request.id === report.generationRequestId && request.requestHash === report.requestHash)) ||
+      prompts.some(prompt => prompt.projectId !== chain.projectId ||
+        !requests.some(request => request.compiledPromptId === prompt.id && request.clipId === prompt.clipId))
+    ) {
+      throw new DomainValidationError("生成前检查版本绑定不完整，不能替换旧授权");
+    }
+    const when = new Date(chain.staleAt);
+    if (!Number.isFinite(when.getTime())) {
+      throw new DomainValidationError("生成前检查更新时间无效");
+    }
+    await this.db.$transaction(async tx => {
+      const old = await tx.generationRequestRecord.findMany({
+        where: { projectId: chain.projectId, clipId: { in: clips }, status: "CURRENT" },
+        select: { id: true }
+      });
+      const oldIds = old.map(item => item.id);
+      if (oldIds.length) {
+        await tx.userApprovalRecord.updateMany({
+          where: { projectId: chain.projectId, generationRequestId: { in: oldIds }, status: "ACTIVE" },
+          data: { status: "STALE" }
+        });
+        await tx.preflightReportRecord.updateMany({
+          where: { projectId: chain.projectId, generationRequestId: { in: oldIds }, status: { not: "STALE" } },
+          data: { status: "STALE", staleAt: when }
+        });
+        await tx.generationRequestRecord.updateMany({
+          where: { projectId: chain.projectId, id: { in: oldIds }, status: "CURRENT" },
+          data: { status: "STALE" }
+        });
+      }
+      for (const prompt of prompts) {
+        const entityKey = `compiled-prompt:${prompt.clipId}`;
+        await tx.versionedEntity.updateMany({
+          where: { projectId: chain.projectId, entityType: "CompiledPrompt", entityKey, status: { not: "STALE" } },
+          data: { status: "STALE" }
+        });
+        await tx.versionedEntity.create({
+          data: { id: prompt.id, projectId: chain.projectId, entityType: "CompiledPrompt",
+            entityKey, version: prompt.version, status: prompt.status,
+            contentHash: prompt.compiledPromptHash, dataJson: JSON.stringify(prompt) }
+        });
+      }
+      for (const request of requests) {
+        await tx.generationRequestRecord.create({
+          data: { id: request.id, projectId: request.projectId, clipId: request.clipId,
+            compiledPromptId: request.compiledPromptId, requestHash: request.requestHash,
+            providerIdentityHash: request.providerIdentityHash, capabilityFingerprint: request.capabilityFingerprint,
+            status: "CURRENT", dataJson: JSON.stringify(request), createdAt: new Date(request.createdAt) }
+        });
+      }
+      for (const report of reports) {
+        await tx.preflightReportRecord.create({
+          data: { id: report.id, projectId: report.projectId,
+            generationRequestId: report.generationRequestId, requestHash: report.requestHash,
+            status: report.status, providerIdentityHash: report.providerIdentityHash,
+            capabilityFingerprint: report.capabilityFingerprint, reportHash: report.reportHash,
+            dataJson: JSON.stringify(report), createdAt: new Date(report.createdAt), staleAt: null }
+        });
+      }
+    });
+  }
 
   async markSubmissionChainStale(projectId: string, staleAt: string): Promise<void> {
     const when = new Date(staleAt);

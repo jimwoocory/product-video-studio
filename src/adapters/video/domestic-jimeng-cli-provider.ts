@@ -43,6 +43,12 @@ export type CommandRunner = (
   timeoutMs: number
 ) => Promise<CommandExecution>;
 
+export type DirectHttpDownload = (
+  url: string,
+  outputPath: string,
+  timeoutMs: number
+) => Promise<void>;
+
 function redactSensitiveText(value: string): string {
   return value
     .replace(
@@ -202,6 +208,65 @@ async function defaultCommandRunner(
   });
 }
 
+async function defaultDirectHttpDownload(
+  url: string,
+  outputPath: string,
+  timeoutMs: number
+): Promise<void> {
+  const parsed = new URL(url);
+  if (parsed.protocol !== "https:") {
+    throw new Error("Dreamina result URL must use HTTPS");
+  }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const temp = outputPath + ".http-" + Date.now() + ".tmp";
+  try {
+    const response = await fetch(parsed, {
+      method: "GET",
+      redirect: "follow",
+      signal: controller.signal
+    });
+    if (!response.ok) {
+      throw new Error(
+        "Dreamina result HTTP download failed: " + response.status
+      );
+    }
+    const length = Number(response.headers.get("content-length") ?? "0");
+    if (Number.isFinite(length) && length > 512 * 1024 * 1024) {
+      throw new Error("Dreamina result is unexpectedly large");
+    }
+    const bytes = Buffer.from(await response.arrayBuffer());
+    if (!bytes.length || bytes.length > 512 * 1024 * 1024) {
+      throw new Error("Dreamina result download returned invalid bytes");
+    }
+    await fs.writeFile(temp, bytes, { flag: "wx" });
+    await fs.rename(temp, outputPath);
+  } finally {
+    clearTimeout(timer);
+    await fs.rm(temp, { force: true }).catch(() => undefined);
+  }
+}
+
+function firstVideoUrl(value: unknown): string | null {
+  if (!value || typeof value !== "object") return null;
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = firstVideoUrl(item);
+      if (found) return found;
+    }
+    return null;
+  }
+  const record = value as Record<string, unknown>;
+  if (typeof record.video_url === "string" && record.video_url.trim()) {
+    return record.video_url.trim();
+  }
+  for (const item of Object.values(record)) {
+    const found = firstVideoUrl(item);
+    if (found) return found;
+  }
+  return null;
+}
+
 async function fileSha256(filePath: string): Promise<string> {
   const bytes = await fs.readFile(filePath);
   return createHash("sha256").update(bytes).digest("hex");
@@ -246,7 +311,8 @@ export class DomesticJimengCliProvider
     private readonly locateExecutable: LocateExecutable = defaultLocateExecutable,
     private readonly runtime?: VerifiedDreaminaRuntime,
     private readonly runCommand: CommandRunner = defaultCommandRunner,
-    private readonly resolveGenerationAssets: ResolveGenerationAssets = async () => []
+    private readonly resolveGenerationAssets: ResolveGenerationAssets = async () => [],
+    private readonly directHttpDownload: DirectHttpDownload = defaultDirectHttpDownload
   ) {}
 
   private async execute(
@@ -579,11 +645,73 @@ export class DomesticJimengCliProvider
       runtime.download.buildArgs(handle, outputPath),
       120_000
     );
-    if (result.exitCode !== 0 || result.timedOut) {
-      throw new Error("dreamina download failed");
-    }
     let actualPath = outputPath;
-    if (runtime.download.outputMode === "DIRECTORY") {
+    let recoveredByDirectUrl = false;
+    if (result.exitCode !== 0 || result.timedOut) {
+      if (!runtime.status) {
+        throw new Error("dreamina download failed");
+      }
+      const fresh = await this.execute(
+        "DOWNLOAD",
+        executablePath,
+        runtime.status.buildArgs(handle),
+        30_000
+      );
+      if (fresh.exitCode !== 0 || fresh.timedOut) {
+        throw new Error(
+          "dreamina download failed and fresh result lookup was unavailable"
+        );
+      }
+      let freshPayload: unknown;
+      try {
+        freshPayload = JSON.parse(fresh.stdout);
+      } catch {
+        throw new Error(
+          "dreamina download failed and fresh result JSON could not be parsed"
+        );
+      }
+      const videoUrl = firstVideoUrl(freshPayload);
+      if (!videoUrl) {
+        throw new Error(
+          "dreamina download failed and fresh result had no video URL"
+        );
+      }
+      const startedAt = new Date().toISOString();
+      try {
+        await fs.rm(outputPath, { force: true }).catch(() => undefined);
+        await this.directHttpDownload(videoUrl, outputPath, 300_000);
+        this.commandEvidence.push({
+          operation: "DOWNLOAD",
+          argvRedacted: ["dreamina-result-url", "<signed-url-redacted>"],
+          stdoutRedacted:
+            "Recovered generated video by direct HTTPS download from the fresh official query_result response.",
+          stderrRedacted: "",
+          startedAt,
+          completedAt: new Date().toISOString(),
+          exitCode: 0,
+          timedOut: false
+        });
+        recoveredByDirectUrl = true;
+        actualPath = outputPath;
+      } catch (error) {
+        this.commandEvidence.push({
+          operation: "DOWNLOAD",
+          argvRedacted: ["dreamina-result-url", "<signed-url-redacted>"],
+          stdoutRedacted: "",
+          stderrRedacted: redactSensitiveText(
+            error instanceof Error ? error.message : String(error)
+          ),
+          startedAt,
+          completedAt: new Date().toISOString(),
+          exitCode: 1,
+          timedOut:
+            error instanceof Error &&
+            /abort|timeout|timed out/i.test(error.message)
+        });
+        throw error;
+      }
+    }
+    if (!recoveredByDirectUrl && runtime.download.outputMode === "DIRECTORY") {
       const after = await fs.readdir(outputDir, { withFileTypes: true });
       const candidates: Array<{
         path: string;

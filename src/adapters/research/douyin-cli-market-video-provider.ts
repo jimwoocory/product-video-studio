@@ -17,7 +17,7 @@ const execFileAsync = promisify(execFile);
 const USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36";
 
-function resolveDouyinCli(): string {
+export function resolveDouyinCli(): string {
   const explicit = process.env.PVS_DOUYIN_CLI_BIN?.trim();
   if (explicit) return explicit;
   const userProfile = process.env.USERPROFILE?.trim();
@@ -53,6 +53,36 @@ function parseJsonEnvelope(stdout: string): Record<string, unknown> {
   return parsed as Record<string, unknown>;
 }
 
+export function douyinEnvelopeRequiresVerification(
+  payload: Record<string, unknown>,
+  stderr = ""
+): boolean {
+  const data =
+    payload.data && typeof payload.data === "object" && !Array.isArray(payload.data)
+      ? (payload.data as Record<string, unknown>)
+      : {};
+  const nilInfo =
+    data.search_nil_info &&
+    typeof data.search_nil_info === "object" &&
+    !Array.isArray(data.search_nil_info)
+      ? (data.search_nil_info as Record<string, unknown>)
+      : {};
+  const signals = [
+    nilInfo.search_nil_type,
+    nilInfo.search_nil_item,
+    data.qc,
+    data.status_msg,
+    data.message,
+    payload.message,
+    stderr
+  ]
+    .filter((value): value is string => typeof value === "string")
+    .join(" ");
+  return /verify[_\s-]?check|captcha|risk[_\s-]?control|验证码|风控/i.test(
+    signals
+  );
+}
+
 async function runDy(
   executable: string,
   args: string[],
@@ -70,8 +100,27 @@ async function runDy(
         PYTHONIOENCODING: "utf-8"
       }
     });
-    return parseJsonEnvelope(String(result.stdout ?? ""));
+    const envelope = parseJsonEnvelope(String(result.stdout ?? ""));
+    if (
+      douyinEnvelopeRequiresVerification(
+        envelope,
+        stripAnsi(String(result.stderr ?? ""))
+      )
+    ) {
+      throw new DomainValidationError("DOUYIN_RISK_CONTROL");
+    }
+    return envelope;
   } catch (error) {
+    if (
+      error instanceof DomainValidationError &&
+      [
+        "DOUYIN_CLI_NOT_FOUND",
+        "DOUYIN_LOGIN_REQUIRED",
+        "DOUYIN_RISK_CONTROL"
+      ].includes(error.message)
+    ) {
+      throw error;
+    }
     const item = error as {
       code?: string | number;
       stdout?: string | Buffer;

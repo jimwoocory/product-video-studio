@@ -50,7 +50,7 @@ The lockfile currently resolves 38 exact npm package versions. Installation is a
 | jiti | 2.4.2 | MIT | transitive |
 | prisma | 6.12.0 | Apache-2.0 | development |
 | playwright | 1.63.0 | Apache-2.0 | transitive |
-| playwright-core | 1.63.0 | Apache-2.0 | transitive |
+| playwright-core | 1.63.0 | Apache-2.0 | production |
 | qrcode-svg | 1.1.0 | MIT | production |
 | typescript | 7.0.2 | Apache-2.0 | development |
 | undici-types | 8.9.0 | MIT | transitive |

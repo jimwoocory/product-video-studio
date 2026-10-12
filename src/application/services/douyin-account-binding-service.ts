@@ -5,6 +5,7 @@ import type {
 import {
   DouyinOpsRuntimeError,
   type DouyinOpsIdentity,
+  type DouyinOpsProbe,
   type DouyinOpsRuntime
 } from "../ports/douyin-ops-runtime.js";
 
@@ -224,7 +225,7 @@ export class DouyinAccountBindingService {
     private readonly opsRuntime: DouyinOpsRuntime
   ) {}
 
-  async inspect(): Promise<DouyinAccountMatchResult> {
+  async inspect(opsProbe?: DouyinOpsProbe): Promise<DouyinAccountMatchResult> {
     const checkedAt = new Date().toISOString();
 
     let publish: DouyinBrowserAccountStatus;
@@ -257,7 +258,7 @@ export class DouyinAccountBindingService {
 
     let probe;
     try {
-      probe = await this.opsRuntime.probe();
+      probe = opsProbe ?? await this.opsRuntime.probe();
     } catch (error) {
       return unknownResult({
         reason: "OPS_RUNTIME_ERROR",

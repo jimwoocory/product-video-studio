@@ -1,5 +1,9 @@
 import { renderDirectorGenerationControls } from "./director-generation-ui.js";
 import { renderBatchGenerationPanel } from "./smart-generation-ui.js";
+import type { WorkflowReadModel } from "../application/services/workflow-read-model.js";
+import { hasTrustedDouyinPublication } from "../application/services/published-ops-entry.js";
+import { pvsGlobalStyles, renderPvsGlobalHeader } from "./pvs-global-shell.js";
+import { douyinResearchPreflightControls, douyinResearchPreflightBrowserScript } from "./douyin-research-preflight-ui.js";
 import type {
   ArtifactRecord,
   CommandAttemptRecord,
@@ -248,13 +252,6 @@ function refText(ref?: { version: number; hash: string }): string {
 
 function resumePath(project: Project): string {
   if (project.status === "DRAFT") return `/projects/${project.id}/product`;
-  if (project.status === "PRODUCT_TRUTH_REVIEW") return `/projects/${project.id}/truth`;
-  if (project.status === "CREATIVE_REVIEW") return `/projects/${project.id}/creative`;
-  if (project.status === "SCRIPT_REVIEW") return `/projects/${project.id}/script`;
-  if (project.status === "DIRECTOR_REVIEW") return `/projects/${project.id}/director`;
-  if (project.status === "READY_TO_ASSEMBLE") {
-    return `/projects/${project.id}/timeline`;
-  }
   if (
     project.status === "FINAL_REVIEW" ||
     project.status === "READY_TO_PUBLISH" ||
@@ -264,20 +261,20 @@ function resumePath(project: Project): string {
   ) {
     return `/projects/${project.id}/final`;
   }
-  return `/projects/${project.id}/generate`;
+  return `/projects/${project.id}/smart`;
 }
 
 function currentActionText(project: Project): string {
   const labels: Record<Project["status"], string> = {
-    DRAFT: "填写产品资料并生成产品事实",
-    PRODUCT_TRUTH_REVIEW: "确认产品事实",
-    CREATIVE_REVIEW: "选择一个创意方案",
-    SCRIPT_REVIEW: "确认脚本内容",
-    DIRECTOR_REVIEW: "确认导演分镜计划",
-    READY_TO_GENERATE: "运行生成前检查并确认本次生成",
-    GENERATING: "等待视频生成完成；系统会自动刷新",
-    GENERATION_REVIEW: "审片并决定采用、重做或跳过",
-    READY_TO_ASSEMBLE: "进入视频剪辑并确认",
+    DRAFT: "填写产品资料并准备产品事实",
+    PRODUCT_TRUTH_REVIEW: "进入智能生成并完成产品事实确认",
+    CREATIVE_REVIEW: "继续智能生成并选择创意",
+    SCRIPT_REVIEW: "继续当前智能生成任务",
+    DIRECTOR_REVIEW: "继续当前智能生成任务",
+    READY_TO_GENERATE: "继续智能生成并确认本次付费范围",
+    GENERATING: "智能生成正在执行视频生成与下载",
+    GENERATION_REVIEW: "继续智能生成；需要时进行人工审片",
+    READY_TO_ASSEMBLE: "继续智能生成并自动剪辑",
     FINAL_REVIEW: "确认最终成片",
     READY_TO_PUBLISH: "选择发布方式",
     PUBLISHING: "等待发布流程完成",
@@ -304,6 +301,9 @@ function pageKindForHeader(pageTitle: string): WorkflowPageKind | undefined {
 }
 
 function currentActionForPage(project: Project, pageTitle: string): string {
+  if (pageTitle === "单视频生成") return "填写独立片段要求并检查生成材料";
+  if (pageTitle === "项目模型设置") return "查看或配置此项目的模型设置";
+  if (pageTitle === "参考视频") return "上传或检查此项目的参考视频";
   const page = pageKindForHeader(pageTitle);
   return page ? workflowPageTaskText(page, project) : currentActionText(project);
 }
@@ -348,33 +348,49 @@ export function layout(
         blockers
       })
     : undefined;
+  const workflowBanner = project && navigationState?.workflow
+    ? `<section class="card" id="workflow-read-model" data-workflow-source="${esc(navigationState.workflow.source)}">
+         <b>当前制作任务：${esc(navigationState.workflow.stageLabel)}</b> · ${esc(navigationState.workflow.statusLabel)}
+         <p>下一步：<a class="primary" href="${esc(navigationState.workflow.action.href)}">${esc(navigationState.workflow.action.label)}</a></p>
+         ${navigationState.workflow.publication.projectMarkedPublished && navigationState.workflow.activeTaskCount > 0
+           ? '<p class="muted">历史项目状态标记：已发布（不代表当前制作任务已完成；可信发布回执请在成片页核对）。</p>' : ""}
+       </section>`
+    : "";
   const nav = project && navigationState
     ? (() => {
-        const mainHtml = navigationState.steps.map((step) => {
-          const stateClass =
-            step.state === "CURRENT"
-              ? "step-current"
-              : step.state === "COMPLETE"
-                ? "step-done"
-                : step.state === "RESUME"
-                  ? "step-next"
-                  : step.state === "OPTIONAL"
-                    ? "step-optional"
-                    : "";
-          return `<a class="step ${stateClass}" href="${esc(step.href)}"><span>${step.index} ${esc(step.title)}</span>${step.badge ? `<small>${esc(step.badge)}</small>` : ""}</a>`;
-        }).join("");
+        const mainHtml = [
+          {
+            title: "产品资料",
+            href: `/projects/${project.id}/product`,
+            current: title === "产品输入" || title === "产品事实"
+          },
+          {
+            title: "智能生成",
+            href: `/projects/${project.id}/smart`,
+            current: title === "智能生成"
+          },
+          {
+            title: "成片 / 发布",
+            href: `/projects/${project.id}/final`,
+            current: title === "成片与发布"
+          }
+        ].map((step, index) =>
+          `<a class="step ${step.current ? "step-current" : ""}" href="${esc(step.href)}"><span>${index + 1} ${esc(step.title)}</span></a>`
+        ).join("");
         const tools = [
+          { title: "联网研究", href: `/projects/${project.id}/research` },
           { title: "参考视频", href: `/projects/${project.id}/reference-video` },
-          { title: "智能生成", href: `/projects/${project.id}/agent` },
           { title: "模型设置", href: `/projects/${project.id}/models` }
         ].map((tool) => `<a class="tool-link ${title === tool.title ? "tool-current" : ""}" href="${tool.href}">${tool.title}</a>`).join("");
-        const resumeStep = navigationState.steps.find(
-          (step) => step.key === navigationState.globalResumeStep
-        );
+        const legacy = navigationState.steps
+          .filter(step => ["creative","script","director","generate","timeline"].includes(step.key))
+          .map(step => `<a class="tool-link" href="${esc(step.href)}">${esc(step.title)}</a>`)
+          .join("");
         return `<section class="workflow-nav">
-          <div class="workflow-nav-head"><b>主流程</b><div class="muted"><div>当前位置：${esc(title)} · 本页任务：${esc(navigationState.pageTaskText)}</div><div>继续主流程：<a href="${esc(navigationState.globalResumeHref)}">${esc(resumeStep?.title ?? "当前步骤")}</a> · ${esc(navigationState.globalResumeText)}</div></div></div>
+          <div class="workflow-nav-head"><b>智能生产主链</b><div class="muted"><div>当前位置：${esc(title)} · 本页任务：${esc(navigationState.pageTaskText)}</div><div>当前任务下一步：<a href="${esc(navigationState.globalResumeHref)}">${esc(navigationState.globalResumeText)}</a></div></div></div>
           <nav class="steps main-steps">${mainHtml}</nav>
           <div class="workflow-tools"><span class="muted">辅助工具</span><nav class="tool-steps">${tools}</nav></div>
+          <details class="technical"><summary>高级兼容工具</summary><p class="muted">旧创意、脚本、导演、生成和时间线页面仅用于历史任务、诊断和高级微调，不再是正常生产必经步骤。</p><nav class="tool-steps">${legacy}</nav></details>
         </section>`;
       })()
     : "";
@@ -389,6 +405,7 @@ export function layout(
 :root{font-family:Inter,"Microsoft YaHei",system-ui,sans-serif;color:#171717;background:#f5f5f3}
 *{box-sizing:border-box}body{margin:0}a{color:inherit}.top{background:#fff;border-bottom:1px solid #ddd;padding:14px 24px;display:flex;gap:20px;align-items:center}.top b{font-size:17px}.wrap{max-width:1180px;margin:0 auto;padding:24px}.steps{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 18px}.steps a{background:#fff;border:1px solid #ddd;padding:8px 11px;border-radius:8px;text-decoration:none}.head{display:flex;justify-content:space-between;gap:20px;align-items:flex-start}.status{font-size:13px;background:#eee;padding:5px 8px;border-radius:999px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(270px,1fr));gap:14px}.card{background:#fff;border:1px solid #deded8;border-radius:12px;padding:16px;margin:12px 0}.card h3{margin-top:0}.muted{color:#707070;font-size:13px}.blocker{background:#fff3cd;border:1px solid #e7ca66;border-radius:10px;padding:14px;margin:14px 0}.blocker code{font-weight:700}.primary{background:#171717;color:#fff;border:0;border-radius:9px;padding:11px 16px;font-weight:700;cursor:pointer}.primary:disabled{opacity:.35;cursor:not-allowed}.secondary{background:#fff;border:1px solid #bbb;border-radius:9px;padding:9px 13px}.facts{padding-left:18px}.hash{font-family:ui-monospace,Consolas,monospace;font-size:12px}.row{display:flex;gap:12px;flex-wrap:wrap}.field{display:flex;flex-direction:column;gap:5px;min-width:220px;flex:1}input,textarea,select{border:1px solid #bbb;border-radius:8px;padding:10px;font:inherit;background:#fff}textarea{min-height:90px}pre{white-space:pre-wrap;word-break:break-word;background:#f6f6f3;padding:12px;border-radius:8px;overflow:auto}.scene{border-left:3px solid #aaa;padding-left:14px}.clip{background:#fafaf8;border:1px solid #e1e1db;border-radius:8px;padding:12px;margin:8px 0}.claim-card{display:block;background:#fafaf8;border:1px solid #e1e1db;border-radius:10px;padding:13px 14px;margin:10px 0;cursor:pointer}.claim-card:hover{border-color:#c9c9c2;background:#fff}.claim-head{display:flex;align-items:flex-start;gap:11px}.claim-check{appearance:auto;width:17px;height:17px;min-width:17px;margin:3px 0 0;padding:0;cursor:pointer}.claim-check:disabled{cursor:not-allowed}.claim-body{min-width:0;flex:1}.claim-title-row{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}.claim-title{font-weight:700;line-height:1.55;word-break:break-word}.claim-title-row .status{flex:0 0 auto;white-space:nowrap}.claim-meta{margin:7px 0 0;line-height:1.55}.claim-card .technical{margin:6px 0 0}.segment{font-size:13px;border-top:1px dashed #ccc;padding:8px 0}.danger{color:#8a1f11}.ok{color:#176b2c}.quick{display:flex;gap:6px;flex-wrap:wrap}.quick button{background:#fff;border:1px solid #bbb;border-radius:7px;padding:6px 10px;cursor:pointer}.top .advanced-toggle{margin-left:auto;background:#fff;border:1px solid #bbb;border-radius:7px;padding:6px 10px;cursor:pointer}body:not(.advanced-mode) .technical,body:not(.advanced-mode) .hash{display:none!important}
 .workflow-nav{margin:0 0 18px}.workflow-nav-head{display:flex;justify-content:space-between;gap:12px;align-items:center;margin-bottom:8px}.main-steps{margin-bottom:10px}.main-steps .step{display:flex;align-items:center;gap:7px;background:#fff;border:1px solid #ddd;padding:8px 11px;border-radius:8px;text-decoration:none}.main-steps .step small{font-size:11px;color:#707070}.main-steps .step-current{border-color:#171717;box-shadow:0 0 0 1px #171717 inset}.main-steps .step-current small{color:#171717;font-weight:700}.main-steps .step-done{background:#f3f7f3;border-color:#b9cfbc}.main-steps .step-next{border-style:dashed;border-color:#777}.main-steps .step-next small{font-weight:700}.main-steps .step-optional{background:#fafafa}.workflow-tools{display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding-top:8px;border-top:1px solid #ddd}.tool-steps{display:flex;gap:7px;flex-wrap:wrap}.tool-link{background:#fff;border:1px solid #ddd;padding:7px 10px;border-radius:8px;text-decoration:none}.tool-current{border-color:#171717;font-weight:700}.primary{display:inline-block;text-decoration:none}.material-list,.agent-material-list{display:grid;gap:10px;margin:10px 0}.material-card,.agent-material-card{display:grid;grid-template-columns:120px 1fr;gap:12px;border:1px solid #ddd;border-radius:10px;padding:10px;background:#fafaf8}.material-preview,.agent-material-preview{width:120px;height:90px;border-radius:8px;background:#eee;display:flex;align-items:center;justify-content:center;overflow:hidden}.material-preview img,.material-preview video,.agent-material-preview img,.agent-material-preview video{width:100%;height:100%;object-fit:contain;background:#111}.material-preview audio,.agent-material-preview audio{width:110px}.material-actions,.agent-material-actions{display:flex;gap:7px;flex-wrap:wrap}.material-empty,.agent-material-empty{padding:12px;border:1px dashed #bbb;border-radius:10px;color:#707070}.material-status,.agent-material-status{font-size:12px;font-weight:700}.material-logo-box,.agent-logo-box{margin-top:10px}.file-picker-input{position:absolute!important;width:1px!important;height:1px!important;padding:0!important;margin:-1px!important;overflow:hidden!important;clip:rect(0,0,0,0)!important;white-space:nowrap!important;border:0!important;opacity:0!important}.file-picker-label{display:inline-flex;align-items:center;justify-content:center;width:max-content;cursor:pointer;text-decoration:none}.file-picker-label:focus{outline:2px solid #555;outline-offset:2px}@media(max-width:760px){.workflow-nav-head{align-items:flex-start;flex-direction:column}.main-steps .step{flex:1 1 calc(50% - 8px);justify-content:space-between}.workflow-tools{align-items:flex-start;flex-direction:column}.material-card,.agent-material-card{grid-template-columns:1fr}.material-preview,.agent-material-preview{width:100%;height:180px}}
+${pvsGlobalStyles}
 </style>
 <script>
 window.pvsCreateMaterialManager=function(config){
@@ -492,14 +509,31 @@ window.pvsCreateMaterialManager=function(config){
 </script>
 </head>
 <body>
-<header class="top"><b>Product Video Studio · P1 Final</b><a href="/projects">项目</a><a href="/tasks">任务中心</a><a href="/health-center">系统诊断</a><a href="/agent">智能生成</a><a href="/douyin-ops">抖音运营</a><a href="/settings/ai">大模型设置</a><span class="muted technical">版本 0.3.0-p1-final</span><button class="advanced-toggle" id="advanced-toggle" type="button">高级信息</button></header>
+${renderPvsGlobalHeader(title === "项目" ? "projects" : title === "任务中心" ? "tasks" : title === "系统诊断中心" ? "health" : title === "大模型设置" || title === "项目模型设置" ? "settings" : "studio", { advancedToggle: true, ...(project ? { project: { id: project.id, name: project.name } } : {}) })}
 <main class="wrap">
 ${nav}
+${workflowBanner}
+${project ? '<section class="card" id="smart-return-card" hidden><b>当前步骤来自智能生成任务</b><p>检查或修改完成后，使用下方入口返回刚才的任务进度，不必重新创建任务。</p><a class="primary" id="smart-return-link" href="#">返回原智能生成任务</a></section>' : ""}
 ${project ? `<section class="card technical"><b>失效影响</b><p class="muted">${esc(staleImpact(project))}</p><p class="muted">恢复入口：重新打开当前项目会从本地数据库和素材记录恢复。</p></section>` : ""}
 ${blockerHtml}
 ${body}
 </main>
 <script>
+(async()=>{
+const projectId=${JSON.stringify(project?.id ?? "")};
+const runId=new URLSearchParams(location.search).get("fromSmartRun");
+if(!projectId||!runId||!/^[A-Za-z0-9_-]{6,128}$/.test(runId))return;
+const card=document.querySelector("#smart-return-card"),link=document.querySelector("#smart-return-link");
+if(!card||!link)return;
+try{
+const response=await fetch("/api/projects/"+encodeURIComponent(projectId)+"/smart-runs/"+encodeURIComponent(runId));
+if(!response.ok)return;
+const result=await response.json();
+if(result.run?.id!==runId||result.run?.projectId!==projectId)return;
+link.href="/projects/"+encodeURIComponent(projectId)+"/smart?activeRun="+encodeURIComponent(runId)+"#smart-run-"+encodeURIComponent(runId);
+card.hidden=false;
+}catch{ /* Unavailable history: do not display an unverified return link. */ }
+})();
 (()=>{const key=\'pvs-advanced-mode\';const button=document.querySelector(\'#advanced-toggle\');const apply=()=>{const on=localStorage.getItem(key)===\'1\';document.body.classList.toggle(\'advanced-mode\',on);if(button)button.textContent=on?\'隐藏高级信息\':\'高级信息\';};apply();button?.addEventListener(\'click\',()=>{localStorage.setItem(key,document.body.classList.contains(\'advanced-mode\')?\'0\':\'1\');apply();});})();
 </script>
 </body></html>`;
@@ -507,7 +541,8 @@ ${body}
 
 export function renderProjectsPage(
   projects: Project[],
-  blockerCounts: Map<string, number>
+  blockerCounts: Map<string, number>,
+  workflows: ReadonlyMap<string, WorkflowReadModel> = new Map()
 ): string {
   const cards = projects.length
     ? projects
@@ -516,7 +551,13 @@ export function renderProjectsPage(
             <div class="head"><div><h3>${esc(project.name)}</h3><div class="muted technical">项目 ID：${esc(project.id)}</div></div><span class="status">${esc(statusLabel[project.status])}</span></div>
             <p>当前结果：产品事实 ${esc(refText(project.currentProductTruthRef))} · 脚本 ${esc(refText(project.currentScriptRef))}</p>
             <p class="muted">未解决阻塞：${blockerCounts.get(project.id) ?? 0} · 更新：${esc(project.updatedAt)}</p>
-            <a class="primary" href="${resumePath(project)}">继续项目</a>
+            ${workflows.get(project.id) ? `<p><b>当前工作流：</b>${esc(workflows.get(project.id)!.stageLabel)} · <b>下一步：</b>${esc(workflows.get(project.id)!.action.label)}</p>` : ""}
+            ${workflows.get(project.id)?.publication.projectMarkedPublished && workflows.get(project.id)?.activeTaskCount ? '<p class="muted">历史项目状态标记：已发布（回执请在成片页核对）；当前制作任务仍未结束。</p>' : ""}
+            <div class="row">
+              <a class="primary" href="${esc(workflows.get(project.id)?.source === "SMART_RUN" ? `/projects/${encodeURIComponent(project.id)}/smart?activeRun=${encodeURIComponent(workflows.get(project.id)?.runId ?? "")}#smart-run-${encodeURIComponent(workflows.get(project.id)?.runId ?? "")}` : workflows.get(project.id)?.action.href ?? resumePath(project))}">${workflows.get(project.id)?.taskSelectionRequired ? "选择当前任务" : "继续项目"}</a>
+              <button class="secondary delete-project" type="button" data-project-id="${esc(project.id)}" data-project-name="${esc(project.name)}">删除项目</button>
+            </div>
+            <div class="danger delete-error" role="alert"></div>
           </article>`
         )
         .join("")
@@ -548,6 +589,25 @@ document.querySelector('#create-project').addEventListener('submit',async(e)=>{
  const j=await r.json(); if(!r.ok){document.querySelector('#create-error').textContent=j.message||j.error;return;}
  location.href='/projects/'+j.project.id+'/product';
 });
+document.querySelectorAll('.delete-project').forEach(button=>button.addEventListener('click',async()=>{
+ const projectId=button.dataset.projectId,projectName=button.dataset.projectName||'';
+ const card=button.closest('.card'),error=card.querySelector('.delete-error');
+ error.textContent='';
+ if(!confirm('确定删除项目“'+projectName+'”？\\n\\n该项目的产品资料、生成记录、素材、剪辑和发布记录都会被删除。此操作不可撤销。'))return;
+ const typed=prompt('第二次确认：请输入完整项目名称后才能删除。\\n\\n'+projectName,'');
+ if(typed===null)return;
+ if(typed!==projectName){error.textContent='项目名称不匹配，未执行删除。';return;}
+ button.disabled=true;
+ try{
+   const r=await fetch('/api/projects/'+encodeURIComponent(projectId),{method:'DELETE',headers:{'content-type':'application/json'},body:JSON.stringify({confirmName:typed})});
+   const j=await r.json();
+   if(!r.ok)throw new Error(j.message||j.error||'删除项目失败');
+   location.reload();
+ }catch(err){
+   error.textContent=err.message||String(err);
+   button.disabled=false;
+ }
+}));
 </script>`
   );
 }
@@ -555,6 +615,7 @@ document.querySelector('#create-project').addEventListener('submit',async(e)=>{
 
 export function renderResearchPage(input: {
   workspace: ProjectWorkspace;
+  productInput?: ProductInputSnapshot | null;
   runs: ResearchRun[];
   latestRun?: ResearchRun;
   evidence: ResearchEvidence[];
@@ -673,6 +734,15 @@ export function renderResearchPage(input: {
     if (value >= 10000) return (value / 10000).toFixed(1) + "万";
     return String(value);
   };
+  const marketVideoLoginRequired =
+    marketVideoResearch?.status === "BLOCKED" &&
+    marketVideoResearch.blockerCode === "LOGIN_REQUIRED";
+  const marketVideoRiskControl =
+    marketVideoResearch?.status === "BLOCKED" &&
+    marketVideoResearch.blockerCode === "RISK_CONTROL";
+  const marketVideoProviderUnavailable =
+    marketVideoResearch?.status === "BLOCKED" &&
+    marketVideoResearch.blockerCode === "PROVIDER_NOT_AVAILABLE";
   const marketVideoHtml = marketVideoResearch
     ? marketVideoResearch.status === "BLOCKED"
       ? `<section class="card">
@@ -680,6 +750,28 @@ export function renderResearchPage(input: {
           <div class="blocker">
             <p><b>${esc(marketVideoResearch.message ?? "抖音视频搜索暂时不可用。")}</b></p>
             <p>下一步：${esc(marketVideoResearch.requiredUserAction ?? "检查抖音搜索运行时后重新运行深度研究。")}</p>
+            ${marketVideoProviderUnavailable ? `<p>抖音研究连接尚未确认。请使用上方研究表单中的连接检测或“暂不搜索抖音”选项；这里不再重复显示第二套连接面板。此前研究结果不会删除。</p>` : ""}
+            ${marketVideoLoginRequired ? `
+              <p>
+                <button class="primary" type="button" id="douyin-research-auth-open" data-query="${esc(marketVideoResearch.searchedQueries[0] ?? "护颈枕")}">打开抖音登录 / 搜索页</button>
+                <button class="secondary" type="button" id="douyin-research-auth-rerun">我已登录，重新检测</button>
+              </p>
+              <div id="douyin-research-auth-status" class="muted"></div>
+              <div id="douyin-research-auth-error" class="danger"></div>
+            ` : ""}
+            ${marketVideoRiskControl ? `
+              <div class="notice">
+                <p><b>当前不是“缺少登录”，而是抖音搜索本身仍被平台限制。</b></p>
+                <p>如果打开搜索页后一直只有灰色骨架、没有验证码或滑块，说明平台当前没有提供可人工处理的验证入口；这不是你漏了某一步。</p>
+                <p>这种情况下不要反复刷新或重复提交研究。可以稍后再试，或者先继续其他联网研究。</p>
+              </div>
+              <p>
+                <button class="primary" type="button" id="douyin-research-auth-open" data-query="${esc(marketVideoResearch.searchedQueries[0] ?? "护颈枕")}">打开抖音搜索页查看</button>
+                <button class="secondary" type="button" id="douyin-research-auth-rerun">重新检测风控状态</button>
+              </p>
+              <div id="douyin-research-auth-status" class="muted"></div>
+              <div id="douyin-research-auth-error" class="danger"></div>
+            ` : ""}
           </div>
           <p class="muted">本轮搜索词：${esc(marketVideoResearch.searchedQueries.join(" / ") || "未生成")}</p>
           <p class="technical">provider=${esc(marketVideoResearch.provider)} · code=${esc(marketVideoResearch.blockerCode ?? "UNKNOWN")}</p>
@@ -728,6 +820,7 @@ export function renderResearchPage(input: {
     ? `<section class="card">
         <div class="head"><div><h3>研究报告</h3><p class="muted">只基于已保存的研究证据生成。</p></div><span class="status">${esc(researchBriefStatusLabel[brief.status])}</span></div>
         <p>${esc(brief.summary)}</p>
+        ${brief.status === "READY" ? `<p><a class="primary" href="/projects/${encodeURIComponent(workspace.project.id)}/smart?useResearch=1">导入智能生成</a></p><p class="muted">把本研究报告的内容机会、结构方向和不确定项带入一键成片。研究中的新产品事实或使用规则仍必须先通过产品事实审核。</p>` : ""}
         <h4>有来源的发现</h4>
         ${brief.findings.length ? `<ul>${brief.findings.map((item)=>`<li>${esc(item.statement)} <span class="muted">· 置信度：${esc(confidenceLabel[item.confidence])}</span><span class="technical"> · evidence=${esc(item.evidenceIds.join(","))}</span></li>`).join("")}</ul>` : "<p>无。</p>"}
         <h4>内容机会</h4>
@@ -790,6 +883,18 @@ export function renderResearchPage(input: {
   return layout(
     "联网研究",
     `${projectHeader(workspace, "联网研究 / 证据")}
+    ${input.productInput && !workspace.productTruth ? `<section class="card" id="research-then-truth">
+      <h3>完成可选研究后，确认产品事实</h3>
+      <p>产品资料已经保存。你可以完成本页研究，也可以直接跳过研究；两条路径最终都需人工确认产品事实。</p>
+      <p class="muted">生成事实草稿可能调用已配置的文本 AI 模型；研究中的竞品信息不会直接确认为本产品事实。</p>
+      <button type="button" class="primary" id="research-finish-truth">研究完成或跳过：生成待确认产品事实</button>
+      <p class="danger" id="research-finish-truth-error" role="alert"></p>
+    </section>` : workspace.productTruth?.status === "DRAFT" ? `<section class="card" id="research-then-truth">
+      <h3>下一步：${brief?.candidateClaims.some(item=>item.status==="PROPOSED") || brief?.usageRules.some(item=>item.status==="PROPOSED") ? "选择要送入事实审核的研究候选" : "核对产品事实"}</h3>
+      <p>研究是可选的。研究中的候选不能自动升级成产品事实；只有你选中的内容才会进入待审核清单，随后仍需要人工逐条确认。</p>
+      ${brief?.candidateClaims.some(item=>item.status==="PROPOSED") || brief?.usageRules.some(item=>item.status==="PROPOSED") ? '<a class="secondary" href="#research-claims-form">选择研究候选内容</a> · ' : ""}
+      <a href="/projects/${encodeURIComponent(workspace.project.id)}/truth" class="primary">不采用研究候选，直接审核产品事实</a>
+    </section>` : ""}
     <section class="card"><h3>创作参考素材池</h3><p>研究图片与视频帧需要单独审核，只有明确确认的参考才能进入创意、导演与视频生成；不会变成新的产品事实。</p><a href="/projects/${encodeURIComponent(workspace.project.id)}/creative-references">预览、筛选并确认创作参考</a></section>
     <section class="card">
       <h3>联网研究</h3>
@@ -847,6 +952,7 @@ export function renderResearchPage(input: {
             </label>
           </div>
         </section>
+        ${douyinResearchPreflightControls}
         <p><button class="primary" type="submit">开始研究</button></p>
         <div id="research-progress" class="muted"></div>
         <div id="research-error" class="danger"></div>
@@ -859,37 +965,106 @@ export function renderResearchPage(input: {
     ${briefHtml}
     ${historyHtml}
 <script>
+${douyinResearchPreflightBrowserScript}
+document.querySelector('#research-finish-truth')?.addEventListener('click',async event=>{
+  const button=event.currentTarget;
+  const error=document.querySelector('#research-finish-truth-error');
+  if(!confirm('准备生成产品事实草稿并进入人工审核吗？这可能使用已配置的文本模型，但不会直接确认任何事实或触发付费视频生成。'))return;
+  button.disabled=true;error.textContent='';button.textContent='正在准备待审核事实…';
+  try{
+    const r=await fetch('/api/projects/${workspace.project.id}/truth/generate-from-input',{method:'POST'});
+    const j=await r.json();
+    if(!r.ok)throw new Error(j.message||j.error||'产品事实草稿未生成');
+    const candidates=document.querySelector('#research-claims-form input[name="claimId"], #research-claims-form input[name="usageRuleId"]');
+    location.href=candidates
+      ? '/projects/${workspace.project.id}/research?afterTruth=1#research-claims-form'
+      : '/projects/${workspace.project.id}/truth';
+  }catch(cause){error.textContent=cause.message||String(cause);button.disabled=false;button.textContent='研究完成或跳过：生成待确认产品事实';}
+});
 const researchLines=(value)=>String(value||'').split(/\\r?\\n/).map(x=>x.trim()).filter(Boolean);
 const researchPost=async(url,body)=>{
   const r=await fetch(url,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});
   const j=await r.json(); if(!r.ok)throw new Error(j.message||j.error||'研究操作失败'); return j;
 };
-document.querySelector('#research-form')?.addEventListener('submit',async(e)=>{
-  e.preventDefault(); const f=new FormData(e.currentTarget);
-  const progress=document.querySelector('#research-progress'),error=document.querySelector('#research-error');
+const researchPayload=(form)=>{
+  const f=new FormData(form);
   const sources=[];
   for(const url of researchLines(f.get('officialUrls')))sources.push({url,sourceType:'OFFICIAL'});
   for(const url of researchLines(f.get('productUrls')))sources.push({url,sourceType:'PUBLIC_PRODUCT'});
   for(const url of researchLines(f.get('competitorUrls')))sources.push({url,sourceType:'COMPETITOR'});
   for(const url of researchLines(f.get('userUrls')))sources.push({url,sourceType:'USER_URL'});
-  error.textContent=''; progress.textContent='正在获取来源并生成带证据的研究报告…';
+  return {
+    mode:f.get('mode'),goal:f.get('goal'),sourceUrls:sources,queries:researchLines(f.get('queries')),
+    marketVideo:{
+      enabled:f.get('marketVideoEnabled')==='on',
+      sort:f.get('marketVideoSort'),
+      timeRange:f.get('marketVideoTimeRange'),
+      count:12
+    }
+  };
+};
+const runResearch=async(form,progress,error,buttons=[],progressText='正在获取来源并生成研究结果…')=>{
+  buttons.forEach(button=>{if(button)button.disabled=true;});
+  if(error)error.textContent='';
+  if(progress)progress.textContent=progressText;
   try{
-    await researchPost('/api/projects/${workspace.project.id}/research/run',{
-      mode:f.get('mode'),goal:f.get('goal'),sourceUrls:sources,queries:researchLines(f.get('queries')),
-      marketVideo:{
-        enabled:f.get('marketVideoEnabled')==='on',
-        sort:f.get('marketVideoSort'),
-        timeRange:f.get('marketVideoTimeRange'),
-        count:12
-      }
-    });
+    await researchPost('/api/projects/${workspace.project.id}/research/run',researchPayload(form));
+    if(progress)progress.textContent='研究完成，正在刷新结果…';
     location.reload();
-  }catch(err){error.textContent=err.message||String(err);progress.textContent='';}
+  }catch(err){
+    if(error)error.textContent=err.message||String(err);
+    if(progress)progress.textContent='';
+    buttons.forEach(button=>{if(button)button.disabled=false;});
+  }
+};
+document.querySelector('#research-form')?.addEventListener('submit',async(e)=>{
+  e.preventDefault();
+  const form=e.currentTarget;
+  const progress=document.querySelector('#research-progress'),error=document.querySelector('#research-error');
+  const submit=form.querySelector('button[type="submit"]');
+  await runResearch(form,progress,error,[submit],'正在获取来源并生成研究结果，请勿重复点击…');
 });
 document.querySelector('#research-resume')?.addEventListener('click',async(e)=>{
   const button=e.currentTarget,error=document.querySelector('#research-resume-error');button.disabled=true;
   try{await researchPost('/api/projects/${workspace.project.id}/research/runs/'+encodeURIComponent(button.dataset.run)+'/resume',{});location.reload();}
   catch(err){error.textContent=err.message||String(err);button.disabled=false;}
+});
+document.querySelector('#douyin-research-auth-open')?.addEventListener('click',async(e)=>{
+  const button=e.currentTarget;
+  const status=document.querySelector('#douyin-research-auth-status');
+  const error=document.querySelector('#douyin-research-auth-error');
+  button.disabled=true;error.textContent='';status.textContent='正在打开 PVS 抖音研究独立浏览器…';
+  try{
+    const result=await researchPost('/api/projects/${workspace.project.id}/research/douyin-auth/launch',{query:button.dataset.query||'护颈枕'});
+    status.textContent=result.message||'验证窗口已打开。请完成验证后回到本页。';
+  }catch(err){
+    error.textContent=err.message||String(err);
+    status.textContent='';
+    button.disabled=false;
+  }
+});
+document.querySelector('#douyin-research-auth-rerun')?.addEventListener('click',async(e)=>{
+  const form=document.querySelector('#research-form');
+  if(!form)return;
+  const rerun=e.currentTarget;
+  const open=document.querySelector('#douyin-research-auth-open');
+  const status=document.querySelector('#douyin-research-auth-status');
+  const error=document.querySelector('#douyin-research-auth-error');
+  const oldText=rerun.textContent;
+  const checkingRisk=oldText?.includes('检测')||oldText?.includes('风控');
+  rerun.textContent=checkingRisk?'正在检测风控…':'正在重新研究…';
+  rerun.disabled=true;if(open)open.disabled=true;
+  error.textContent='';status.textContent=checkingRisk?'正在同步当前抖音搜索会话并检测风控状态…':'正在同步你刚刚完成的普通抖音登录会话…';
+  try{
+    const synced=await researchPost('/api/projects/${workspace.project.id}/research/douyin-auth/sync',{query:open?.dataset.query||'护颈枕'});
+    status.textContent=synced.message||'抖音搜索限制已解除，正在重新研究…';
+    await runResearch(form,status,error,[rerun,open],'抖音搜索限制已解除，正在重新研究，请勿重复点击…');
+  }catch(err){
+    error.textContent=err.message||String(err);
+    status.textContent='';
+    rerun.disabled=false;if(open)open.disabled=false;
+  }
+  if(document.body.contains(rerun))rerun.textContent=oldText;
 });
 document.querySelectorAll('[data-market-video-analyze]').forEach(button=>button.addEventListener('click',async()=>{
   const run=button.dataset.run,candidate=button.dataset.candidate;
@@ -927,10 +1102,12 @@ document.querySelector('#research-claims-form')?.addEventListener('submit',async
 
 export function renderReferenceVideoPage(input: {
   workspace: ProjectWorkspace;
+  navigation?: WorkflowNavigationState;
   profile?: ReferenceVideoProfile | null;
   history: ReferenceVideoProfile[];
+  previewArtifactId?: string;
 }): string {
-  const { workspace, profile, history } = input;
+  const { workspace, profile, history, previewArtifactId } = input;
   const profileHtml =
     profile && profile.status === "ACTIVE"
       ? `<section class="card">
@@ -941,7 +1118,8 @@ export function renderReferenceVideoPage(input: {
             </div>
             <span class="status">已启用</span>
           </div>
-          <video controls preload="metadata" style="width:100%;max-height:520px;background:#000" src="/api/artifacts/${esc(profile.videoArtifactId)}/content"></video>
+          <video controls preload="metadata" style="width:100%;max-height:520px;background:#000" src="/api/artifacts/${esc(previewArtifactId ?? profile.videoArtifactId)}/content"></video>
+          ${previewArtifactId ? '<p class="muted">网页播放使用 H.264 兼容预览；原始视频仍用于抽帧、分析与证据哈希。</p>' : ""}
           <div class="grid">
             <div class="card"><h4>前 3 秒钩子</h4><p>${esc(profile.hook.firstThreeSecondsPattern)}</p><p class="muted">${esc(profile.hook.structuralPurpose)}</p></div>
             <div class="card"><h4>节奏</h4><p>${esc(profile.pacing.overall)}</p><p class="muted">估计 ${profile.pacing.estimatedShotCount} 个镜头 · 平均 ${(profile.pacing.averageShotDurationMs/1000).toFixed(1)}s/镜头</p></div>
@@ -986,10 +1164,11 @@ export function renderReferenceVideoPage(input: {
         <p class="muted">分析模型可在 <a href="/projects/${workspace.project.id}/models">模型设置 → 参考视频分析</a> 中单独指定。</p>
       </div>
       <div class="card">
-        <h3>生成直参</h3>
-        <p>这是另一条独立链路：视频/音频可直接交给 Dreamina 全能参考生成，不等同于前面的参考视频分析。</p>
-        <p><a class="primary" href="/projects/${workspace.project.id}/agent${profile ? "?referenceArtifactId="+encodeURIComponent(profile.videoArtifactId) : ""}">进入智能生成并使用${profile ? "当前参考视频" : "视频 / 音频"}直参</a></p>
-        <p class="muted">系统会在真实扣费前再次动态检查当前 Dreamina 全能参考能力的素材数量、时长和模型限制。</p>
+        <h3>导入智能生成</h3>
+        <p>参考视频分析用于学习钩子、节奏、镜头语言、产品露出方式、旁白 / 对话结构和可复用制作方法。</p>
+        ${profile?.status === "ACTIVE"
+          ? `<p><a class="primary" href="/projects/${workspace.project.id}/smart?useReference=1">把当前参考视频分析导入智能生成</a></p><p class="muted">当前启用的参考视频分析会进入本轮创意、脚本和导演分镜；不会复制原视频的具体台词、镜头内容、人物身份或品牌表达。</p>`
+          : '<p class="muted">先上传并启用一份参考视频分析，之后即可导入智能生成。</p>'}
       </div>
     </section>
     ${profileHtml}
@@ -1038,7 +1217,9 @@ document.querySelector('#deactivate-reference-video')?.addEventListener('click',
   }
 });
 </script>`,
-    workspace.project
+    workspace.project,
+    [],
+    input.navigation
   );
 }
 
@@ -1061,20 +1242,21 @@ export function renderAgentHome(projects: Project[]): string {
         .map(
           (project) => `<article class="card">
             <div class="head"><div><h3>${esc(project.name)}</h3><p class="muted">目标 ${project.targetDurationMs / 1000} 秒</p></div><span class="status">${esc(statusLabel[project.status])}</span></div>
-            <p>智能生成不会替代标准流程；它会根据材料和要求选择合适的 Dreamina 生成能力。</p>
-            <a class="primary" href="/projects/${project.id}/agent">进入智能生成</a>
+            <p>按项目目标 ${project.targetDurationMs / 1000} 秒自动生成创意、脚本和导演分镜，再按 Seedance 单镜头能力自动拆分，批量生成并进入自动剪辑。</p>
+            <a class="primary" href="/projects/${project.id}/smart">进入智能生成</a>
           </article>`
         )
         .join("")
     : '<section class="card"><p>还没有项目。先创建一个项目作为智能生成任务容器。</p><a class="primary" href="/projects">新建项目</a></section>';
   return layout(
     "智能生成",
-    `<div class="head"><div><h1>智能生成</h1><p class="muted">选择项目后，给出材料和要求，系统会检查 Dreamina 官方生成能力与当前命令支持范围，再规划生成。</p></div></div><section class="grid">${cards}</section>`
+    `<div class="head"><div><h1>智能生成</h1><p class="muted">这里的时长是最终成片总时长。系统先写完整脚本，再依据 Dreamina / Seedance 当前单镜头时长限制自动拆分，不会把整段总时长直接提交给单次视频生成。</p></div></div><section class="grid">${cards}</section>`
   );
 }
 
 export function renderAgentProjectPage(input: {
   workspace: ProjectWorkspace;
+  navigation?: WorkflowNavigationState;
   tasks: AgentTask[];
   artifacts?: ArtifactRecord[];
   prefillReference?: {
@@ -1239,9 +1421,9 @@ export function renderAgentProjectPage(input: {
     : '<section class="card"><p>还没有智能生成任务。</p></section>';
 
   return layout(
-    "智能生成",
-    `${projectHeader(workspace, "智能生成")}
-    <section class="card"><h3>生成模式</h3><p><b>单视频直出</b> · <a href="/projects/${encodeURIComponent(workspace.project.id)}/smart">一键成片工作台（分阶段接入中）</a></p><p class="muted">单视频直出保持原流程；一键成片使用当前产品事实进行可恢复的多镜头编排。</p></section>
+    "单视频生成",
+    `${projectHeader(workspace, "单视频生成")}
+    <section class="card"><h3>这是单片段工具，不是完整成片入口</h3><p><a class="primary" href="/projects/${encodeURIComponent(workspace.project.id)}/smart">返回智能生成：按 ${workspace.project.targetDurationMs/1000} 秒总时长自动写脚本、拆分镜头并生成成片</a></p><p class="muted">本页只用于单独生成一个 Seedance 片段，所以单次时长必须服从当前模型上限；项目总时长不会在这里直接提交。</p></section>
     <section class="card">
       <h3>直接生成一个视频</h3>
       <p class="muted">系统会先检查材料和当前 Dreamina 官方生成能力。真实消耗积分前仍会要求你确认一次。</p>
@@ -1270,7 +1452,7 @@ export function renderAgentProjectPage(input: {
               <option value="">正在读取…</option>
             </select>
           </label>
-          <label class="field">本次生成时长（秒）<input id="agent-duration" name="durationSeconds" type="number" min="2" max="120" step="1" value="10" required><span class="muted">系统会按当前模型和命令的实时能力限制时长。</span></label>
+          <label class="field">单个 Seedance 片段时长（秒）<input id="agent-duration" name="durationSeconds" type="number" min="2" max="120" step="1" value="10" required><span class="muted">这里只控制一个生成片段；完整成片请使用“智能生成”，系统会按项目总时长自动拆镜。</span></label>
         </div>
         <section class="card">
           <h4>声音</h4>
@@ -1585,7 +1767,9 @@ async function advanceAgentTasks(){
 }
 if(document.querySelector('.agent-task[data-polling="1"]'))setTimeout(advanceAgentTasks,1200);
 </script>`,
-    workspace.project
+    workspace.project,
+    [],
+    input.navigation
   );
 }
 
@@ -1814,6 +1998,7 @@ document.querySelector('#system-ai-default')?.addEventListener('submit',async(e)
 
 export function renderProjectModelSettingsPage(input: {
   workspace: ProjectWorkspace;
+  navigation?: WorkflowNavigationState;
   providers: AiProviderWithModels[];
   systemPreference: AiSystemPreference;
   projectPreference: ProjectAiPreference;
@@ -1893,7 +2078,9 @@ document.querySelectorAll('.step-model-form').forEach(form=>form.addEventListene
   catch(err){m.textContent=err.message||String(err);}
 }));
 </script>`,
-    workspace.project
+    workspace.project,
+    [],
+    input.navigation
   );
 }
 
@@ -1930,7 +2117,7 @@ function renderProduct(
     <section class="card">
       <h4>产品图片*（至少 1 张，单张≤10MB）</h4>
       <div class="field"><span>选择产品图片（可多选、可继续追加）</span>
-        <div class="row"><label class="secondary file-picker-label" for="product-image-input" id="product-image-pick" tabindex="0">选择产品图片</label><span class="muted">再次选择会追加；提交前可以逐张预览、替换或删除。</span></div>
+        <div class="row"><button type="button" class="secondary file-picker-label" id="product-image-pick">选择产品图片</button><span class="muted">再次选择会追加；提交前可以逐张预览、替换或删除。</span></div>
         <input class="file-picker-input" id="product-image-input" name="images" type="file" accept="image/*" multiple>
       </div>
       <input id="product-image-replace-input" type="file" accept="image/*" hidden>
@@ -1939,7 +2126,7 @@ function renderProduct(
     </section>
     <section class="card">
       <h4>品牌标志 Logo（可选，独立管理）</h4>
-      <div class="field"><span>选择 / 替换 Logo</span><div class="row"><label class="secondary file-picker-label" for="product-logo-input" id="product-logo-pick" tabindex="0">选择 Logo</label></div><input class="file-picker-input" id="product-logo-input" name="logo" type="file" accept="image/*"></div>
+      <div class="field"><span>选择 / 替换 Logo</span><div class="row"><button type="button" class="secondary file-picker-label" id="product-logo-pick">选择 Logo</button></div><input class="file-picker-input" id="product-logo-input" name="logo" type="file" accept="image/*"></div>
       <div id="product-logo-preview" class="material-logo-box"><div class="material-empty">尚未选择 Logo。</div></div>
       <p><button type="button" class="secondary" id="product-logo-replace" disabled>替换 Logo</button> <button type="button" class="secondary" id="product-logo-remove" disabled>删除 Logo</button></p>
     </section>
@@ -1953,7 +2140,8 @@ function renderProduct(
       <label class="field">严重级别<select name="forbiddenSeverity"><option value="HARD">严格禁止修改</option><option value="SOFT">尽量保持不变</option></select></label>
       <label class="field">说明<input name="forbiddenDescription" placeholder="例如：不得改变品牌标志形状"></label>
     </div>
-    <p><button class="primary" id="generate-truth">保存资料并生成产品事实</button></p>
+    <p class="muted">先保存产品资料，再决定是否进行联网研究。无论研究还是跳过，最后都需要人工确认产品事实，未经确认不得进入正式创作。</p>
+    <p>${!workspace.productTruth ? `<button class="primary" type="submit" id="save-for-research">保存资料，先进行可选研究</button> <button class="secondary" type="submit" id="generate-truth">跳过研究，直接生成待审核事实</button>` : `<button class="primary" type="submit" id="generate-truth">保存资料并生成新版本产品事实</button>`}</p>
     <p id="product-progress" class="muted"></p>
     <div id="product-error" class="danger"></div>
   </form></section>
@@ -1981,15 +2169,19 @@ const productMaterialManager=pvsCreateMaterialManager({
   emptyText:'尚未选择产品图片。',
   logoEmptyText:'尚未选择 Logo。'
 });
+document.querySelector('#product-image-pick')?.addEventListener('click',()=>productMaterialManager.pickFiles());
+document.querySelector('#product-logo-pick')?.addEventListener('click',()=>productMaterialManager.pickLogo());
 
 
 document.querySelector('#product-form').addEventListener('submit',async(e)=>{
   e.preventDefault();
   const form=e.currentTarget, f=new FormData(form);
-  const button=document.querySelector('#generate-truth');
+  const button=e.submitter||document.querySelector('#generate-truth');
   const progress=document.querySelector('#product-progress');
   const error=document.querySelector('#product-error');
-  error.textContent=''; button.disabled=true; progress.textContent='正在保存素材并生成产品事实…';
+  const deferTruth=button.id==='save-for-research';
+  error.textContent=''; button.disabled=true;
+  progress.textContent=deferTruth?'正在保存原始资料，下一步可联网研究或直接跳过研究…':'正在保存素材并生成待确认的产品事实…';
   try{
     if(!productMaterialManager.getItems().length)throw new Error('请至少选择 1 张产品图片');
     const invalid=productMaterialManager.validate();
@@ -2016,14 +2208,15 @@ document.querySelector('#product-form').addEventListener('submit',async(e)=>{
       category:f.get('category'),
       images,
       logo,
-      forbiddenChanges
+      forbiddenChanges,
+      deferTruth
     };
     const r=await fetch('/api/projects/${workspace.project.id}/product-input/generate-truth',{
       method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(payload)
     });
     const j=await r.json();
     if(!r.ok) throw new Error(j.message||j.error||'生成失败');
-    location.href='/projects/${workspace.project.id}/truth';
+    location.href='/projects/${workspace.project.id}/'+(deferTruth?'research?fromProduct=1':'truth');
   }catch(err){error.textContent=err.message||String(err);progress.textContent='';button.disabled=false;}
 });
 const retry=document.querySelector('#retry-truth');
@@ -2053,6 +2246,16 @@ function renderTruth(
   const canonicalArtifact = canonicalAsset
     ? artifacts.find((item) => item.id === canonicalAsset.artifactId)
     : undefined;
+  const awaitingClaims = truth.uncertainClaims.filter(claim =>
+    truth.status === "DRAFT" && !claim.dispositionConfirmedByUser
+  ).length;
+  const awaitingRules = (truth.usageRules ?? []).filter(rule =>
+    truth.status === "DRAFT" && !rule.dispositionConfirmedByUser
+  ).length;
+  const verifiedImage = canonicalArtifact?.integrityStatus === "READY" &&
+    canonicalArtifact.mimeType?.startsWith("image/");
+  const hasResearchCandidates = truth.uncertainClaims.some(item => item.sourceType === "research") ||
+    (truth.usageRules ?? []).some(item => item.sourceType === "research");
   const claimRows = truth.uncertainClaims.length
     ? truth.uncertainClaims.map(c=>`<li><b>${claimStatusLabel[c.status]}</b> · ${esc(c.statement)}<br><span class="muted">${esc(c.reason)}</span>${c.sourceType==="research"?`<br><span class="status">研究证据</span> <a href="/projects/${workspace.project.id}/research">查看来源</a>`:""}<span class="technical"> · ${esc(c.status)}${c.evidenceRefs?.length?` · evidence=${esc(c.evidenceRefs.join(","))}`:""}</span>${truth.status==="DRAFT"&&!c.dispositionConfirmedByUser?`<div><select class="claim-disposition" data-claim-id="${esc(c.id)}"><option value="KEEP_UNVERIFIED">保留为未验证</option><option value="REJECT">拒绝</option><option value="PROMOTE">提升为事实（用户明确确认）</option></select></div>`:truth.status==="DRAFT"?`<div class="muted">已在上一轮产品事实审核中处理，本轮无需重复确认。</div>`:""}</li>`).join("")
     : "<li>无不确定信息</li>";
@@ -2060,11 +2263,11 @@ function renderTruth(
     ? (truth.usageRules ?? []).map(rule=>`<li><b>${rule.status==="CONFIRMED"?"已确认硬约束":rule.status==="REJECTED"?"已拒绝":"未验证"}</b> · ${esc(usageRuleCategoryLabel[rule.category])} · ${esc(rule.statement)}<br><span class="muted">${esc(usageRulePolarityLabel[rule.polarity])} · 置信度：${esc(confidenceLabel[rule.confidence])}</span>${rule.sourceType==="research"?`<br><span class="status">研究证据</span> <a href="/projects/${workspace.project.id}/research">查看来源</a>`:""}<span class="technical"> · ${esc(rule.status)}${rule.evidenceRefs?.length?` · evidence=${esc(rule.evidenceRefs.join(","))}`:""}</span>${truth.status==="DRAFT"&&!rule.dispositionConfirmedByUser?`<div><select class="usage-rule-disposition" data-rule-id="${esc(rule.id)}"><option value="KEEP_UNVERIFIED">保留为未验证</option><option value="REJECT">拒绝规则</option><option value="CONFIRM">确认并作为后续硬约束</option></select></div>`:truth.status==="DRAFT"?`<div class="muted">已在上一轮产品事实审核中处理，本轮无需重复确认。</div>`:""}</li>`).join("")
     : "<li>当前没有产品使用规则。</li>";
   const action = truth.status === "DRAFT"
-    ? `<button class="primary" id="confirm-truth">确认产品事实并生成创意</button><span id="truth-progress" class="muted"></span><div id="truth-error" class="danger"></div>
+    ? `<button class="primary" id="confirm-truth">确认产品事实并继续当前任务</button><span id="truth-progress" class="muted"></span><div id="truth-error" class="danger"></div>
 <script>
 document.querySelector('#confirm-truth').addEventListener('click',async()=>{
   const button=document.querySelector('#confirm-truth'), progress=document.querySelector('#truth-progress'), error=document.querySelector('#truth-error');
-  button.disabled=true; error.textContent=''; progress.textContent=' 正在确认并生成 4–6 个创意…';
+  button.disabled=true; error.textContent=''; progress.textContent=' 正在确认产品事实，随后返回当前制作任务…';
   try{
     const dispositions={};
     document.querySelectorAll('.claim-disposition').forEach(el=>{dispositions[el.dataset.claimId]=el.value;});
@@ -2072,19 +2275,29 @@ document.querySelector('#confirm-truth').addEventListener('click',async()=>{
     document.querySelectorAll('.usage-rule-disposition').forEach(el=>{usageRuleDispositions[el.dataset.ruleId]=el.value;});
     const r=await fetch('/api/projects/${workspace.project.id}/truth/confirm',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({projectId:'${workspace.project.id}',dispositions,usageRuleDispositions})});
     const j=await r.json(); if(!r.ok) throw new Error(j.message||j.error);
-    location.href='/projects/${workspace.project.id}/creative';
+    const currentRun=new URLSearchParams(location.search).get('fromSmartRun');
+    location.href='/projects/${workspace.project.id}/smart'+(currentRun?'?activeRun='+encodeURIComponent(currentRun):'');
   }catch(err){error.textContent=err.message||String(err);progress.textContent='';button.disabled=false;}
 });
 </script>`
-    : `<a class="primary" href="/projects/${workspace.project.id}/creative">继续查看创意</a>`;
+    : `<a class="primary" href="/projects/${workspace.project.id}/smart">进入智能生成</a>`;
   return `${projectHeader(workspace, "产品事实确认")}
-  <section class="card"><h3>当前结果 · ${versionStatusLabel[truth.status]}</h3><p>版本 ${truth.version}${truth.aiExecution ? `<span class="technical"> · 模型：<b>${esc(truth.aiExecution.modelId)}</b></span>` : ""} <span class="hash">· ${esc(truth.contentHash)}${truth.aiExecution ? ` · provider=${esc(truth.aiExecution.providerId)} · config=v${truth.aiExecution.configVersion}` : ""}</span></p>
-  <p><b>${esc(truth.productName)}</b> · ${esc(truth.brand ?? "无品牌")} · ${esc(truth.category ?? "未分类")}</p></section>
-  <section class="card"><h3>产品身份基准</h3>
-    <p>主产品图片：${esc(canonicalAsset?.originalFilename ?? "未解析")} <code class="technical">${esc(truth.canonicalImageId)}</code></p>
-    <p>原文件：${esc(canonicalAsset?.originalFilename ?? "未解析")} · 素材状态：<b class="${canonicalArtifact?.integrityStatus==="READY"?"ok":"danger"}">${canonicalArtifact?.integrityStatus==="READY"?"可用":canonicalArtifact?.integrityStatus==="PENDING"?"处理中":canonicalArtifact?.integrityStatus==="MISSING"?"文件缺失":canonicalArtifact?.integrityStatus==="CORRUPT"?"文件损坏":"未知"}</b></p>
-    <p class="hash">artifact=${esc(canonicalAsset?.artifactId ?? "UNKNOWN")} · sha256=${esc(canonicalAsset?.sha256 ?? "UNKNOWN")}</p>
-    <p>标准颜色：${truth.standardColors.length ? esc(truth.standardColors.join(" / ")) : "未确认"}</p>
+  <section class="card"><h3>产品事实审核 · ${versionStatusLabel[truth.status]}</h3><p><b>${esc(truth.productName)}</b> · ${esc(truth.brand ?? "无品牌")} · ${esc(truth.category ?? "未分类")}</p><p class="muted">版本 ${truth.version} · 待处理 ${awaitingClaims + awaitingRules} 项 · 研究引用：${hasResearchCandidates ? "包含待核查的研究候选" : "未引入研究候选或已跳过研究"}</p><p><a class="secondary" href="/projects/${encodeURIComponent(workspace.project.id)}/research">返回可选联网研究</a></p><details class="technical"><summary>展开技术版本信息</summary><p>${esc(truth.contentHash)}${truth.aiExecution ? " · 模型 "+esc(truth.aiExecution.modelId)+" / "+esc(truth.aiExecution.providerId) : ""}</p></details></section>
+  <section class="card" id="truth-identity"><h3>产品身份基准</h3>
+    <div style="display:grid;grid-template-columns:minmax(150px,280px) minmax(0,1fr);gap:16px;align-items:start">
+      <div>
+        ${verifiedImage && canonicalAsset
+          ? `<img src="/api/artifacts/${encodeURIComponent(canonicalAsset.artifactId)}/content" alt="当前已保存的产品主图" loading="lazy" style="display:block;width:100%;height:auto;max-height:300px;object-fit:contain;background:#f5f7fa;border:1px solid #d6dce6;border-radius:10px">`
+          : '<div style="padding:20px;background:#f7f8fa;border:1px solid #d9dfe5;border-radius:10px">当前主图不可预览，请检查素材状态</div>'}
+      </div>
+      <div>
+        <p><b>当前主参考：</b>${esc(canonicalAsset?.originalFilename ?? "未解析")}</p>
+        <p><b>素材状态：</b><span class="${canonicalArtifact?.integrityStatus==="READY"?"ok":"danger"}">${canonicalArtifact?.integrityStatus==="READY"?"可用":canonicalArtifact?.integrityStatus==="PENDING"?"处理中":canonicalArtifact?.integrityStatus==="MISSING"?"文件缺失":canonicalArtifact?.integrityStatus==="CORRUPT"?"文件损坏":"未知"}</span></p>
+        <p><b>标准颜色：</b>${truth.standardColors.length ? esc(truth.standardColors.join(" / ")) : "未确认"}</p>
+        <p class="muted">所有后续制作资产与视频中的产品外观必须遵循确认的主参考图。</p>
+        <details class="technical"><summary>技术文件与校验信息</summary><p>产品参考：${esc(truth.canonicalImageId)}<br>素材：${esc(canonicalAsset?.artifactId ?? "UNKNOWN")}<br>文件校验：${esc(canonicalAsset?.sha256 ?? "UNKNOWN")}</p></details>
+      </div>
+    </div>
   </section>
   <div class="grid"><section class="card"><h3>已确认事实</h3><ul class="facts">${[...truth.confirmedFeatures,...truth.sellingPoints].map(f=>`<li><code class="technical">${esc(f.id)}</code> ${esc(f.statement)}</li>`).join("")||"<li>无</li>"}</ul></section>
   <section class="card"><h3>禁止修改项</h3><ul class="facts">${truth.forbiddenChanges.map(f=>`<li><b>${f.severity==="HARD"?"严格禁止修改":"尽量保持不变"}</b> · ${f.field==="logo"?"品牌标志":f.field==="color"?"颜色":f.field==="shape"?"形状":f.field==="packaging"?"包装":f.field==="text"?"文字":f.field==="model"?"型号":f.field==="proportion"?"比例":"其他"} · ${esc(f.description)}</li>`).join("")||"<li>无</li>"}</ul></section>
@@ -2252,10 +2465,12 @@ function renderDirector(
             truth=${esc(prompt.productTruthRef.hash)}<br>
             script=${esc(prompt.scriptRef.hash)}<br>
             plan=${esc(prompt.productionPlanRef.hash)}</p>
-            <h4>生成提示词（只读）</h4><pre>${esc(prompt.promptText)}</pre>
+            <h4>实际提交给即梦的提示词（只读）</h4><pre>${esc(prompt.promptText)}</pre>
+            <div class="technical"><h4>内部审计映射</h4>
+            <p class="hash">auditContractHash=${esc(prompt.auditContractHash ?? "legacy")}</p>
             <h4>factMapping</h4><pre>${esc(JSON.stringify(prompt.factMapping, null, 2))}</pre>
             <h4>segmentMapping</h4><pre>${esc(JSON.stringify(prompt.segmentMapping, null, 2))}</pre>
-            <h4>constraintMapping</h4><pre>${esc(JSON.stringify(prompt.constraintMapping, null, 2))}</pre>
+            <h4>constraintMapping</h4><pre>${esc(JSON.stringify(prompt.constraintMapping, null, 2))}</pre></div>
           </details>`
         )
         .join("")
@@ -2545,7 +2760,7 @@ function renderGenerate(
           decision.generationAttemptId === attempt.id &&
           decision.outputArtifactId === output.id &&
           decision.outputArtifactHash === output.sha256 &&
-          (decision.decision === "ACCEPT" || decision.decision === "REDO")
+          (decision.decision === "ACCEPT" || decision.decision === "REDO" || decision.decision === "STALE")
       )
       .sort((a, b) => b.decidedAt.localeCompare(a.decidedAt))[0];
     if (latestReview?.decision === "ACCEPT") acceptedClipIds.add(clip.id);
@@ -2726,7 +2941,7 @@ function renderGenerate(
             <video controls preload="metadata" style="width:100%;max-height:520px" src="/api/artifacts/${esc(output.id)}/content"></video>
             <p class="hash">video=${esc(output.id)} · sha256=${esc(output.sha256 ?? "UNKNOWN")}</p>
             ${latestReview
-              ? `<p>最新审片：<b>${latestReview.source === "AI_VISUAL_GATE" ? "视觉 AI 高置信自动采用" : latestReview.decision === "ACCEPT" ? "采用" : latestReview.decision === "REDO" ? "重新生成" : esc(latestReview.decision)}</b> · ${esc(latestReview.decidedAt)}</p>${latestReview.source === "AI_VISUAL_GATE" ? '<p class="muted">此结果来自用户在一键成片任务中预先启用的视觉门禁；不代表用户逐镜头手工点击采用。</p>' : ""}`
+              ? `<p>最新审片：<b>${latestReview.source === "AI_VISUAL_GATE" ? "视觉 AI 高置信自动采用" : latestReview.decision === "ACCEPT" ? "采用" : latestReview.decision === "REDO" ? "重新生成" : latestReview.decision === "STALE" ? "因上游镜头重做需重新审核" : esc(latestReview.decision)}</b> · ${esc(latestReview.decidedAt)}</p>${latestReview.source === "AI_VISUAL_GATE" ? '<p class="muted">此结果来自用户在一键成片任务中预先启用的视觉门禁；不代表用户逐镜头手工点击采用。</p>' : ""}`
               : `<p><button class="primary review-action" data-attempt="${esc(attempt.id)}" data-clip="${esc(attempt.clipId)}" data-decision="ACCEPT">接受此结果</button>
                  <button class="secondary review-action" data-attempt="${esc(attempt.id)}" data-clip="${esc(attempt.clipId)}" data-decision="REDO">重新生成此镜头</button></p>`}
           </div>`
@@ -3269,6 +3484,17 @@ function renderFinal(
         receipts: publishBridge.receipts
       })
     : `<section class="card"><h3>发布中心</h3><p class="muted">发布方式状态尚未加载；最终 MP4 仍可手动下载。</p></section>`;
+  const showPublishedDouyinOperations = Boolean(
+    publishBridge && hasTrustedDouyinPublication({
+      projectId: workspace.project.id,
+      finalAssemblyId: assembly?.id,
+      finalArtifactId: assembly?.outputArtifactId,
+      finalArtifactHash: assembly?.outputArtifactHash,
+      finalArtifactReady: finalDeliverableReady,
+      packages: publishBridge.packages,
+      receipts: publishBridge.receipts
+    })
+  );
 
   const selectedPublishProbe = publishBridge?.probes.find(
     (probe) => probe.providerType === publishBridge.preference.providerType
@@ -3295,6 +3521,12 @@ function renderFinal(
 ${finalQcHtml}
 ${publishCenter}
 ${publishHistory ? `<section class="card"><h3>兼容的旧发布记录（只读）</h3>${publishHistory}</section>` : ""}
+${showPublishedDouyinOperations
+  ? `<section class="card" id="post-publish-ops-entry"><h3>发布已确认 · 下一步</h3>
+       <p class="muted">当前成片已有抖音可信发布回执。可以进入该项目运营页查看作品绑定、播放数据、评论和复盘。</p>
+       <p><a class="primary" href="/projects/${encodeURIComponent(workspace.project.id)}/douyin">进入抖音运营</a></p>
+       <p class="muted">进入运营页面仅执行导航，不会重复发布或自动回复评论。</p></section>`
+  : ""}
 <script>
 const finalVideoPlayer=document.querySelector('#final-video-player');
 if(finalVideoPlayer){

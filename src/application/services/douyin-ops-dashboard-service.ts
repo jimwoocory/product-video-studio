@@ -37,6 +37,7 @@ import { DouyinRetrospectiveService } from "./douyin-retrospective-service.js";
 import { DouyinCreativeFeedbackService } from "./douyin-creative-feedback-service.js";
 import { DouyinOpsRuntimeError } from "../ports/douyin-ops-runtime.js";
 import { DomainValidationError } from "../../domain/validation.js";
+import { checkDouyinResearchReadiness, type DouyinResearchReadiness } from "./douyin-research-readiness.js";
 
 export type DouyinOpsGlobalView = {
   runtime: Awaited<ReturnType<DouyinOpsRuntime["probe"]>>;
@@ -239,13 +240,18 @@ export class DouyinOpsDashboardService {
     return this.launcher.launch();
   }
 
+  /** Fast research-only check: never lists published works or checks the publishing account. */
+  async researchReadiness(): Promise<DouyinResearchReadiness> {
+    return checkDouyinResearchReadiness(this.opsRuntime);
+  }
+
   async global(): Promise<DouyinOpsGlobalView> {
-    const [runtime, account, projects] =
-      await Promise.all([
-        this.opsRuntime.probe(),
-        this.accountBinding.inspect(),
-        this.productFlow.listProjects()
-      ]);
+    // 复用同一次探测，避免多个 Bridge eval 并发导致虚假 SITE_OFFLINE。
+    const [runtime, projects] = await Promise.all([
+      this.opsRuntime.probe(),
+      this.productFlow.listProjects()
+    ]);
+    const account = await this.accountBinding.inspect(runtime);
 
     const candidateState =
       runtime.ready &&
@@ -305,10 +311,8 @@ export class DouyinOpsDashboardService {
     projectId: string
   ): Promise<DouyinOpsProjectView> {
     const project = await this.requireProject(projectId);
-    const [runtime, account] = await Promise.all([
-      this.opsRuntime.probe(),
-      this.accountBinding.inspect()
-    ]);
+    const runtime = await this.opsRuntime.probe();
+    const account = await this.accountBinding.inspect(runtime);
     const state = await this.ensureBinding({
       projectId,
       account

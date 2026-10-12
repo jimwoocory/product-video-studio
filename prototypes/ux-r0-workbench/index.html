@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f7f8fb">
+  <title>产品视频工作台 · UX-R0 交互原型</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="./styles.css">
+  <script src="./app.js" defer></script>
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-symbol" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+        <div><strong>Product Video Studio</strong><small>统一项目工作台 · 方案原型</small></div>
+      </div>
+      <div class="header-controls">
+        <span class="prototype-label"><span class="dot"></span> 仅本地演示</span>
+        <button class="text-button" id="showGuide" type="button">如何体验 <span aria-hidden="true">↗</span></button>
+      </div>
+    </header>
+
+    <div class="demo-bar" role="note">
+      <span class="demo-icon">◆</span>
+      <div><b>UX-R0 交互评审</b> · 所有数据均为模拟。点击按钮只会更新本页演示状态，<strong>不连接正式程序、不调用模型、不消耗积分、不发布视频。</strong></div>
+    </div>
+
+    <section class="scenario-bar" aria-label="演示场景选择">
+      <div class="scenario-heading"><div class="eyebrow">体验三种实际业务情况</div><h1>一次只处理一件事</h1><p>切换场景，观察用户看到的当前任务和下一步如何变化。</p></div>
+      <div class="scenario-switch" role="group" aria-label="演示场景">
+        <button class="scenario-option selected" type="button" data-scenario="create" aria-pressed="true"><span class="scenario-number">01</span><span>新建产品视频</span></button>
+        <button class="scenario-option" type="button" data-scenario="review" aria-pressed="false"><span class="scenario-number">02</span><span>正在镜头审片</span></button>
+        <button class="scenario-option" type="button" data-scenario="asset" aria-pressed="false"><span class="scenario-number">03</span><span>资产失败恢复</span></button>
+      </div>
+    </section>
+
+    <main class="workbench">
+      <aside class="sidebar" aria-label="任务进度">
+        <div class="side-section">
+          <div class="overline">当前项目</div>
+          <div class="project-mini"><span class="project-square">T</span><div><strong id="sideProjectName">Tonemay Q8 Pro 宣传片</strong><span id="sideProjectMeta">目标 40 秒 · 新任务</span></div></div>
+        </div>
+        <div class="side-divider"></div>
+        <div class="side-section">
+          <div class="side-title-row"><span class="overline">制作进度</span><span id="stepFraction" class="step-fraction">1 / 6</span></div>
+          <ol id="stepList" class="stage-list" aria-label="流程阶段"></ol>
+          <p class="side-tip" id="stageNote">按当前任务阶段处理，不需要在研究、分镜和生成页面之间来回跳转。</p>
+        </div>
+        <div class="side-divider"></div>
+        <div class="side-section side-bottom">
+          <div class="overline">安全操作</div>
+          <button id="resetDemo" class="subtle-button" type="button"><span aria-hidden="true">↺</span> 重置当前场景演示</button>
+          <div class="side-footnote">已生成结果与其他镜头互不覆盖（原型规则演示）。</div>
+        </div>
+      </aside>
+
+      <section class="work-area" aria-live="polite">
+        <div class="page-header">
+          <div>
+            <div class="breadcrumb"><span>项目工作台</span><span class="crumb-chevron">/</span><span id="crumbScenario">新建视频</span></div>
+            <div class="heading-row"><h2 id="currentHeading">填写产品资料</h2><span class="status-chip" id="statusChip">等待你操作</span></div>
+            <p class="page-description" id="currentDescription">填写一次产品资料，确认后系统会把信息带入后续创意与制作。</p>
+          </div>
+          <div class="version-label"><span>当前任务</span><strong id="taskIdText">演示任务 · 001</strong></div>
+        </div>
+
+        <div class="section-navigator">
+          <div class="progress-label"><span>当前工作</span><strong id="currentActionLabel">产品资料确认</strong></div>
+          <div class="progress-track" aria-hidden="true"><span id="progressBar" style="width:16.7%"></span></div>
+        </div>
+
+        <div id="scenarioCreate" class="scenario-content">
+          <div id="createStepForm">
+            <div class="content-card">
+              <div class="card-header"><div><span class="eyebrow">第一步 · 产品与事实</span><h3>产品基础信息</h3><p>资料仅填写一次；后续步骤默认复用，不要求重复导入。</p></div><span class="tiny-label">当前必填</span></div>
+              <div class="form-grid">
+                <label class="field">产品名称 <span class="required">*</span><input id="productName" type="text" value="Tonemay Q8 Pro" maxlength="120" required></label>
+                <label class="field">品牌<input id="productBrand" type="text" value="Tonemay"></label>
+                <label class="field field-wide">产品功能介绍 <span class="required">*</span><textarea id="productDesc" rows="3" required>开放式耳夹蓝牙耳机，不入耳设计；适合日常音乐、通话及通勤等使用场景。本段为用户待核实的示例产品资料。</textarea></label>
+              </div>
+              <div class="upload-row">
+                <div class="product-art" id="productImagePreview" aria-label="耳夹式耳机的演示占位图">
+                  <svg width="142" height="104" viewBox="0 0 142 104" fill="none" aria-hidden="true">
+                    <path d="M42 21c-13 5-20 19-15 34 4 14 18 21 31 17" stroke="#7f93bb" stroke-width="11" stroke-linecap="round"/>
+                    <path d="M72 26c-8 1-16 7-19 15l-4 15c-2 7 2 14 9 16 8 2 13-1 17-9l7-20c3-9-1-16-10-17Z" fill="#26374f"/>
+                    <path d="M94 35c-11 0-19 10-18 22 1 12 11 20 22 19" stroke="#8194b8" stroke-width="10" stroke-linecap="round"/>
+                    <path d="M108 28c-9 0-16 8-16 18v12c0 8 6 14 14 14s13-6 13-14V44c0-9-4-16-11-16Z" fill="#26374f"/>
+                    <path d="M60 40c5-7 13-10 20-8M102 39c4-3 7-4 11-4" stroke="#b4c1d7" stroke-width="3" stroke-linecap="round"/>
+                  </svg>
+                  <small id="productImageNote">演示占位图 · 不是真实产品照片</small>
+                </div>
+                <div class="upload-copy"><strong>产品图片</strong><p>实际项目中使用原始产品真图；本原型仅演示上传预览，不会上传到服务器。</p><label class="upload-button" for="productPhoto">选择本地图片 <span aria-hidden="true">↑</span></label><input id="productPhoto" type="file" accept="image/*"></div>
+              </div>
+              <div class="inline-notice"><span aria-hidden="true">ⓘ</span> 当前项目不需要先研究，也不需要选择哪个模型适合哪一步。缺少必要能力时由工作流提示。</div>
+              <div class="card-actions"><button id="saveProduct" class="primary-button" type="button">保存资料，继续确认产品事实 <span aria-hidden="true">→</span></button><span class="action-hint" id="productFeedback">接下来：核对哪些信息可以用于广告</span></div>
+            </div>
+            <details class="subcard tool-details" id="createReference"><summary><span class="summary-icon">＋</span> 可选：补充同类爆款研究 / 参考视频 <span class="summary-aside">不影响当前必填步骤</span></summary>
+              <div class="tools-body"><p>正式版将在此提供局部研究、参考视频上传与确认，不嵌套一整个旧页面。</p>
+                <div class="sample-tools"><label><input type="checkbox" id="useResearch"> 使用已有研究的结构参考（示例）</label><label><input type="checkbox" id="useReference"> 使用已确认参考视频（示例）</label></div>
+                <div id="refPreviewText" class="soft-note">尚未选用任何参考。产品事实仍需人工核对。</div>
+              </div>
+            </details>
+          </div>
+
+          <div id="createStepTruth" hidden>
+            <div class="content-card">
+              <div class="card-header"><div><span class="eyebrow">产品事实核对</span><h3>这几项可以写进广告吗？</h3><p>系统不会直接把推测或竞品卖点当成当前产品的真实信息。</p></div><span class="tiny-label">需要人工确认</span></div>
+              <div class="truth-row"><span class="truth-mark">✓</span><div><strong id="factProductName">Tonemay Q8 Pro</strong><p>产品名称及类别来自你填写的资料</p></div><span class="neutral-tag">待你核对</span></div>
+              <div class="truth-row"><span class="truth-mark">✓</span><div><strong>开放式耳夹佩戴设计</strong><p>功能描述来自输入，正式项目应核对说明书或商品资料</p></div><span class="neutral-tag">待你核对</span></div>
+              <div class="truth-row truth-muted"><span class="truth-mark warning-mark">!</span><div><strong>“全天佩戴完全无感”</strong><p>示例：缺少充分依据，不能直接进入宣传文案</p></div><span class="neutral-tag blocked">暂不采用</span></div>
+              <label class="consent-line"><input type="checkbox" id="truthAccepted"> 我已核对示例中的可用信息，并同意排除未经证实的宣传内容</label>
+              <div class="card-actions"><button id="confirmTruth" class="primary-button" disabled type="button">确认产品事实，进入创意 <span aria-hidden="true">→</span></button><button id="backToProduct" class="plain-button" type="button">返回修改资料</button></div>
+            </div>
+          </div>
+
+          <div id="createStepCreative" hidden>
+            <div class="content-card">
+              <div class="card-header"><div><span class="eyebrow">第二步 · 创意选择</span><h3>选一个你想拍的方向</h3><p>这里只需要做一次选择；下一步会自动进入制作策略、脚本与分镜。</p></div><span class="tiny-label">选择 1 项</span></div>
+              <div class="concept-options" role="radiogroup" aria-label="创意方案">
+                <label class="concept-card"><input type="radio" name="creativeDirection" value="story" checked><span><b>方向 A · 日常情节</b><small>一段通勤对话，自然引出开放式耳夹设计与适用场景。</small><em>突出使用体验</em></span></label>
+                <label class="concept-card"><input type="radio" name="creativeDirection" value="showcase"><span><b>方向 B · 轻量产品展示</b><small>从细节特写过渡到上耳佩戴，画面精简、节奏直接。</small><em>突出产品外观</em></span></label>
+              </div>
+              <div class="card-actions"><button id="selectCreative" class="primary-button" type="button">采用此创意，继续制作 <span aria-hidden="true">→</span></button><span class="action-hint">之后自动准备脚本和分镜；新增付费素材会另行确认</span></div>
+            </div>
+          </div>
+
+          <div id="createStepDone" hidden>
+            <div class="content-card finish-card">
+              <div class="finish-icon">✓</div><span class="eyebrow">演示推进完成</span><h3>创意已选，制作任务已建立</h3>
+              <p id="createResultMessage">模拟工作流已将产品事实、创意和参考使用选择绑定到同一任务。</p>
+              <div class="impact-box"><strong>正式程序的下一步</strong><p>系统根据创意自动规划脚本、导演分镜和可复用素材；如需新生成固定人物或场景素材，先展示图片用途与积分范围，经你确认再开始。</p></div>
+              <button class="secondary-button" type="button" data-switch-to="review">继续体验：生成后的镜头审片 <span aria-hidden="true">→</span></button>
+            </div>
+          </div>
+        </div>
+
+        <div id="scenarioReview" class="scenario-content" hidden>
+          <div id="reviewActive">
+            <div class="content-card review-card">
+              <div class="card-header"><div><span class="eyebrow">第四步 · 视频生成与审片</span><h3 id="reviewTitle">确认镜头 2 / 3</h3><p>其他已确认镜头不会因为你重做这一段而失效。</p></div><span class="tiny-label attention">需要你决定</span></div>
+              <div class="video-display">
+                <div class="fake-video">
+                  <div class="video-scene"><span class="scene-glow"></span><div class="scene-window"></div><div class="scene-person person-left"></div><div class="scene-person person-right"></div><div class="scene-headset"></div><span class="scene-caption" id="videoSceneText">模拟视频画面 · 镜头 2</span></div>
+                  <div class="video-playline"><button id="previewPlay" type="button" class="play-control" aria-label="播放或暂停模拟预览">▶</button><div class="play-track"><span id="previewFill"></span></div><small id="previewTime">00:00 / 00:10</small><span class="preview-label">示意预览</span></div>
+                </div>
+                <div class="video-info"><div class="review-confidence">建议人工确认 <span>视觉分析不确定</span></div><h4 id="reviewSummary">人物耳夹佩戴方式特写</h4><p id="reviewDescription">画面演示产品佩戴，但细节辨识度不足，需要你确认产品是否与真实图片一致。</p>
+                  <div class="quality-list"><div><span>时间长度</span><strong>10 秒 · 通过</strong></div><div><span>产品身份</span><strong class="warn-text">需人工确认</strong></div><div><span>对白和环境声</span><strong>需试听</strong></div></div>
+                </div>
+              </div>
+              <div class="clip-line" id="clipLine" aria-label="镜头状态"></div>
+              <div class="action-zone"><div><strong id="reviewActionTitle">你是否采用镜头 2？</strong><p>先判断画面能否使用，再决定采用还是只重做这一段。</p></div><div class="action-buttons"><button id="reviewAccept" type="button" class="primary-button">采用此镜头 ✓</button><button id="reviewRedo" type="button" class="secondary-button">仅重做此镜头</button></div></div>
+            </div>
+            <details class="subcard tool-details" id="reviewExpert"><summary><span class="summary-icon">⚙</span> 高级编辑 · 剧本 / 分镜 / 提示词 <span class="summary-aside">默认收起</span></summary>
+              <div class="tools-body"><p>查看详细分镜或修改当前镜头提示词时，系统先告知会影响哪些镜头、版本和审核结果。</p><label class="field">当前镜头提示词（模拟）<textarea id="inlineClipPrompt" rows="3">固定人物外形，佩戴耳夹式耳机，单镜头平稳推进，自然场景声音，不生成背景音乐。</textarea></label><p class="soft-note">修改只用于下一次重新生成当前镜头；不会直接修改已生成的旧视频。</p></div>
+            </details>
+          </div>
+          <div id="reviewDone" hidden class="content-card finish-card">
+            <div class="finish-icon">✓</div><span class="eyebrow">本轮审片完成</span><h3>3 个镜头均已完成确认</h3><p>所有镜头已明确采用，工作流下一步将自动准备剪辑方案与声音检查。</p>
+            <div class="impact-box"><strong>保留的结果</strong><p>已采用镜头 1、2、3；本轮没有重新提交已成功的视频生成请求。</p></div>
+            <button id="showEditPlan" class="primary-button" type="button">查看模拟剪辑方案 <span aria-hidden="true">→</span></button>
+            <p id="editPlanResult" hidden class="success-line">模拟剪辑方案已准备：10 秒 + 10 秒 + 10 秒。原声保留，背景音乐默认关闭；最终仍需试听与确认。</p>
+          </div>
+        </div>
+
+        <div id="scenarioAsset" class="scenario-content" hidden>
+          <div class="content-card">
+            <div class="card-header"><div><span class="eyebrow">第三步 · 角色与场景素材</span><h3>一个资产失败，其他资产不必重做</h3><p>只处理有问题的素材；已确认图片、人物和场景继续保留。</p></div><span class="tiny-label attention">1 项待处理</span></div>
+            <div class="asset-grid">
+              <div class="asset-tile"><div class="asset-image product-thumb">◇</div><b>产品主参考</b><span class="asset-status ok">✓ 已确认</span></div>
+              <div class="asset-tile"><div class="asset-image actor-thumb">A</div><b>固定人物 A</b><span class="asset-status ok">✓ 已确认</span></div>
+              <div class="asset-tile highlighted" id="assetTileB"><div class="asset-image actor-thumb broken">B<span class="broken-mark">!</span></div><b>固定人物 B</b><span id="assetBStatus" class="asset-status trouble">生成失败</span></div>
+              <div class="asset-tile"><div class="asset-image place-thumb">▤</div><b>商场场景</b><span class="asset-status ok">✓ 已确认</span></div>
+            </div>
+            <div id="assetIssuePanel" class="issue-card">
+              <div class="issue-heading"><div><span class="eyebrow">当前唯一待处理项</span><h4 id="issueTitle">固定人物 B · 生成失败</h4></div><span class="issue-badge" id="issueStatus">可局部修复</span></div>
+              <p id="assetIssueMessage">示例原因：远端已确认失败。你可以查看原提示词，仅重新准备人物 B。</p>
+              <div class="issue-actions"><button id="assetRepair" class="primary-button" type="button">查看提示词并修复人物 B <span aria-hidden="true">→</span></button><button id="toggleRemote" type="button" class="plain-button">切换演示：结果未知</button></div>
+              <p class="issue-support" id="issueSupport">不会重做人物 A、产品主参考或商场场景；新增费用仍须确认。</p>
+            </div>
+            <div id="assetReadyPanel" class="issue-card recovered" hidden><div class="issue-heading"><div><span class="eyebrow">原任务已恢复</span><h4>人物 B · 新候选等待看图确认</h4></div><span class="tiny-label">演示候选</span></div><div class="recovered-image"><div class="candidate-face">B</div><div><b>模拟资产候选</b><p>这里只展示占位图，正式版会展示即梦返回的真实图片，并保留原候选版本供比较。</p></div></div><button id="approveAsset" type="button" class="primary-button">确认人物 B，并继续原任务 <span aria-hidden="true">→</span></button></div>
+            <div id="assetSuccessPanel" class="issue-card recovered" hidden><div class="finish-icon small">✓</div><h4>人物 B 已确认，当前阻塞解除</h4><p>产品图、人物 A、人物 B 和场景全部保留，可以继续原任务的剧本与分镜规划。其他已成功资产不需要重新授权。</p><button class="secondary-button" type="button" data-switch-to="review">查看后续审片交互 <span aria-hidden="true">→</span></button></div>
+          </div>
+          <details class="subcard tool-details" id="assetTechnical"><summary><span class="summary-icon">↗</span> 资产依赖与版本影响 <span class="summary-aside">必要时查看</span></summary>
+            <div class="tools-body"><div class="dependency-note"><b>独立资源</b><span>人物 A、人物 B、商场场景可并行准备；引用人物 B 的后续镜头会等待其确认。</span></div><div class="dependency-note"><b>本次修改范围</b><span>仅人物 B 的候选版本和依赖它的后续检查受影响，其他素材不重新生成。</span></div><div class="dependency-note"><b>防重复规则</b><span>远端提交结果未知时，先核查原编号；不自动再次扣费提交。</span></div></div>
+          </details>
+        </div>
+      </section>
+
+      <aside class="context-sidebar" aria-label="当前任务上下文">
+        <div class="context-card"><div class="context-top"><span class="overline">任务上下文</span><span class="mini-signal">● 已关联</span></div><h3 id="contextTitle">开始创作前</h3><p id="contextDescription">请先确认产品资料。系统后续读取同一个项目的数据。</p>
+          <div class="detail-line"><span>进行中的任务</span><strong id="contextTask">新建产品宣传视频</strong></div>
+          <div class="detail-line"><span>已确认成果</span><strong id="contextSaved">0 项</strong></div>
+          <div class="detail-line"><span>下一阶段</span><strong id="contextNext">确认产品事实</strong></div>
+        </div>
+        <div class="context-card context-checklist"><div class="context-top"><span class="overline">系统替你处理</span></div>
+          <div class="context-check">✓ <span>自动带入已经确认的资料</span></div>
+          <div class="context-check">✓ <span>明确保留已成功素材和镜头</span></div>
+          <div class="context-check">✓ <span>完成审核后自动更新下一步</span></div>
+          <div class="context-check">✓ <span>实际费用与发布必须单独授权</span></div>
+        </div>
+        <div class="context-card small-card"><div class="context-top"><span class="overline">最近操作</span></div><p id="lastAction" class="last-action">等待你完成第一步。</p><button id="openDetails" class="plain-button" type="button">查看本次演示规则 ↓</button><p class="context-extra" id="contextExtra" hidden>本原型只在浏览器内改变模拟数据。正式系统开发前，还需将页面映射到真实的任务、版本、费用和审核 API。</p></div>
+      </aside>
+    </main>
+    <footer class="page-footer"><span>UX-R0 · 独立设计验证 · 不属于正式 3090 业务系统</span><span>确定性工作流 · 一个当前动作 · 可恢复任务</span></footer>
+  </div>
+
+  <dialog id="actionDialog" class="action-dialog" aria-labelledby="dialogTitle">
+    <div class="dialog-head"><div><span class="eyebrow">仅模拟操作</span><h3 id="dialogTitle">操作确认</h3></div><button id="dialogClose" class="close-button" type="button" aria-label="关闭对话框">×</button></div>
+    <div id="dialogBody" class="dialog-body"></div>
+    <div class="dialog-actions"><button id="dialogCancel" class="plain-button" type="button">返回</button><button id="dialogPrimary" class="primary-button" type="button">下一步</button></div>
+  </dialog>
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+</body>
+</html>

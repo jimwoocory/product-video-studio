@@ -6,8 +6,12 @@ import { fileURLToPath } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, "../../..");
-const dbPath = path.join(root, "prisma", "e2e.db");
-const projectsRoot = path.join(root, ".tmp", "e2e-projects");
+const dbName = process.env.PVS_E2E_DB_NAME ?? "e2e.db";
+if (!/^[A-Za-z0-9_-]+\.db$/.test(dbName)) throw new Error("Invalid isolated E2E database filename");
+const dbPath = path.join(root, "prisma", dbName);
+const projectsDir = process.env.PVS_E2E_PROJECT_DIR ?? "e2e-projects";
+if (!/^[A-Za-z0-9_-]+$/.test(projectsDir)) throw new Error("Invalid isolated E2E projects folder");
+const projectsRoot = path.join(root, ".tmp", projectsDir);
 const port = Number(process.env.PVS_E2E_PORT ?? "3190");
 
 await fs.rm(dbPath, { force: true });
@@ -17,7 +21,7 @@ await fs.mkdir(projectsRoot, { recursive: true });
 const env = {
   ...process.env,
   NODE_ENV: "test",
-  DATABASE_URL: "file:./e2e.db",
+  DATABASE_URL: "file:./" + dbName,
   PROJECTS_ROOT: projectsRoot,
   PORT: String(port),
   PVS_SMART_WORKER_DISABLED: "1",
@@ -191,7 +195,20 @@ await prisma.researchRunRecord.create({
     browserStateJson: JSON.stringify({
       provider: "external-browser",
       resumeToken: "e2e-resume",
-      lastCheckedAt: "2026-10-04T00:05:00.000Z"
+      lastCheckedAt: "2026-10-04T00:05:00.000Z",
+      marketVideoResearch: {
+        status: "BLOCKED",
+        provider: "douyin-cli-search",
+        sort: "MOST_LIKED",
+        timeRange: "ANY",
+        searchedQueries: ["草本护颈枕"],
+        checkedAt: "2026-10-04T00:05:00.000Z",
+        candidates: [],
+        blockerCode: "RISK_CONTROL",
+        message: "抖音搜索触发验证码或平台风控，本轮已停止。",
+        requiredUserAction:
+          "在正常浏览器会话中完成人工验证后再重试；系统不会绕过验证码或风控。"
+      }
     }),
     blockerCode: "LOGIN_REQUIRED",
     blockerMessage: "需要登录平台后继续研究",
@@ -477,7 +494,141 @@ await prisma.finalAssemblyRecord.create({
   }
 });
 
+// W2/W3 workflow browser fixtures live ONLY in isolated e2e.db / e2e-projects.
+const { smartRunSchema } = await import("../../../dist/src/domain/smart-generation.js");
+const e2eTruthRun = smartRunSchema.parse({
+  id: "e2e-workflow-truth-run",
+  projectId: "e2e-ready",
+  workflowVersion: 2,
+  requestKey: "e2e-workflow-truth",
+  inputHash: e2eFinalHash,
+  revision: 1,
+  status: "WAITING_FOR_TRUTH_REVIEW",
+  stage: "SOURCES",
+  targetDurationMs: 30000,
+  options: {
+    requestText: "本地测试：产品资料审核后继续本轮任务",
+    generationSettings: {
+      requestedModelVersion: "seedance2.0mini",
+      aspectRatio: "9:16", videoResolution: "720p",
+      nativeAudioOutputRequested: false
+    },
+    reviewMode: "MANUAL"
+  },
+  expectedWorkspace: {},
+  attemptIds: [],
+  notes: [],
+  createdAt: now.toISOString(),
+  updatedAt: now.toISOString()
+});
+await prisma.smartGenerationRunRecord.create({
+  data: {
+    id: e2eTruthRun.id, projectId: e2eTruthRun.projectId,
+    requestKey: e2eTruthRun.requestKey,
+    activeProjectKey: e2eTruthRun.projectId,
+    status: e2eTruthRun.status,
+    revision: e2eTruthRun.revision,
+    inputHash: e2eTruthRun.inputHash,
+    dataJson: JSON.stringify(e2eTruthRun),
+    createdAt: e2eTruthRun.createdAt,
+    updatedAt: e2eTruthRun.updatedAt
+  }
+});
+
+await prisma.project.create({
+  data: {
+    id: "e2e-published", name: "E2E Trusted Published",
+    status: "PUBLISHED", targetPlatform: "douyin",
+    targetDurationMs: 10000, aspectRatio: "9:16",
+    createdAt: now, updatedAt: now
+  }
+});
+const trustedPlan={...e2eProductionPlan,id:"e2e-published-plan",projectId:"e2e-published"};
+await prisma.versionedEntity.create({
+  data: {
+    id:trustedPlan.id,projectId:"e2e-published",entityType:"ProductionPlan",
+    entityKey:"current",version:1,status:"CONFIRMED",contentHash:e2ePlanHash,
+    dataJson:JSON.stringify(trustedPlan),createdAt:now,updatedAt:now
+  }
+});
+await prisma.project.update({
+  where:{id:"e2e-published"},
+  data:{currentProductionPlanId:trustedPlan.id,currentProductionPlanVersion:1,currentProductionPlanHash:e2ePlanHash}
+});
+const trustedTimeline={...e2eTimeline,id:"e2e-published-timeline",projectId:"e2e-published"};
+await prisma.timelineRecord.create({
+  data: {
+    id:trustedTimeline.id,projectId:trustedTimeline.projectId,version:1,status:"CONFIRMED",
+    productionPlanHash:e2ePlanHash,contentHash:e2eTimelineHash,
+    dataJson:JSON.stringify(trustedTimeline),createdAt:now,updatedAt:now,confirmedAt:now
+  }
+});
+const publishedRelativePath = "final/final.mp4";
+const publishedRoot = path.join(projectsRoot, "e2e-published");
+await fs.mkdir(path.dirname(path.join(publishedRoot, publishedRelativePath)), {recursive:true});
+await fs.copyFile(e2eFinalFile, path.join(publishedRoot, publishedRelativePath));
+await prisma.artifactRecord.create({
+  data: {
+    id:"e2e-published-artifact", projectId:"e2e-published",
+    kind:"FINAL_VIDEO", relativePath:publishedRelativePath,
+    sha256:e2eFinalHash, sizeBytes:e2eFinalBytes.byteLength,
+    mimeType:"video/mp4", integrityStatus:"READY",immutable:true,createdAt:now
+  }
+});
+await prisma.finalAssemblyRecord.create({
+  data: {
+    id:"e2e-published-assembly",projectId:"e2e-published",
+    productionPlanHash:e2ePlanHash, selectedClipIdsJson:"[]",
+    inputArtifactIdsJson:"[]",inputArtifactHashesJson:"[]",
+    outputArtifactId:"e2e-published-artifact",outputArtifactHash:e2eFinalHash,
+    status:"ACCEPTED",acceptedAt:now,createdAt:now
+  }
+});
+await prisma.publishPackageRecord.create({
+  data: {
+    id:"e2e-trusted-douyin-package",projectId:"e2e-published",
+    finalAssemblyId:"e2e-published-assembly",
+    finalArtifactId:"e2e-published-artifact",
+    finalArtifactHash:e2eFinalHash,
+    providerType:"DOUYIN_BROWSER_AUTOMATION",
+    titleDraft:"E2E Trusted Publish",
+    expiresAt:new Date("2027-01-01T00:00:00.000Z"),
+    singleUseTokenHash:"1".repeat(64),
+    status:"PUBLISHED_CONFIRMED",publishedConfirmedAt:now,createdAt:now
+  }
+});
+await prisma.publishReceiptRecord.create({
+  data: {
+    id:"e2e-trusted-douyin-receipt",projectId:"e2e-published",
+    packageId:"e2e-trusted-douyin-package",
+    providerType:"DOUYIN_BROWSER_AUTOMATION",
+    kind:"PUBLISHED_CONFIRMED",trusted:true,createdAt:now
+  }
+});
+
 const deps = createDefaultDependencies();
+const realResearchStartRun = deps.research.startRun.bind(deps.research);
+deps.research.startRun = async (input) => {
+  if (input.goal === "__E2E_RESEARCH_MUTEX__") {
+    await new Promise((resolve) => setTimeout(resolve, 800));
+    const stamp = new Date().toISOString();
+    return {
+      run: {
+        id: "e2e-research-mutex-run",
+        projectId: input.projectId,
+        mode: input.mode,
+        status: "COMPLETED",
+        goal: input.goal,
+        sourceUrls: input.sourceUrls,
+        queries: input.queries,
+        createdAt: stamp,
+        updatedAt: stamp
+      },
+      evidence: []
+    };
+  }
+  return realResearchStartRun(input);
+};
 const blockedExternalCall = async () => {
   throw new Error("E2E_EXTERNAL_CALL_BLOCKED");
 };
@@ -495,6 +646,27 @@ deps.provider.submit = blockedExternalCall;
 deps.provider.status = blockedExternalCall;
 deps.provider.download = blockedExternalCall;
 deps.provider.reconcileSubmission = blockedExternalCall;
+deps.douyinResearchAuth = {
+  launch: async () => ({
+    started: true,
+    alreadyRunning: false,
+    executable: "e2e-dy.exe"
+  }),
+  syncCookies: async () => ({
+    cookieCount: 73,
+    hasSession: true
+  })
+};
+deps.douyinMarketVideoSearch = {
+  id: "e2e-douyin-search",
+  search: async () => ({
+    status: "READY",
+    provider: "e2e-douyin-search",
+    candidates: [],
+    searchedQueries: ["fixture"],
+    checkedAt: new Date().toISOString()
+  })
+};
 const server = createAppServer(deps);
 server.listen(port, "127.0.0.1", () => {
   console.log("PVS E2E listening on http://127.0.0.1:" + port);

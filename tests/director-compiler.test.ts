@@ -15,6 +15,7 @@ import { compileSeedancePrompt } from "../src/application/services/prompt-compil
 import { DomainValidationError } from "../src/domain/validation.js";
 import { hashValue } from "../src/domain/hashing.js";
 import { H, ISO, makeProductTruth, makeValidClip } from "./fixtures.js";
+import type { DirectorV3Plan } from "../src/domain/director-v3.js";
 
 const truth = makeProductTruth();
 
@@ -317,6 +318,104 @@ test("Prompt Compiler is deterministic and excludes UNVERIFIED claims", () => {
   assert.equal(first.constraintMapping[0]?.forbiddenChangeId, "forbid-1");
 });
 
+test("Director V3 compiler uses the concise prompt, requests native audio and binds no-BGM policy", () => {
+  const batch = makeBatch();
+  const script = makeScript(batch);
+  const plan = makePlan(script);
+  const directorV3Plan: DirectorV3Plan = {
+    version: "director-v3-1",
+    projectId: truth.projectId,
+    scriptRef: {
+      entityType: "ScriptDraft",
+      entityId: script.id,
+      version: script.version,
+      hash: script.contentHash
+    },
+    targetDurationMs: 60000,
+    clipContracts: plan.scenes[0]!.clips.map(
+      (clip, index) => ({
+        id: "contract-" + (index + 1),
+        order: index + 1,
+        sourceBeatIds: ["beat-1"],
+        purpose: "展示当前产品并完成一个清晰动作",
+        location: "studio",
+        durationMs: clip.durationMs,
+        openingState: "产品准备展示",
+        closingState: "产品完成展示",
+        actions: [
+          {
+            order: 1,
+            startMs: 0,
+            endMs: clip.durationMs,
+            description: "自然展示当前产品",
+            productState: "完整产品"
+          }
+        ],
+        camera: {
+          shotSize: "中近景",
+          position: "稳定机位",
+          angle: "轻俯视",
+          movement: "固定机位"
+        },
+        referenceAssetIds: [],
+        productStateChanges: [],
+        audio: {
+          mode: "NATIVE",
+          dialogueOrOs: [],
+          ambience: ["自然室内环境声"],
+          sfx: ["产品接触声"],
+          bgm: false
+        },
+        globalConstraints: {
+          preserveProductIdentity: true,
+          noReadableText: true,
+          noBgm: true,
+          extra: []
+        }
+      })
+    ),
+    createdAt: ISO,
+    contentHash: H.f
+  };
+  const compiled = compileSeedancePrompt({
+    id: "prompt-v3",
+    version: 1,
+    createdAt: ISO,
+    productTruth: truth,
+    creativeBatch: batch,
+    script,
+    productionPlan: plan,
+    directorV3Plan,
+    clipId: "clip-1",
+    assets: []
+  });
+  assert.equal(
+    compiled.compilerTemplateVersion,
+    "seedance-prompt-v3-1"
+  );
+  assert.equal(
+    compiled.audioPolicy,
+    "V3_NATIVE_NO_BGM"
+  );
+  assert.equal(
+    compiled.generationParams.generateAudio,
+    true
+  );
+  assert.match(compiled.promptText, /【本段视频目标】/);
+  assert.match(compiled.promptText, /【声音】/);
+  assert.match(compiled.promptText, /不生成背景音乐/);
+  assert.match(compiled.promptText, /自然室内环境声/);
+  assert.equal(
+    (compiled.promptText.match(/【全局约束】/g) ?? [])
+      .length,
+    1
+  );
+  assert.doesNotMatch(
+    compiled.promptText,
+    /不请求模型原生音轨|声音由后期统一处理/
+  );
+});
+
 test("Prompt Compiler fails closed when required reference asset is missing", () => {
   const batch = makeBatch();
   const script = makeScript(batch);
@@ -347,4 +446,44 @@ test("Prompt Compiler fails closed when required reference asset is missing", ()
       error instanceof DomainValidationError &&
       /Required reference asset missing/.test(error.message)
   );
+});
+
+test("Prompt Compiler accepts a confirmed production asset with SCENE_REFERENCE role without treating it as research", () => {
+  const batch = makeBatch();
+  const script = makeScript(batch);
+  const plan = makePlan(script);
+  const assetId = "production-asset:set-1:SET_OFFICE";
+  plan.scenes[0]!.clips[0]!.referenceAssets = [
+    {
+      assetId,
+      role: "SCENE_REFERENCE",
+      priority: 0,
+      required: true
+    }
+  ];
+  const compiled = compileSeedancePrompt({
+    id: "prompt-production-set",
+    version: 1,
+    createdAt: ISO,
+    productTruth: truth,
+    creativeBatch: batch,
+    script,
+    productionPlan: plan,
+    clipId: "clip-1",
+    assets: [
+      {
+        id: assetId,
+        artifactId: "artifact-production-set",
+        type: "image",
+        source: "generated",
+        originalFilename: "办公室.jpg",
+        sha256: H.a,
+        mimeType: "image/jpeg",
+        sizeBytes: 1024,
+        provenance: "ProductionAssetSet set-1 / SET_OFFICE",
+        createdAt: ISO
+      }
+    ]
+  });
+  assert.ok(compiled.inputAssetManifest.some(item => item.assetId === assetId));
 });

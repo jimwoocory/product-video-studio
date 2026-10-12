@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+import path from "node:path";
 import { hashValue } from "../../domain/hashing.js";
 import { DomainValidationError } from "../../domain/validation.js";
 import type { SmartGenerationRun, WorkspaceBinding } from "../../domain/smart-generation.js";
@@ -20,7 +22,7 @@ import type { GenerationExecutionService } from "./generation-execution.js";
 import type { BatchGenerationService } from "./batch-generation-service.js";
 import type { RenderEngine } from "./render-engine.js";
 import type { TimelineService } from "./timeline-service.js";
-import { assertCanonicalProductArtifactReady, confirmProductionPlanDraft, confirmScriptDraft } from "./review-actions.js";
+import { assertCanonicalProductArtifactReady, confirmProductionPlanDraft, confirmScriptDraft, reviseScriptDraft } from "./review-actions.js";
 import { resolveDirectorGenerationTarget, assertDirectorSettingsMatch } from "./director-generation-target.js";
 import { validateReferenceImagesForPreflight } from "../../adapters/media/reference-image-validator.js";
 import { AutoEditBlocked } from "../../domain/auto-edit.js";
@@ -28,6 +30,31 @@ import {CreativeReferenceService} from "./creative-reference-service.js";
 import {referenceSetRef} from "./creative-reference-binding.js";
 import type { ReviewService } from "./review-service.js";
 import type { VisualEditAssessmentService } from "./visual-edit-assessment.js";
+import type { ProductionPlannerService } from "./production-planner.js";
+import type { ProductionAssetService } from "./production-asset-service.js";
+import type { ScriptFeasibilityService } from "./script-feasibility-service.js";
+import { reviseV8DetailedProposal, type V8DetailedScreenplayService } from "./v8-detailed-screenplay-service.js";
+import type { DirectorV3PlannerService } from "./director-v3-planner-service.js";
+import {
+  buildSeedancePromptV3,
+  createSeedancePromptV3Draft
+} from "./seedance-model-prompt-v3.js";
+import { LocalArtifactStore } from "../../adapters/store/local-artifact-store.js";
+import {
+  productionAssetSetRef,
+  type ProductionAssetSet
+} from "../../domain/production-strategy.js";
+import { sealV8, type V8PromptRecord } from "../../domain/v8-production.js";
+import { buildV8DirectorDecision } from "./v8-director-decision.js";
+import { compileV8AuthoritativePrompts } from "./v8-authoritative-prompt.js";
+import { firstSourceIndependentClipIds } from "./clip-continuity-engine.js";
+import { planNextContinuityWave } from "./continuity-wave-planner.js";
+import { loadReviewedContinuitySource } from "./reviewed-continuity-source.js";
+import { bindReviewedContinuitySource, appendReviewedContinuityInstruction, type SourceBinding } from "./continuity-request-compiler.js";
+import { assertV8DecisionBinding, assertV8PlanBinding, assertV8PromptBinding } from "./v8-production-binding.js";
+import { directorClipBounds } from "./director-generation-target.js";
+import { assertV8TimelineConformance } from "./v8-timeline-conformance.js";
+import { scriptDraftSchema } from "../../domain/schemas.js";
 
 type Ref = NonNullable<SmartGenerationRun["truthRef"]>;
 function ref(entityType: string, value: { id: string; version: number; contentHash: string }): Ref {
@@ -39,7 +66,22 @@ export function workspaceBinding(workspace: ProjectWorkspace): WorkspaceBinding 
     selectedCreativeId: p.selectedCreativeId, scriptRef: p.currentScriptRef, productionPlanRef: p.currentProductionPlanRef };
 }
 function equal(a: unknown, b: unknown) { return hashValue(a ?? null) === hashValue(b ?? null); }
-function scopeHash(scope: NonNullable<SmartGenerationRun["paidScope"]>) { return hashValue({ planRef: scope.planRef, requests: scope.requests }); }
+function scopeHash(scope: NonNullable<SmartGenerationRun["paidScope"]>) { return hashValue({ planRef: scope.planRef, requests: scope.requests, ...(scope.v8Binding ? { v8Binding: scope.v8Binding } : {}), ...(scope.continuityBatch ? {continuityBatch:scope.continuityBatch} : {}) }); }
+function bindScriptProductionAssets(
+  script: ReturnType<typeof scriptDraftSchema.parse>,
+  set?: ProductionAssetSet
+) {
+  if (!set) return script;
+  const { contentHash: _oldHash, ...base } = script;
+  const next = {
+    ...base,
+    productionAssetSetRef: productionAssetSetRef(set)
+  };
+  return scriptDraftSchema.parse({
+    ...next,
+    contentHash: hashValue(next)
+  });
+}
 
 export type SmartProductionDependencies = {
   productFlow: ProductFlowService; productInput: ProductInputStore; artifacts: ArtifactRepository;
@@ -53,6 +95,11 @@ export type SmartProductionDependencies = {
   creativeReferences?: CreativeReferenceService;
   reviewService?: Pick<ReviewService, "decide">;
   visualReview?: VisualEditAssessmentService;
+  productionPlanner?: ProductionPlannerService;
+  productionAssets?: ProductionAssetService;
+  scriptFeasibility?: ScriptFeasibilityService;
+  v8Screenplay?: V8DetailedScreenplayService;
+  directorV3Planner?: DirectorV3PlannerService;
   preflightAudit: (projectId: string, result: RunPreflightResult) => Promise<void>;
   autoEdit?: (run: SmartGenerationRun) => ReturnType<SmartProduction["autoEdit"]>;
 };
@@ -117,16 +164,383 @@ export class ApplicationSmartProduction implements SmartProduction {
     const w = await this.workspace(run.projectId);
     await this.assertSources(run, w);
     if (!equal(workspaceBinding(w), run.expectedWorkspace)) throw new SmartFlowPause("BLOCKED", "WORKSPACE_CHANGED", "标准流程已更新创意、脚本或分镜；本任务暂停，避免覆盖新版本", false);
+    if (run.workflowVersion === 2 && run.productionAssetSet) {
+      const assetRef = productionAssetSetRef(run.productionAssetSet);
+      if (
+        run.script?.productionAssetSetRef &&
+        !equal(run.script.productionAssetSetRef, assetRef)
+      ) {
+        throw new SmartFlowPause(
+          "BLOCKED",
+          "PRODUCTION_ASSET_SET_CHANGED",
+          "脚本绑定的角色/场景制作资产已经变化，需要重新规划",
+          false
+        );
+      }
+      if (
+        run.productionPlan?.productionAssetSetRef &&
+        !equal(run.productionPlan.productionAssetSetRef, assetRef)
+      ) {
+        throw new SmartFlowPause(
+          "BLOCKED",
+          "PRODUCTION_ASSET_SET_CHANGED",
+          "导演分镜绑定的角色/场景制作资产已经变化，需要重新规划",
+          false
+        );
+      }
+    }
   }
   async creative(run: SmartGenerationRun) {
     const w = await this.workspace(run.projectId);
-    return this.d.aiGeneration.generateCreativeBatch(w.productTruth!, await this.d.productFlow.nextVersion(run.projectId, "CreativeBatch", "creative-batch"), run.targetDurationMs, run.referenceVideoProfile, run.creativeContext);
+    return this.d.aiGeneration.generateCreativeBatch(
+      w.productTruth!,
+      await this.d.productFlow.nextVersion(
+        run.projectId,
+        "CreativeBatch",
+        "creative-batch"
+      ),
+      run.targetDurationMs,
+      run.referenceVideoProfile,
+      run.creativeContext,
+      run.options.directorVersion ?? 2
+    );
+  }
+  async planProduction(run: SmartGenerationRun) {
+    if (!this.d.productionPlanner) {
+      throw new SmartFlowPause(
+        "BLOCKED",
+        "PRODUCTION_PLANNER_NOT_READY",
+        "制作策略规划器尚未配置"
+      );
+    }
+    const w = await this.workspace(run.projectId);
+    if (!w.productTruth || !run.creativeBatch || !run.selectedCreativeId) {
+      throw new DomainValidationError("创意尚未选择，不能制定制作策略");
+    }
+    return this.d.productionPlanner.plan({
+      projectId: run.projectId,
+      version: 1,
+      truth: w.productTruth,
+      creativeBatch: run.creativeBatch,
+      selectedCreativeId: run.selectedCreativeId,
+      targetDurationMs: run.targetDurationMs,
+      referenceVideoProfile: run.referenceVideoProfile,
+      creativeContext: run.creativeContext
+    });
+  }
+  async prepareProductionAssets(run: SmartGenerationRun) {
+    if (!this.d.productionAssets) {
+      throw new SmartFlowPause(
+        "BLOCKED",
+        "PRODUCTION_ASSET_SERVICE_NOT_READY",
+        "制作资产服务尚未配置"
+      );
+    }
+    const w = await this.workspace(run.projectId);
+    const material = await this.d.productInput.latest(run.projectId);
+    if (!w.productTruth || !material || !run.productionStrategy) {
+      throw new DomainValidationError("制作资产准备所需的产品事实或制作策略不完整");
+    }
+    return this.d.productionAssets.prepare({
+      strategy: run.productionStrategy,
+      truth: w.productTruth,
+      productInput: material,
+      creativeReferences: run.creativeContext?.references
+    });
+  }
+  async validateAssetPaidScope(run: SmartGenerationRun) {
+    if (!this.d.productionAssets || !run.productionStrategy || !run.productionAssetSet || !run.assetPaidScope) {
+      throw new DomainValidationError("制作资产付费范围尚未准备");
+    }
+    await this.assertCurrent(run);
+    await this.d.productionAssets.validatePaidScope({
+      strategy: run.productionStrategy,
+      set: run.productionAssetSet,
+      scope: run.assetPaidScope
+    });
+  }
+  async advanceProductionAssets(run: SmartGenerationRun) {
+    if (!this.d.productionAssets || !run.productionStrategy || !run.productionAssetSet) {
+      throw new DomainValidationError("制作资产尚未准备");
+    }
+    const material = await this.d.productInput.latest(run.projectId);
+    if (!material) throw new DomainValidationError("产品输入不存在");
+    return this.d.productionAssets.advance({
+      set: run.productionAssetSet,
+      strategy: run.productionStrategy,
+      productInput: material,
+      creativeReferences: run.creativeContext?.references
+    });
+  }
+  async acceptProductionAsset(run: SmartGenerationRun, key: string) {
+    if (!this.d.productionAssets || !run.productionAssetSet) {
+      throw new DomainValidationError("制作资产尚未准备");
+    }
+    return this.d.productionAssets.acceptReview(run.productionAssetSet, key);
+  }
+  async reconcileProductionAssetReview(run: SmartGenerationRun) {
+    if (!this.d.productionAssets || !run.productionAssetSet) {
+      throw new DomainValidationError("制作资产尚未准备");
+    }
+    return this.d.productionAssets.reconcileHumanReview(run.productionAssetSet);
+  }
+  async recoverProductionAssetResults(run: SmartGenerationRun) {
+    if (!this.d.productionAssets || !run.productionAssetSet) {
+      throw new DomainValidationError("制作资产尚未准备");
+    }
+    return this.d.productionAssets.recoverResultProcessing(run.productionAssetSet);
+  }
+  async updateProductionAssetPrompt(run: SmartGenerationRun, key: string, prompt: string) {
+    if (
+      !this.d.productionAssets ||
+      !run.productionStrategy ||
+      !run.productionAssetSet
+    ) {
+      throw new DomainValidationError("制作资产尚未准备");
+    }
+    return this.d.productionAssets.updatePrompt(
+      run.productionAssetSet,
+      run.productionStrategy,
+      key,
+      prompt
+    );
+  }
+  async regenerateProductionAsset(run: SmartGenerationRun, key: string, prompt?: string) {
+    if (
+      !this.d.productionAssets ||
+      !run.productionStrategy ||
+      !run.productionAssetSet
+    ) {
+      throw new DomainValidationError("制作资产尚未准备");
+    }
+    return this.d.productionAssets.regenerateReview(
+      run.productionAssetSet,
+      run.productionStrategy,
+      key,
+      prompt
+    );
+  }
+  async retryProductionAsset(run: SmartGenerationRun, key: string, prompt?: string) {
+    if (
+      !this.d.productionAssets ||
+      !run.productionStrategy ||
+      !run.productionAssetSet
+    ) {
+      throw new DomainValidationError("制作资产尚未准备");
+    }
+    return this.d.productionAssets.retryUnknown(
+      run.productionAssetSet,
+      run.productionStrategy,
+      key,
+      prompt
+    );
   }
   async script(run: SmartGenerationRun) {
     const w = await this.workspace(run.projectId);
-    return this.d.aiGeneration.generateScriptDraft({ truth: w.productTruth!, batch: run.creativeBatch!,
+    const draft = await this.d.aiGeneration.generateScriptDraft({ truth: w.productTruth!, batch: run.creativeBatch!,
       selectedCreativeId: run.selectedCreativeId!, version: await this.d.productFlow.nextVersion(run.projectId, "ScriptDraft", "script"),
-      targetDurationMs: run.targetDurationMs, referenceVideoProfile: run.referenceVideoProfile, creativeContext: run.creativeContext });
+      targetDurationMs: run.targetDurationMs, referenceVideoProfile: run.referenceVideoProfile, creativeContext: run.creativeContext,
+      directorVersion: run.options.directorVersion ?? 2 });
+    return bindScriptProductionAssets(
+      draft,
+      run.workflowVersion === 2 ? run.productionAssetSet : undefined
+    );
+  }
+  async scriptV8(run: SmartGenerationRun) {
+    if (!this.d.v8Screenplay || run.options.directorPipeline !== "V8") {
+      throw new DomainValidationError("当前任务未启用 V8 详细剧本生成器");
+    }
+    const w = await this.workspace(run.projectId);
+    if (!w.productTruth || !run.creativeBatch || !run.selectedCreativeId) {
+      throw new DomainValidationError("V8 剧本必须先确认产品事实、创意方案及制作资产");
+    }
+    const generated = await this.d.v8Screenplay.propose({
+      truth: w.productTruth,
+      batch: run.creativeBatch,
+      selectedCreativeId: run.selectedCreativeId,
+      userBrief: run.options.requestText,
+      targetDurationMs: run.targetDurationMs,
+      version: await this.d.productFlow.nextVersion(run.projectId, "ScriptDraft", "script"),
+      researchPatterns: run.creativeContext?.research?.contentOpportunities
+    });
+    const script = bindScriptProductionAssets(
+      generated.legacyScriptDraft,
+      run.productionAssetSet
+    );
+    return { script, screenplay: generated.screenplay };
+  }
+
+  async reviseV8Screenplay(run: SmartGenerationRun, screenplay: unknown) {
+    if (run.options.directorPipeline !== "V8" || !run.script || !run.creativeBatch ||
+        !run.selectedCreativeId) {
+      throw new DomainValidationError("只有未确认的 V8 详细剧本可以在此编辑");
+    }
+    const w = await this.workspace(run.projectId);
+    if (!w.productTruth) throw new DomainValidationError("V8 剧本缺少本轮产品事实");
+    const revised = reviseV8DetailedProposal({
+      screenplay,
+      existingScript: run.script,
+      truth: w.productTruth,
+      batch: run.creativeBatch,
+      selectedCreativeId: run.selectedCreativeId,
+      targetDurationMs: run.targetDurationMs
+    });
+    return bindScriptProductionAssets(revised, run.productionAssetSet);
+  }
+
+  async scriptV3(run: SmartGenerationRun) {
+    if (!this.d.scriptFeasibility) {
+      throw new SmartFlowPause(
+        "BLOCKED",
+        "DIRECTOR_V3_SCRIPT_QA_NOT_READY",
+        "Director V3 脚本可生成性 QA 尚未配置",
+        false
+      );
+    }
+    const w = await this.workspace(run.projectId);
+    if (!w.productTruth || !run.creativeBatch || !run.selectedCreativeId) {
+      throw new DomainValidationError(
+        "Director V3 脚本所需产品事实或创意尚未准备"
+      );
+    }
+    let script = await this.d.aiGeneration.generateScriptDraft({
+      truth: w.productTruth,
+      batch: run.creativeBatch,
+      selectedCreativeId: run.selectedCreativeId,
+      version: await this.d.productFlow.nextVersion(
+        run.projectId,
+        "ScriptDraft",
+        "script"
+      ),
+      targetDurationMs: run.targetDurationMs,
+      referenceVideoProfile: run.referenceVideoProfile,
+      creativeContext: run.creativeContext,
+      directorVersion: 3
+    });
+    script = bindScriptProductionAssets(
+      script,
+      run.workflowVersion === 2
+        ? run.productionAssetSet
+        : undefined
+    );
+    let feasibility = this.d.scriptFeasibility.review(script);
+    for (
+      let repairPass = 0;
+      repairPass < 2 && feasibility.status === "REVISE";
+      repairPass += 1
+    ) {
+      script = await this.d.scriptFeasibility.repair({
+        truth: w.productTruth,
+        batch: run.creativeBatch,
+        script,
+        report: feasibility
+      });
+      script = bindScriptProductionAssets(
+        script,
+        run.workflowVersion === 2
+          ? run.productionAssetSet
+          : undefined
+      );
+      feasibility = this.d.scriptFeasibility.review(script);
+    }
+    if (feasibility.status !== "PASS") {
+      throw new SmartFlowPause(
+        "BLOCKED",
+        "DIRECTOR_V3_SCRIPT_QA_FAILED",
+        "Director V3 自动修复后脚本仍然过载，请人工修改脚本后再继续",
+        false
+      );
+    }
+    return { script, feasibility };
+  }
+  /** User-triggered regeneration of the saved script's deficient timing/detail.
+   * Retains the approved story/characters and product assets; makes a fresh
+   * ScriptDraft version, while the caller invalidates every downstream scope.
+   */
+  async repairNarrativeScriptV3(run: SmartGenerationRun) {
+    if (!this.d.scriptFeasibility || !run.script || !run.creativeBatch || !run.selectedCreativeId) {
+      throw new DomainValidationError("本轮剧本/创意尚未准备好，无法进行内容驱动的时长修订");
+    }
+    const workspace = await this.workspace(run.projectId);
+    if (!workspace.productTruth || workspace.productTruth.status !== "CONFIRMED") {
+      throw new DomainValidationError("剧本重新编排前必须有当前确认的产品事实");
+    }
+    await this.assertCurrent(run);
+    const first = this.d.scriptFeasibility.review(run.script);
+    if (first.status === "PASS") {
+      throw new DomainValidationError("当前剧本已经通过时长与叙事质检，无需重复调用模型");
+    }
+    const nextVersion = await this.d.productFlow.nextVersion(
+      run.projectId, "ScriptDraft", "script"
+    );
+    let draft = run.script;
+    let report = first;
+    for (let attempt = 0; attempt < 2 && report.status === "REVISE"; attempt++) {
+      draft = await this.d.scriptFeasibility.repair({
+        truth: workspace.productTruth,
+        batch: run.creativeBatch,
+        script: draft,
+        report,
+        outputVersion: nextVersion
+      });
+      draft = bindScriptProductionAssets(draft,
+        run.workflowVersion === 2 ? run.productionAssetSet : undefined);
+      report = this.d.scriptFeasibility.review(draft);
+    }
+    if (report.status !== "PASS") {
+      throw new DomainValidationError("剧本自动重编排后仍不满足时长与叙事质量："+
+        report.issues.map(issue => issue.message).join("；"));
+    }
+    await this.d.aiGeneration.assertScriptUsageCompliance(workspace.productTruth, draft);
+    return { script: draft, feasibility: report };
+  }
+
+  async reviseScriptV3(
+    run: SmartGenerationRun,
+    beats: NonNullable<SmartGenerationRun["script"]>["beats"]
+  ) {
+    if (!run.script || !this.d.scriptFeasibility) {
+      throw new DomainValidationError(
+        "Director V3 脚本或脚本 QA 尚未准备"
+      );
+    }
+    const w = await this.workspace(run.projectId);
+    if (!w.productTruth) {
+      throw new DomainValidationError(
+        "当前项目缺少已确认产品事实"
+      );
+    }
+    const revised = reviseScriptDraft(
+      run.script,
+      beats.map((beat) => ({
+        id: beat.id,
+        purpose: beat.purpose,
+        text: beat.text,
+        estimatedDurationMs: beat.estimatedDurationMs,
+        requiredFactIds: beat.requiredFactIds,
+        ...(beat.videoIntent
+          ? { videoIntent: beat.videoIntent }
+          : {})
+      }))
+    );
+    const feasibility =
+      this.d.scriptFeasibility.review(revised);
+    if (feasibility.status !== "PASS") {
+      throw new DomainValidationError(
+        "修改后的脚本未通过 Director V3 可生成性 QA：" +
+          feasibility.issues
+            .map((issue) => issue.message)
+            .join("；")
+      );
+    }
+    await this.d.aiGeneration.assertScriptUsageCompliance(
+      w.productTruth,
+      revised
+    );
+    return {
+      script: revised,
+      feasibility
+    };
   }
   async director(run: SmartGenerationRun) {
     const w = await this.workspace(run.projectId);
@@ -134,17 +548,437 @@ export class ApplicationSmartProduction implements SmartProduction {
     return this.d.productDirector.generate({ productTruth: w.productTruth!, creativeBatch: run.creativeBatch!,
       selectedCreativeId: run.selectedCreativeId!, script: run.script!, generationTarget,
       projectTargetDurationMs: run.targetDurationMs, productionPlanVersion: await this.d.productFlow.nextVersion(run.projectId, "ProductionPlan", "production-plan"),
+      referenceVideoProfile: run.referenceVideoProfile, creativeContext: run.creativeContext,
+      ...(run.workflowVersion === 2 && run.productionAssetSet
+        ? { productionAssetSet: run.productionAssetSet }
+        : {}) });
+  }
+  async buildDirectorV8(run: SmartGenerationRun) {
+    if (run.options.directorPipeline !== "V8" || run.v8Screenplay?.status !== "CONFIRMED" || !run.script) {
+      throw new DomainValidationError("请先人工确认当前 V8 详细剧本");
+    }
+    const generationTarget = resolveDirectorGenerationTarget(
+      await this.d.dreaminaCapability.registry(), run.options.generationSettings
+    );
+    if (!generationTarget.nativeAudioOutputRequested || generationTarget.operationConstraints.some(c => !c.supportsNativeAudioOutput)) {
+      throw new DomainValidationError("V8 当前生产链需要所选模型支持并启用原生对白声音；请核实模型能力，不能静默改成无声视频");
+    }
+    const bounds = directorClipBounds(generationTarget);
+    return sealV8({ revision: (run.v8Director?.revision ?? 0) + 1, status: "DRAFT" as const, generationTarget,
+      decision: buildV8DirectorDecision({ script: run.script, screenplay: run.v8Screenplay.screenplay,
+        modelMinSeconds: bounds.minSeconds, modelMaxSeconds: bounds.maxSeconds }) });
+  }
+  async directorV8(run: SmartGenerationRun) {
+    assertV8DecisionBinding(run);
+    if (run.v8Director?.status !== "CONFIRMED") throw new DomainValidationError("请先明确采用 V8 导演镜头表");
+    const w = await this.workspace(run.projectId);
+    const productionPlan = await this.d.productDirector.generate({ productTruth: w.productTruth!, creativeBatch: run.creativeBatch!,
+      selectedCreativeId: run.selectedCreativeId!, script: run.script!, generationTarget: run.v8Director.generationTarget,
+      v8DirectorDecision: run.v8Director.decision, productionAssetSet: run.productionAssetSet,
+      projectTargetDurationMs: run.targetDurationMs, productionPlanVersion: await this.d.productFlow.nextVersion(run.projectId, "ProductionPlan", "production-plan"),
       referenceVideoProfile: run.referenceVideoProfile, creativeContext: run.creativeContext });
+    const { contentHash: _hash, ...base } = productionPlan;
+    const boundPlan = sealV8({ ...base, v8Source: { screenplayHash: run.v8Screenplay!.screenplayHash,
+      directorDecisionHash: run.v8Director.decision.contentHash, directorRecordHash: run.v8Director.contentHash } });
+    assertV8PlanBinding({ ...run, productionPlan: boundPlan });
+    return boundPlan;
+  }
+  async compilePromptsV8(run: SmartGenerationRun, voiceBindings: V8PromptRecord["voiceBindings"]) {
+    assertV8PlanBinding(run);
+    if (run.productionPlan?.status !== "CONFIRMED" || run.productionAssetSet?.status !== "READY") {
+      throw new DomainValidationError("请先确认正式分镜及全部制作资产，再编译 V8 提示词");
+    }
+    const w = await this.workspace(run.projectId);
+    const imageBindingMode = run.v8Prompts?.imageBindingMode ??
+      (!run.v8Prompts && process.env.PVS_SCENE_CONTINUITY_V1 === "1" ? "V1" : undefined);
+    const packages = compileV8AuthoritativePrompts({ script: run.script!, truth: w.productTruth!, decision: run.v8Director!.decision,
+      plan: run.productionPlan, assets: run.productionAssetSet, speakerBindings: voiceBindings,
+      includeImageReferences: imageBindingMode === "V1" });
+    return sealV8({ revision: (run.v8Prompts?.revision ?? 0) + 1, status: "DRAFT" as const,
+      screenplayHash: run.v8Screenplay!.screenplayHash, directorRecordHash: run.v8Director!.contentHash,
+      assetSetHash: run.productionAssetSet.contentHash, voiceBindings, packages,
+      ...(imageBindingMode ? { imageBindingMode } : {}) });
+  }
+  async validatePromptsV8(run: SmartGenerationRun) {
+    assertV8PromptBinding(run, false);
+    const compiled = await this.compilePromptsV8(run, run.v8Prompts!.voiceBindings);
+    if (!equal(compiled.packages, run.v8Prompts!.packages)) {
+      throw new DomainValidationError("V8 编辑 Prompt 无法证明保留全部声音、动作和揭晓约束；请修改正式分镜或声线，再重新编译采用");
+    }
+  }
+  async directorV3(run: SmartGenerationRun) {
+    if (!this.d.directorV3Planner) {
+      throw new SmartFlowPause(
+        "BLOCKED",
+        "DIRECTOR_V3_PLANNER_NOT_READY",
+        "Director V3 分镜规划器尚未配置",
+        false
+      );
+    }
+    const w = await this.workspace(run.projectId);
+    if (
+      !w.productTruth ||
+      !run.creativeBatch ||
+      !run.selectedCreativeId ||
+      !run.script
+    ) {
+      throw new DomainValidationError(
+        "Director V3 分镜所需脚本、创意或产品事实不完整"
+      );
+    }
+    const generationTarget =
+      resolveDirectorGenerationTarget(
+        await this.d.dreaminaCapability.registry(),
+        run.options.generationSettings
+      );
+    const directorV3Plan =
+      run.directorV3Plan ??
+      this.d.directorV3Planner.plan({
+        script: run.script,
+        generationTarget
+      });
+    const productionPlan =
+      await this.d.productDirector.generate({
+        productTruth: w.productTruth,
+        creativeBatch: run.creativeBatch,
+        selectedCreativeId: run.selectedCreativeId,
+        script: run.script,
+        generationTarget,
+        directorV3Plan,
+        projectTargetDurationMs: run.targetDurationMs,
+        productionPlanVersion:
+          await this.d.productFlow.nextVersion(
+            run.projectId,
+            "ProductionPlan",
+            "production-plan"
+          ),
+        referenceVideoProfile: run.referenceVideoProfile,
+        creativeContext: run.creativeContext,
+        ...(run.workflowVersion === 2 &&
+        run.productionAssetSet
+          ? {
+              productionAssetSet:
+                run.productionAssetSet
+            }
+          : {})
+      });
+    const formalClips = productionPlan.scenes.flatMap(
+      (scene) =>
+        scene.clips.map((clip) => ({
+          scene,
+          clip
+        }))
+    );
+    if (
+      formalClips.length !==
+      directorV3Plan.clipContracts.length
+    ) {
+      throw new DomainValidationError(
+        "Director V3 正式分镜数量与 Clip Contract 不一致"
+      );
+    }
+    const seedancePromptDrafts = formalClips.map(
+      ({ scene, clip }, index) => {
+        const contract =
+          directorV3Plan.clipContracts[index]!;
+        const promptText = buildSeedancePromptV3({
+          truth: w.productTruth!,
+          plan: productionPlan,
+          scene,
+          clip,
+          contract,
+          ...(run.productionAssetSet
+            ? {
+                productionAssetSet:
+                  run.productionAssetSet
+              }
+            : {}),
+          creativeReferences:
+            run.creativeContext?.references,
+          model:
+            generationTarget.requestedModelVersion,
+          aspectRatio: generationTarget.aspectRatio,
+          videoResolution:
+            generationTarget.videoResolution
+        });
+        return createSeedancePromptV3Draft({
+          projectId: run.projectId,
+          clipId: clip.id,
+          contract,
+          promptText
+        });
+      }
+    );
+    return {
+      productionPlan,
+      directorV3Plan,
+      seedancePromptDrafts
+    };
+  }
+  async previewV3(run: SmartGenerationRun) {
+    if (
+      !this.d.scriptFeasibility ||
+      !this.d.directorV3Planner
+    ) {
+      throw new DomainValidationError(
+        "Director V3 影子预演服务尚未配置完整"
+      );
+    }
+    const w = await this.workspace(run.projectId);
+    if (
+      !w.productTruth ||
+      !run.creativeBatch ||
+      !run.selectedCreativeId ||
+      !run.script
+    ) {
+      throw new DomainValidationError(
+        "当前真实任务缺少 Director V3 预演所需的产品事实、创意或脚本"
+      );
+    }
+
+    const scriptBefore =
+      this.d.scriptFeasibility.review(run.script);
+    let repairedScript = run.script;
+    let scriptAfter = scriptBefore;
+    for (
+      let repairPass = 0;
+      repairPass < 2 && scriptAfter.status === "REVISE";
+      repairPass += 1
+    ) {
+      repairedScript =
+        await this.d.scriptFeasibility.repair({
+          truth: w.productTruth,
+          batch: run.creativeBatch,
+          script: repairedScript,
+          report: scriptAfter
+        });
+      scriptAfter =
+        this.d.scriptFeasibility.review(repairedScript);
+    }
+    if (scriptAfter.status !== "PASS") {
+      throw new DomainValidationError(
+        "Director V3 影子预演的修复脚本仍未通过可生成性 QA：" +
+          scriptAfter.issues
+            .map((issue) => issue.code + " " + issue.message)
+            .join("；")
+      );
+    }
+    const previewScript =
+      repairedScript.status === "DRAFT"
+        ? confirmScriptDraft(repairedScript)
+        : repairedScript;
+    scriptAfter =
+      this.d.scriptFeasibility.review(previewScript);
+    await this.d.aiGeneration.assertScriptUsageCompliance(
+      w.productTruth,
+      previewScript
+    );
+
+    const generationSettings = {
+      ...run.options.generationSettings,
+      nativeAudioOutputRequested: true
+    };
+    const generationTarget =
+      resolveDirectorGenerationTarget(
+        await this.d.dreaminaCapability.registry(),
+        generationSettings
+      );
+    const directorV3Plan =
+      this.d.directorV3Planner.plan({
+        script: previewScript,
+        generationTarget
+      });
+
+    const productionPlan =
+      await this.d.productDirector.generate({
+        productTruth: w.productTruth,
+        creativeBatch: run.creativeBatch,
+        selectedCreativeId: run.selectedCreativeId,
+        script: previewScript,
+        generationTarget,
+        directorV3Plan,
+        projectTargetDurationMs: run.targetDurationMs,
+        productionPlanVersion:
+          (run.productionPlan?.version ?? 0) + 1,
+        referenceVideoProfile: run.referenceVideoProfile,
+        creativeContext: run.creativeContext,
+        ...(run.productionAssetSet?.status === "READY"
+          ? {
+              productionAssetSet:
+                run.productionAssetSet
+            }
+          : {})
+      });
+    await this.d.productDirector.assertPlanUsageCompliance(
+      w.productTruth,
+      productionPlan
+    );
+
+    const formalClips = productionPlan.scenes.flatMap(
+      (scene) =>
+        scene.clips.map((clip) => ({
+          scene,
+          clip
+        }))
+    );
+    if (
+      formalClips.length !==
+      directorV3Plan.clipContracts.length
+    ) {
+      throw new DomainValidationError(
+        "Director V3 影子预演的正式分镜数量与 Clip Contract 不一致"
+      );
+    }
+    const prompts = formalClips.map(
+      ({ scene, clip }, index) => {
+        const contract =
+          directorV3Plan.clipContracts[index]!;
+        const promptText = buildSeedancePromptV3({
+          truth: w.productTruth!,
+          plan: productionPlan,
+          scene,
+          clip,
+          contract,
+          ...(run.productionAssetSet?.status === "READY"
+            ? {
+                productionAssetSet:
+                  run.productionAssetSet
+              }
+            : {}),
+          creativeReferences:
+            run.creativeContext?.references,
+          model:
+            generationTarget.requestedModelVersion,
+          aspectRatio: generationTarget.aspectRatio,
+          videoResolution:
+            generationTarget.videoResolution
+        });
+        return createSeedancePromptV3Draft({
+          projectId: run.projectId,
+          clipId: clip.id,
+          contract,
+          promptText
+        });
+      }
+    );
+
+    const [requests, attempts] = await Promise.all([
+      this.d.generation.listCurrentGenerationRequests(
+        run.projectId
+      ),
+      this.d.workflow.listGenerationAttempts(
+        run.projectId
+      )
+    ]);
+    const baselineRequests = requests
+      .map((request) => {
+        const attempt = attempts
+          .filter(
+            (item) =>
+              item.generationRequestId === request.id
+          )
+          .sort(
+            (a, b) =>
+              b.attemptNumber - a.attemptNumber
+          )[0];
+        return {
+          clipId: request.clipId,
+          durationMs: request.durationMs,
+          generateAudio: request.generateAudio,
+          ...(request.audioPolicy
+            ? { audioPolicy: request.audioPolicy }
+            : {}),
+          promptText: request.promptText,
+          ...(attempt?.outputArtifactId
+            ? {
+                outputArtifactId:
+                  attempt.outputArtifactId
+              }
+            : {})
+        };
+      })
+      .sort(
+        (a, b) =>
+          a.durationMs - b.durationMs ||
+          a.clipId.localeCompare(b.clipId)
+      );
+
+    const createdAt = new Date().toISOString();
+    const preview = {
+      sourceRunId: run.id,
+      ...(run.workflowVersion
+        ? { sourceWorkflowVersion: run.workflowVersion }
+        : {}),
+      createdAt,
+      baseline: {
+        clipCount: baselineRequests.length,
+        requests: baselineRequests
+      },
+      scriptBefore,
+      repairedScript: previewScript,
+      scriptAfter,
+      directorV3Plan,
+      productionPlan,
+      prompts,
+      noPaidVideoGeneration: true as const
+    };
+    const artifactId = randomUUID();
+    const projectRoot = path.join(
+      this.d.projectsRoot,
+      run.projectId
+    );
+    const artifact =
+      await new LocalArtifactStore(
+        projectRoot,
+        this.d.artifacts
+      ).writeImmutable({
+        id: artifactId,
+        projectId: run.projectId,
+        kind: "OTHER",
+        immutable: true,
+        relativePath:
+          "director-v3-preview/" +
+          createdAt
+            .replace(/[:.]/g, "-") +
+          "-" +
+          artifactId +
+          ".json",
+        bytes: Buffer.from(
+          JSON.stringify(preview, null, 2),
+          "utf8"
+        ),
+        mimeType: "application/json"
+      });
+    return {
+      ...preview,
+      artifact
+    };
   }
   async confirmScript(run: SmartGenerationRun) {
     const w = await this.workspace(run.projectId);
     if (!run.script) throw new DomainValidationError("脚本尚未生成");
+    if (run.options.directorVersion === 3 &&
+        run.options.directorPipeline !== "V8") {
+      if (!this.d.scriptFeasibility) {
+        throw new DomainValidationError(
+          "Director V3 脚本 QA 尚未配置"
+        );
+      }
+      const feasibility =
+        this.d.scriptFeasibility.review(run.script);
+      if (feasibility.status !== "PASS") {
+        throw new DomainValidationError(
+          "脚本未通过 Director V3 可生成性 QA，不能确认"
+        );
+      }
+    }
     await this.d.aiGeneration.assertScriptUsageCompliance(w.productTruth!, run.script);
     return confirmScriptDraft(run.script);
   }
   async confirmPlan(run: SmartGenerationRun) {
     const w = await this.workspace(run.projectId);
     if (!run.productionPlan?.generationTarget) throw new DomainValidationError("模型感知分镜尚未准备");
+    if (run.options.directorPipeline === "V8") assertV8PlanBinding(run);
     await this.d.productDirector.assertPlanUsageCompliance(w.productTruth!, run.productionPlan);
     assertDirectorSettingsMatch(run.productionPlan.generationTarget, run.options.generationSettings);
     return confirmProductionPlanDraft(run.productionPlan);
@@ -180,12 +1014,108 @@ export class ApplicationSmartProduction implements SmartProduction {
     await this.assertCurrent(run);
     const w = await this.workspace(run.projectId), material = await this.d.productInput.latest(run.projectId);
     if (!w.productTruth || !w.creativeBatch || !w.script || !w.productionPlan || !material) throw new DomainValidationError("生产链不完整");
+    if (
+      run.options.directorVersion === 3 && run.options.directorPipeline !== "V8" &&
+      (
+        !run.directorV3Plan ||
+        !run.seedancePromptDrafts ||
+        run.seedancePromptDrafts.length !==
+          w.productionPlan.scenes.flatMap((scene) => scene.clips).length
+      )
+    ) {
+      throw new DomainValidationError(
+        "Director V3 的 Clip Contract 或最终 Seedance Prompt 尚未准备完整"
+      );
+    }
+    if (
+      run.workflowVersion === 2 &&
+      (!run.productionAssetSet || run.productionAssetSet.status !== "READY")
+    ) {
+      throw new SmartFlowPause(
+        "WAITING_FOR_ASSET_REVIEW",
+        "PRODUCTION_ASSETS_NOT_READY",
+        "角色、场景或其他制作资产尚未全部准备完成"
+      );
+    }
+    if (run.options.directorPipeline === "V8") {
+      assertV8PromptBinding(run);
+      await this.validatePromptsV8(run);
+    }
+    const stagedContinuity = run.options.directorPipeline === "V8" &&
+      run.v8Prompts?.imageBindingMode === "V1";
+    let waveClipIds: string[] | undefined;
+    const continuitySources: Record<string, SourceBinding> = {};
+    if (stagedContinuity && run.v8Prompts) {
+      const attempts = await this.d.workflow.listGenerationAttempts(run.projectId);
+      const decisions = await this.d.review.listDecisions(run.projectId);
+      const clips = w.productionPlan.scenes.flatMap(s=>s.clips);
+      const attemptedClipIds = new Set(attempts.filter(a=>run.attemptIds.includes(a.id)).map(a=>a.clipId));
+      const acceptedClipIds = new Set<string>();
+      for (const clip of clips) {
+        const latest = attempts.filter(a=>a.clipId===clip.id &&
+            ["SUCCEEDED","RECONCILED_SUCCEEDED"].includes(a.status))
+          .sort((a,b)=>b.attemptNumber-a.attemptNumber)[0];
+        if (!latest?.outputArtifactId || !run.attemptIds.includes(latest.id)) continue;
+        const accepted = decisions.filter(d=>d.clipId===clip.id && d.clipHash===clip.contentHash)
+          .sort((a,b)=>b.decidedAt.localeCompare(a.decidedAt))[0];
+        if (accepted?.source==="USER" && accepted.decision==="ACCEPT" &&
+            accepted.generationAttemptId===latest.id &&
+            accepted.outputArtifactId===latest.outputArtifactId) acceptedClipIds.add(clip.id);
+      }
+      const wave = planNextContinuityWave({
+        packages:run.v8Prompts.packages, attemptedClipIds, acceptedClipIds
+      });
+      if (wave.status !== "READY") {
+        throw new SmartFlowPause(
+          wave.status==="WAITING_FOR_REVIEW" || wave.status==="WAIT_SOURCE"
+            ? "WAITING_FOR_CLIP_REVIEW" : "BLOCKED",
+          wave.status==="COMPLETE" ? "CONTINUITY_ALL_CLIPS_GENERATED" : "CONTINUITY_SOURCE_REVIEW_REQUIRED",
+          wave.message, true);
+      }
+      waveClipIds=wave.clipIds;
+      for (const targetId of wave.clipIds) {
+        const incoming=run.v8Prompts.packages.find(p=>p.clipId===targetId)?.incomingContinuity;
+        if (!incoming || incoming.relationship==="SCENE_OR_TIME_JUMP") continue;
+        const sourceClip=clips.find(c=>c.id===incoming.sourceClipId);
+        if (!sourceClip) throw new DomainValidationError("本轮转场缺少合法的来源镜头。");
+        const reviewed=await loadReviewedContinuitySource({
+          projectId:run.projectId, projectsRoot:this.d.projectsRoot,
+          clip:sourceClip, attempts, runAttemptIds:run.attemptIds,
+          decisions, artifacts:this.d.artifacts
+        });
+        continuitySources[targetId]=bindReviewedContinuitySource({source:reviewed,incoming});
+      }
+    }
+    const generatedProductionAssets =
+      run.workflowVersion === 2 && run.productionAssetSet && this.d.productionAssets
+        ? await this.d.productionAssets.toAssetRefs(run.productionAssetSet)
+        : [];
     const ids = w.productionPlan.scenes.flatMap((s) => s.clips.flatMap((c) => c.referenceAssets.map((a) => a.assetId)));
     const valid = await validateReferenceImagesForPreflight({ projectsRoot: this.d.projectsRoot, projectId: run.projectId,
-      confirmedReferenceAssets: CreativeReferenceService.assets(await this.d.creativeReferences?.assertExpected(run.projectId,w.productionPlan.creativeReferenceSetRef)??null),
+      confirmedReferenceAssets: [
+        ...CreativeReferenceService.assets(await this.d.creativeReferences?.assertExpected(run.projectId,w.productionPlan.creativeReferenceSetRef)??null),
+        ...generatedProductionAssets
+      ],
       snapshot: material, artifacts: this.d.artifacts, requiredAssetIds: ids });
     const result = await this.d.preflight.run({ projectId: run.projectId, productTruth: w.productTruth, creativeBatch: w.creativeBatch,
-      script: w.script, productionPlan: w.productionPlan, assets: material.assets, generationSettings: run.options.generationSettings,
+      script: w.script, productionPlan: w.productionPlan, assets: [...material.assets, ...generatedProductionAssets],
+      ...(run.workflowVersion === 2 && run.productionAssetSet
+        ? { productionAssetSet: run.productionAssetSet }
+        : {}),
+      ...(run.options.directorVersion === 3 && run.directorV3Plan
+        ? {
+            directorV3Plan: run.directorV3Plan,
+            promptV3Overrides: Object.fromEntries(
+              (run.seedancePromptDrafts ?? []).map(
+                (draft) => [draft.clipId, draft.promptText]
+              )
+            )
+          }
+        : {}),
+      ...(run.options.directorPipeline === "V8" ? { v8Run: run } : {}),
+      generationSettings: run.options.generationSettings,
+      ...(waveClipIds ? {clipIds:waveClipIds} : {}),
+      ...(Object.keys(continuitySources).length ? {continuitySources} : {}),
       inputBlockers: valid.blockers, acceptedDuplicateSubmissionRisk: false });
     await this.d.preflightAudit(run.projectId, result);
     if (result.reports.some((r) => r.status !== "PASS")) throw new SmartFlowPause("BLOCKED", "PREFLIGHT_BLOCKED", result.reports.flatMap((r) => r.blockers).join("；") || "生成前检查未通过");
@@ -195,10 +1125,20 @@ export class ApplicationSmartProduction implements SmartProduction {
         costStatus: report.costEstimate.status, estimatedCredits: report.costEstimate.estimatedCredits, costText: report.costEstimate.estimatedCostText };
     }).sort((a, b) => a.requestId.localeCompare(b.requestId));
     const scope = { hash: "0".repeat(64), planRef: ref("ProductionPlan", w.productionPlan), requests, preparedAt: new Date().toISOString() };
-    return { ...scope, hash: scopeHash(scope) };
+    const boundScope = { ...scope,
+      ...(waveClipIds ? {continuityBatch:{wave:(run.completedContinuityWaves?.length??0)+1,clipIds:waveClipIds}} : {}),
+      ...(run.options.directorPipeline === "V8" ? { v8Binding: { runId: run.id,
+      screenplayHash: run.v8Screenplay!.screenplayHash, directorRecordHash: run.v8Director!.contentHash, promptRecordHash: run.v8Prompts!.contentHash } } : {}) };
+    return { ...boundScope, hash: scopeHash(boundScope) };
   }
   async validatePaidScope(run: SmartGenerationRun) {
     await this.assertCurrent(run);
+    if (run.options.directorPipeline === "V8") {
+      assertV8PromptBinding(run);
+      await this.validatePromptsV8(run);
+      if (!equal(run.paidScope?.v8Binding, { runId: run.id, screenplayHash: run.v8Screenplay!.screenplayHash,
+        directorRecordHash: run.v8Director!.contentHash, promptRecordHash: run.v8Prompts!.contentHash })) throw new DomainValidationError("V8 付费范围绑定已失效");
+    }
     const scope = run.paidScope;
     if (!scope || scopeHash(scope) !== scope.hash || !run.productionPlan || !equal(scope.planRef, ref("ProductionPlan", run.productionPlan))) throw new DomainValidationError("付费范围校验失败");
     const [requests, reports, registry] = await Promise.all([this.d.generation.listCurrentGenerationRequests(run.projectId), this.d.generation.listPreflightReports(run.projectId), this.d.dreaminaCapability.registry()]);
@@ -210,35 +1150,85 @@ export class ApplicationSmartProduction implements SmartProduction {
       if (!request || !report || report.status !== "PASS" || request.requestHash !== bound.requestHash || report.reportHash !== bound.preflightHash || report.requestHash !== request.requestHash || report.generationRequestId !== request.id ||
           !request.inputVersionRefs.some((r) => equal(r, scope.planRef)) || !planned.has(request.clipId) || found.has(request.clipId) ||
           (report.costEstimate.expiresAt && Date.parse(report.costEstimate.expiresAt) <= Date.now())) throw new SmartFlowPause("BLOCKED", "PAID_SCOPE_STALE", "镜头、预检或成本范围已失效；不会使用旧确认执行新请求", false);
+      if (run.options.directorPipeline === "V8") {
+        const p = run.v8Prompts!.packages.find(p => p.clipId === request.clipId);
+        const source=request.continuitySource;
+        const expectedText=p ? source
+          ? appendReviewedContinuityInstruction(p.promptText,source) : p.promptText : undefined;
+        if (!p || request.promptText !== expectedText || !request.generateAudio ||
+            request.v8Binding?.promptPackageHash !== p.contentHash || request.v8Binding.promptRecordHash !== run.v8Prompts!.contentHash ||
+            request.v8Binding.runId !== run.id) throw new DomainValidationError("V8 实际生成请求未保留当前采用提示词，禁止付费提交");
+        const incoming=p.incomingContinuity;
+        if (source) {
+          if (incoming?.sourceClipId!==source.sourceClipId ||
+              incoming.contractHash!==source.contractHash ||
+              incoming.relationship!==source.relationship ||
+              (incoming.requiresHardFirstFrame &&
+                (request.dreaminaOperation!=="image2video" ||
+                 request.assetManifest[0]?.assetId!==source.tailFrameArtifactId ||
+                 request.assetManifest[0]?.artifactHash!==source.tailFrameSha256 ||
+                 request.imageBindings?.[0]?.providerSlot!=="FIRST_FRAME"))) {
+            throw new DomainValidationError("当前付款镜头的真实尾帧/专用首帧槽位绑定不正确。");
+          }
+          const latestAttempts=await this.d.workflow.listGenerationAttempts(run.projectId);
+          const sourceClip=run.productionPlan!.scenes.flatMap(s=>s.clips)
+            .find(c=>c.id===source.sourceClipId);
+          if (!sourceClip) throw new DomainValidationError("连续性来源镜头已失效。");
+          const reviewed=await loadReviewedContinuitySource({
+            projectId:run.projectId,projectsRoot:this.d.projectsRoot,clip:sourceClip,
+            attempts:latestAttempts,runAttemptIds:run.attemptIds,
+            decisions:await this.d.review.listDecisions(run.projectId),artifacts:this.d.artifacts
+          });
+          if (!equal(bindReviewedContinuitySource({source:reviewed,incoming}),source)) {
+            throw new DomainValidationError("上一段视频或人工采用决定发生变化，必须重新预检并再次授权。");
+          }
+        } else if (run.v8Prompts?.imageBindingMode==="V1" && incoming &&
+            incoming.relationship!=="SCENE_OR_TIME_JUMP") {
+          throw new DomainValidationError("连续性依赖片段缺少审核过的来源，禁止复用第一批费用许可。");
+        }
+      }
       found.add(request.clipId);
     }
-    if (found.size !== planned.size) throw new DomainValidationError("付费范围没有精确覆盖当前导演镜头");
+    if (run.options.directorPipeline === "V8" && run.v8Prompts?.imageBindingMode === "V1") {
+      const expected = new Set(run.paidScope?.continuityBatch?.clipIds ??
+        firstSourceIndependentClipIds(run.v8Prompts.packages));
+      if (found.size !== expected.size || [...found].some(id=>!expected.has(id))) {
+        throw new DomainValidationError("连续性首批付费范围不匹配；后续镜头不能复用本次授权。");
+      }
+    } else if (found.size !== planned.size) throw new DomainValidationError("付费范围没有精确覆盖当前导演镜头");
   }
   async approve(run: SmartGenerationRun) {
     if (!run.consent || run.consent.scopeHash !== run.paidScope?.hash) throw new DomainValidationError("缺少本次明确付费确认");
+    await this.validatePaidScope(run);
     const approved = await this.d.approval.approveCurrentRequests({ projectId: run.projectId,
       generationRequestIds: run.paidScope.requests.map((r) => r.requestId), acceptedUnknownCostRisk: run.consent.acceptedUnknownCostRisk,
-      acceptedDuplicateSubmissionRisk: false, reuseMatchingApprovals: true });
+      acceptedDuplicateSubmissionRisk: false, reuseMatchingApprovals: run.options.directorPipeline !== "V8" });
     return approved.attempts.map((a) => a.id);
   }
   async generate(run: SmartGenerationRun) {
     if (!run.consent || run.consent.scopeHash !== run.paidScope?.hash || !run.attemptIds.length) throw new DomainValidationError("生成任务缺少独立授权与尝试记录");
+    const activeIds=run.options.directorPipeline==="V8" &&
+      run.v8Prompts?.imageBindingMode==="V1"
+      ? (run.activeBatchAttemptIds??run.attemptIds) : run.attemptIds;
+    if (!activeIds.length || activeIds.some(id=>!run.attemptIds.includes(id))) {
+      throw new DomainValidationError("本批次生成尝试与当前任务授权不匹配");
+    }
     let attempts = await this.d.workflow.listGenerationAttempts(run.projectId);
-    const scoped = attempts.filter((a) => run.attemptIds.includes(a.id));
-    if (scoped.length !== run.attemptIds.length) throw new DomainValidationError("生成尝试记录不完整");
+    const scoped = attempts.filter((a) => activeIds.includes(a.id));
+    if (scoped.length !== activeIds.length) throw new DomainValidationError("本批生成尝试记录不完整");
     const created = scoped.filter((a) => a.status === "CREATED");
     if (created.length) {
       await this.validatePaidScope(run);
       const preview = await this.d.batchGeneration.preview(run.projectId, created.map((a) => a.id));
       await this.d.batchGeneration.submit({ projectId: run.projectId, attemptIds: created.map((a) => a.id), scopeHash: preview.scopeHash });
     }
-    for (const id of run.attemptIds) {
+    for (const id of activeIds) {
       let attempt = await this.d.workflow.getGenerationAttempt(id);
       if (!attempt) continue;
       if (["SUBMITTED", "PROCESSING"].includes(attempt.status)) attempt = await this.d.execution.pollAttempt(id);
       if (["SUCCEEDED", "RECONCILED_SUCCEEDED"].includes(attempt.status) && !attempt.outputArtifactId) await this.d.execution.downloadAttempt(id);
     }
-    attempts = (await this.d.workflow.listGenerationAttempts(run.projectId)).filter((a) => run.attemptIds.includes(a.id));
+    attempts = (await this.d.workflow.listGenerationAttempts(run.projectId)).filter((a) => activeIds.includes(a.id));
     if (attempts.some((a) => ["SUBMITTED", "PROCESSING"].includes(a.status))) return { done: false };
     if (attempts.some((a) => ["SUBMITTING", "SUBMISSION_OUTCOME_UNKNOWN", "RECONCILING"].includes(a.status))) throw new SmartFlowPause("BLOCKED", "RECONCILE_REQUIRED", "有镜头提交结果未知，先在视频生成页调和；不会自动重提");
     if (attempts.some((a) => a.status === "CREATED")) throw new SmartFlowPause("BLOCKED", "SUBMISSION_BLOCKED", "部分镜头尚未提交，请查看视频生成页的审批或能力错误");
@@ -246,6 +1236,16 @@ export class ApplicationSmartProduction implements SmartProduction {
     return { done: true };
   }
   async reviewClips(run: SmartGenerationRun) {
+    if (run.options.directorPipeline === "V8" && run.v8Prompts?.imageBindingMode === "V1") {
+      const expected=run.productionPlan?.scenes.flatMap(s=>s.clips).length ?? 0;
+      const attempts=await this.d.workflow.listGenerationAttempts(run.projectId);
+      const completed=new Set(attempts.filter(a=>run.attemptIds.includes(a.id) &&
+        ["SUCCEEDED","RECONCILED_SUCCEEDED"].includes(a.status) && Boolean(a.outputArtifactId)).map(a=>a.clipId));
+      if (completed.size < expected) {
+        throw new SmartFlowPause("WAITING_FOR_CLIP_REVIEW", "CONTINUITY_NEXT_BATCH_REQUIRED",
+          "首批视频已生成，请先审核。后续片段必须继承审核通过的真实尾帧并重新确认下一批费用；当前版本不自动复用首批授权或提前进入剪辑。", false);
+      }
+    }
     let w = await this.workspace(run.projectId);
     let decisions = await this.d.review.listDecisions(run.projectId);
     const acceptedRunOutput = () =>
@@ -285,13 +1285,15 @@ export class ApplicationSmartProduction implements SmartProduction {
     const planClips = w.productionPlan.scenes
       .flatMap(scene => scene.clips)
       .sort((a, b) => a.order - b.order);
+    const reviewBlockers: Array<{ index: number; reason: string }> = [];
     const pending: Array<{
       clip: (typeof planClips)[number];
       attempt: (typeof allAttempts)[number];
       assessment: Awaited<ReturnType<VisualEditAssessmentService["assess"]>>;
     }> = [];
 
-    for (const clip of planClips) {
+    for (const [clipIndex, clip] of planClips.entries()) {
+      const videoNumber = clipIndex + 1;
       const usage = decisions
         .filter(
           d =>
@@ -311,11 +1313,8 @@ export class ApplicationSmartProduction implements SmartProduction {
         )
         .sort((a, b) => b.attemptNumber - a.attemptNumber)[0];
       if (!attempt?.outputArtifactId) {
-        throw new SmartFlowPause(
-          "WAITING_FOR_CLIP_REVIEW",
-          "OUTPUT_REVIEW_REQUIRED",
-          "仍有镜头没有本轮可审的成功视频，请先处理生成结果"
-        );
+        reviewBlockers.push({ index: videoNumber, reason: "没有已下载的成功视频" });
+        continue;
       }
       const existing = decisions
         .filter(
@@ -329,11 +1328,8 @@ export class ApplicationSmartProduction implements SmartProduction {
         .sort((a, b) => b.decidedAt.localeCompare(a.decidedAt))[0];
       if (existing?.decision === "ACCEPT") continue;
       if (existing?.decision === "REDO") {
-        throw new SmartFlowPause(
-          "WAITING_FOR_CLIP_REVIEW",
-          "REDO_ALREADY_REQUESTED",
-          "已有镜头明确要求重做，视觉 AI 不会覆盖人工重做决定"
-        );
+        reviewBlockers.push({ index: videoNumber, reason: "已有人工重做决定，等待处理" });
+        continue;
       }
 
       let assessment;
@@ -346,28 +1342,34 @@ export class ApplicationSmartProduction implements SmartProduction {
           outputArtifactId: attempt.outputArtifactId
         });
       } catch (error) {
-        throw new SmartFlowPause(
-          "WAITING_FOR_CLIP_REVIEW",
-          "VISUAL_REVIEW_UNAVAILABLE",
-          "视觉 AI 无法可靠完成审片：" +
-            (error instanceof Error ? error.message : String(error)) +
-            "；已转回人工审片"
-        );
+        // An unavailable visual model or a broken evidence record must not
+        // terminate diagnosis of the remaining independent clips.
+        reviewBlockers.push({ index: videoNumber, reason: "视觉审核暂不可用，请人工复核" });
+        continue;
       }
       if (!assessment.assessment.autoAcceptEligible) {
-        throw new SmartFlowPause(
-          "WAITING_FOR_CLIP_REVIEW",
-          "VISUAL_REVIEW_REQUIRED",
-          "视觉 AI 未达到自动采用门槛（" +
-            assessment.assessment.status +
-            "/" +
-            assessment.assessment.confidence +
-            "）：" +
-            assessment.assessment.reasons.join("；") +
-            "。请人工播放完整视频决定采用或重做"
-        );
+        reviewBlockers.push({
+          index: videoNumber,
+          reason: assessment.assessment.status === "BLOCKED"
+            ? "画面或产品展示存在问题"
+            : "视觉证据不足，不能安全自动采用"
+        });
+        continue;
       }
       pending.push({ clip, attempt, assessment });
+    }
+
+    if (reviewBlockers.length) {
+      // Complete all independent visual checks before writing any AI ACCEPT.
+      // Human decisions and all existing video artifacts remain unchanged.
+      const summary = reviewBlockers.map(item =>
+        "视频 " + item.index + "：" + item.reason).join("；");
+      throw new SmartFlowPause(
+        "WAITING_FOR_CLIP_REVIEW",
+        "VISUAL_REVIEW_REQUIRED",
+        "逐条视觉审核完成；" + summary +
+        "。请在本轮镜头审片中播放对应视频并选择采用、重做或跳过。不会自动付费重提。"
+      );
     }
 
     // Assess the full outstanding set first. Only then persist AI ACCEPT decisions.
@@ -401,7 +1403,16 @@ export class ApplicationSmartProduction implements SmartProduction {
   }
   async autoEdit(run: SmartGenerationRun) {
     if (!this.d.autoEdit) throw new SmartFlowPause("BLOCKED", "AUTO_EDIT_NOT_READY", "自动剪辑、字幕和音轨集成尚未完成；现有手动时间线可用");
-    try { return await this.d.autoEdit(run); }
+    try {
+      const result = await this.d.autoEdit(run);
+      if (run.options.directorPipeline === "V8") {
+        assertV8PromptBinding(run);
+        const timeline = await this.d.timeline?.latestTimeline(run.projectId);
+        if (!timeline) throw new DomainValidationError("V8 时间线校验未配置或结果未保存，禁止进入渲染");
+        assertV8TimelineConformance(run.productionPlan!, timeline);
+      }
+      return result;
+    }
     catch (error) {
       if (error instanceof AutoEditBlocked) throw new SmartFlowPause(error.audioRequired ? "WAITING_FOR_AUDIO" : "BLOCKED", error.code, error.message);
       throw error;
@@ -414,11 +1425,19 @@ export class ApplicationSmartProduction implements SmartProduction {
     }
     const outputs = new Set((await this.d.workflow.listGenerationAttempts(run.projectId)).filter(a => run.attemptIds.includes(a.id)).map(a => a.outputArtifactId));
     if (timeline.clips.some(c => !c.deleted && !outputs.has(c.sourceArtifactId))) throw new SmartFlowPause("BLOCKED", "TIMELINE_OTHER_OUTPUT", "手工时间线包含本任务以外的生成结果，请独立完成手工成片");
+    if (run.options.directorPipeline === "V8") {
+      assertV8PromptBinding(run);
+      assertV8TimelineConformance(run.productionPlan!, timeline);
+    }
   }
   async render(run: SmartGenerationRun) {
     const current = await this.d.timeline?.latestTimeline(run.projectId);
     if (!current || current.status !== "CONFIRMED" || current.id !== run.timelineRef?.id || current.contentHash !== run.timelineRef?.hash) {
       throw new SmartFlowPause("BLOCKED", "TIMELINE_CHANGED", "当前时间线不是本任务确认的版本，已在渲染前阻断", false);
+    }
+    if (run.options.directorPipeline === "V8") {
+      assertV8PromptBinding(run);
+      assertV8TimelineConformance(run.productionPlan!, current);
     }
     const result = await this.d.renderEngine.render(run.projectId);
     if (result.renderJob.status !== "SUCCEEDED" || result.assembly.timelineId !== run.timelineRef?.id || result.assembly.timelineHash !== run.timelineRef?.hash) throw new SmartFlowPause("BLOCKED", "RENDER_OUTPUT_MISMATCH", "渲染输出与本任务时间线不一致", false);

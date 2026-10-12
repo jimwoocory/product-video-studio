@@ -1,4 +1,5 @@
 import type { Project, Timeline, WorkflowBlocker } from "../../domain/schemas.js";
+import type { WorkflowReadModel } from "./workflow-read-model.js";
 
 export type WorkflowPageKind =
   | "product"
@@ -37,6 +38,8 @@ export type WorkflowNavigationState = {
   globalResumeText: string;
   progressIndex: number;
   steps: WorkflowNavigationStep[];
+  /** UX-R1: sole user-facing next action, calculated from existing task truth. */
+  workflow?: WorkflowReadModel;
 };
 
 type ResolveWorkflowNavigationInput = {
@@ -45,6 +48,7 @@ type ResolveWorkflowNavigationInput = {
   blockers?: WorkflowBlocker[];
   timeline?: Pick<Timeline, "status">;
   finalAssemblyStatus?: "READY" | "ACCEPTED" | "STALE";
+  workflow?: WorkflowReadModel;
 };
 
 const stepDefinitions: Array<{
@@ -230,9 +234,10 @@ export function resolveWorkflowNavigation(
       ? workflowPageTaskText(currentPage, project)
       : "使用辅助工具；主流程恢复位置保持不变",
     globalResumeStep: resume,
-    globalResumeHref: `/projects/${project.id}/${resume}`,
-    globalResumeText: resumeText(project, blockers, resume),
+    globalResumeHref: input.workflow?.action.href ?? `/projects/${project.id}/${resume}`,
+    globalResumeText: input.workflow?.action.label ?? resumeText(project, blockers, resume),
     progressIndex: progress,
-    steps
+    steps,
+    ...(input.workflow ? { workflow: input.workflow } : {})
   };
 }

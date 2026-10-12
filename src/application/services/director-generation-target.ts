@@ -135,15 +135,45 @@ export function assertDirectorSettingsMatch(
 }
 
 export function assertProfileMatchesDirectorTarget(target: DirectorGenerationTarget, profile: GenerationProfile): void {
-  assertDirectorSettingsMatch(target, {
-    requestedModelVersion: profile.modelVersion ?? "FIXED",
-    aspectRatio: profile.aspectRatio ?? "AUTO",
-    videoResolution: profile.videoResolution,
-    nativeAudioOutputRequested: profile.nativeAudioOutputRequested
-  });
+  if (
+    toDreaminaCliModel(profile.modelVersion ?? "FIXED") !==
+      toDreaminaCliModel(target.requestedModelVersion) ||
+    (profile.aspectRatio ?? "AUTO") !== target.aspectRatio ||
+    profile.videoResolution.toLowerCase() !==
+      target.videoResolution.toLowerCase() ||
+    (profile.nativeAudioOutputRequested &&
+      !target.nativeAudioOutputRequested)
+  ) {
+    throw new DomainValidationError(
+      "生成参数与导演目标不一致；请返回导演分镜重新适配并审核，不能复用旧 Prompt 或生成授权"
+    );
+  }
   const operation = target.operationConstraints.find((item) => item.operation === profile.operation);
   if (!operation || operation.modelVersion !== profile.modelVersion || profile.registryFingerprint !== target.registryFingerprint) {
     throw new DomainValidationError("模型命令或能力表已变化，请重新适配导演分镜；旧计划和付费授权不可复用");
+  }
+}
+
+/**
+ * A HARD_CONTINUITY successor uses a verified image2video operation instead of
+ * the director's original text/multimodal route. This is an opt-in exception
+ * only for the operation, never for model/ratio/resolution/audio/registry.
+ */
+export function assertReviewedFirstFrameProfileMatchesDirectorTarget(
+  target: DirectorGenerationTarget, profile: GenerationProfile
+): void {
+  if (profile.operation !== "image2video" ||
+      profile.aspectRatioMode !== "EXPLICIT" ||
+      profile.registryFingerprint !== target.registryFingerprint ||
+      toDreaminaCliModel(profile.modelVersion ?? "FIXED") !==
+        toDreaminaCliModel(target.requestedModelVersion) ||
+      profile.aspectRatio !== target.aspectRatio ||
+      profile.videoResolution.toLowerCase() !== target.videoResolution.toLowerCase() ||
+      profile.nativeAudioOutputRequested !== target.nativeAudioOutputRequested ||
+      (target.nativeAudioOutputRequested && !profile.nativeAudioOutputSupported)) {
+    throw new DomainValidationError(
+      "已审核硬首帧模式的模型、比例、分辨率或原生声音能力不满足原导演要求；不得擅自降级生成。"
+    );
   }
 }
 

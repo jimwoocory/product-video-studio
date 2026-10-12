@@ -17,10 +17,17 @@ import { LocalArtifactStore } from "../../adapters/store/local-artifact-store.js
 import { inspectMedia } from "../../adapters/media/inspect-media.js";
 import { sampleGeneratedVisualReviewFrames } from "../../adapters/media/generated-visual-review-frames.js";
 
-export const VISUAL_EDIT_EVALUATOR_VERSION = "p1f06-visual-edit-v1";
+export const VISUAL_EDIT_EVALUATOR_VERSION = "p1f06-visual-edit-v2-visibility";
 
 const proposalSchema = z.object({
   productIdentity: z.enum(["PASS", "BLOCKED", "UNCERTAIN"]),
+  /** Visual evidence of presence, independent of whether presence was required. */
+  productPresence: z.enum(["ABSENT", "PRESENT", "UNCERTAIN"]),
+  /** Whether the expected NONE / PARTIAL / CLEAR / HERO framing was met. */
+  visibilityCompliance: z.enum(["PASS", "BLOCKED", "UNCERTAIN"]),
+  /** Confidence in non-product checks independent of product identity. */
+  sceneConfidence: z.enum(["LOW", "MEDIUM", "HIGH"]),
+  storyActionAlignment: z.enum(["PASS", "BLOCKED", "UNCERTAIN"]),
   productStability: z.enum(["PASS", "BLOCKED", "UNCERTAIN"]),
   usageCompliance: z.enum(["PASS", "BLOCKED", "UNCERTAIN"]),
   visualQuality: z.enum(["PASS", "BLOCKED", "UNCERTAIN"]),
@@ -59,16 +66,58 @@ function candidateWindows(sourceDurationMs: number, requiredDurationMs: number) 
   }));
 }
 
-function aggregateStatus(proposal: z.infer<typeof proposalSchema>) {
-  const checks = [
-    proposal.productIdentity,
-    proposal.productStability,
-    proposal.usageCompliance,
-    proposal.visualQuality,
-    proposal.cutQuality
-  ];
-  if (checks.includes("BLOCKED")) return "BLOCKED" as const;
-  if (checks.includes("UNCERTAIN") || proposal.confidence !== "HIGH") {
+export function applyClipVisibilityPolicy(
+  clip: Pick<Clip, "productVisibility">,
+  proposal: z.infer<typeof proposalSchema>
+) {
+  const visibility = clip.productVisibility;
+  let productIdentity: "PASS" | "BLOCKED" | "UNCERTAIN" | "NOT_APPLICABLE" = proposal.productIdentity;
+  let productStability: "PASS" | "BLOCKED" | "UNCERTAIN" | "NOT_APPLICABLE" = proposal.productStability;
+  let confidence = proposal.confidence;
+  const notes: string[] = [];
+  if (visibility === "NONE") {
+    productStability = "NOT_APPLICABLE";
+    if (proposal.productPresence === "ABSENT") {
+      // The canonical reference remains authenticated, but identity comparison
+      // is meaningless when the script deliberately contains no product.
+      productIdentity = "NOT_APPLICABLE";
+      confidence = proposal.sceneConfidence;
+      notes.push("本段为纯剧情镜头，产品按分镜未出场；产品身份与稳定性检查不适用。");
+    } else if (proposal.productPresence === "PRESENT") {
+      productIdentity = "BLOCKED";
+      notes.push("本段导演要求产品不出镜，但采样画面出现了产品，需要核实是否破坏剧情。");
+    } else {
+      productIdentity = "UNCERTAIN";
+      notes.push("纯剧情镜头是否出现了意外产品尚不能确认，需人工看完整视频。");
+    }
+  } else if (proposal.productPresence === "ABSENT") {
+    productIdentity = "BLOCKED";
+    productStability = "UNCERTAIN";
+    notes.push("当前镜头要求展示产品，但抽样画面没有产品，不得自动采用。");
+  } else if (proposal.productPresence === "UNCERTAIN") {
+    productIdentity = productIdentity === "BLOCKED" ? "BLOCKED" : "UNCERTAIN";
+    notes.push("当前镜头应展示产品，但抽样画面无法可靠确认产品是否出现。");
+  } else if (proposal.visibilityCompliance === "BLOCKED") {
+    productIdentity = "BLOCKED";
+    notes.push("产品虽可能出现，但未达到本段要求的部分/清晰/主视觉展示程度。");
+  } else if (proposal.visibilityCompliance === "UNCERTAIN") {
+    productIdentity = productIdentity === "BLOCKED" ? "BLOCKED" : "UNCERTAIN";
+    notes.push("产品出现程度或构图未能可靠确认，不能自动采用。");
+  }
+  return { productIdentity, productStability, confidence, notes };
+}
+
+function aggregateStatus(checks: {
+  productIdentity: "PASS" | "BLOCKED" | "UNCERTAIN" | "NOT_APPLICABLE";
+  productStability: "PASS" | "BLOCKED" | "UNCERTAIN" | "NOT_APPLICABLE";
+  usageCompliance: "PASS" | "BLOCKED" | "UNCERTAIN";
+  visualQuality: "PASS" | "BLOCKED" | "UNCERTAIN";
+  cutQuality: "PASS" | "BLOCKED" | "UNCERTAIN";
+  storyActionAlignment?: "PASS" | "BLOCKED" | "UNCERTAIN";
+}, confidence: "LOW" | "MEDIUM" | "HIGH") {
+  const values = Object.values(checks);
+  if (values.includes("BLOCKED")) return "BLOCKED" as const;
+  if (values.includes("UNCERTAIN") || confidence !== "HIGH") {
     return "UNCERTAIN" as const;
   }
   return "PASS" as const;
@@ -98,6 +147,23 @@ async function verifiedFile(input: {
   }
   return { artifact: { ...artifact, sha256: artifact.sha256 }, file, bytes };
 }
+
+/** Read-only status for the exact current Clip + GenerationAttempt.
+ * Old v1 assessments are kept but explicitly labeled outdated, never reused.
+ */
+export type VisualReviewReadSummary = {
+  clipId: string;
+  attemptId: string;
+  status: "PASS" | "BLOCKED" | "UNCERTAIN" | "OUTDATED";
+  confidence?: "LOW" | "MEDIUM" | "HIGH";
+  autoAcceptEligible: boolean;
+  productVisibility?: Clip["productVisibility"];
+  productPresence?: "ABSENT" | "PRESENT" | "UNCERTAIN";
+  productIdentity?: VisualClipAssessment["checks"]["productIdentity"];
+  productStability?: VisualClipAssessment["checks"]["productStability"];
+  storyActionAlignment?: "PASS" | "BLOCKED" | "UNCERTAIN";
+  audioTrackPresent?: boolean;
+};
 
 export type VisualClipAssessmentResult = {
   assessment: VisualClipAssessment;
@@ -144,6 +210,70 @@ export class VisualEditAssessmentService {
       path.resolve(this.d.projectsRoot, projectId),
       this.d.artifacts
     );
+  }
+
+  /** Read saved visual audit snapshots only. Never calls an AI model, writes
+   * a decision, downloads media or resumes any production task.
+   */
+  async readCurrentSummaries(input: {
+    projectId: string;
+    truthHash: string;
+    clips: Array<Pick<Clip, "id" | "contentHash">>;
+    attempts: Array<{ id: string; clipId: string; outputArtifactId?: string }>;
+  }): Promise<VisualReviewReadSummary[]> {
+    const clipMap = new Map(input.clips.map(clip => [clip.id, clip.contentHash]));
+    const attemptMap = new Map(input.attempts
+      .filter(attempt => Boolean(attempt.outputArtifactId))
+      .map(attempt => [attempt.id, attempt]));
+    const records = (await this.d.artifacts.listByProject(input.projectId, "STRUCTURED_SNAPSHOT"))
+      .filter(record =>
+        record.integrityStatus === "READY" &&
+        record.relativePath.startsWith("post-production/visual-assessments/"))
+      .sort((a,b)=>String(b.createdAt).localeCompare(String(a.createdAt)))
+      .slice(0, 180);
+    const results = new Map<string, VisualReviewReadSummary>();
+    const store = this.store(input.projectId);
+    for (const record of records) {
+      try {
+        const file = await verifiedFile({
+          projectId: input.projectId, artifactId: record.id,
+          expectedHash: record.sha256, artifacts: this.d.artifacts, store
+        });
+        const review = visualClipAssessmentSchema.parse(JSON.parse(file.bytes.toString("utf8")));
+        const { contentHash, ...body } = review;
+        if (hashValue(body) !== contentHash) continue;
+        if (clipMap.get(review.clipId) !== review.clipHash ||
+            review.productTruthRef.hash !== input.truthHash) continue;
+        const attempt = attemptMap.get(review.attemptId);
+        if (!attempt || attempt.clipId !== review.clipId ||
+            attempt.outputArtifactId !== review.outputArtifactId) continue;
+        if (results.has(review.clipId)) continue;
+        if (review.evaluatorVersion !== VISUAL_EDIT_EVALUATOR_VERSION) {
+          results.set(review.clipId, {
+            clipId: review.clipId, attemptId: review.attemptId,
+            status: "OUTDATED", autoAcceptEligible: false
+          });
+        } else {
+          results.set(review.clipId, {
+            clipId: review.clipId, attemptId: review.attemptId,
+            status: review.status, confidence: review.confidence,
+            autoAcceptEligible: review.autoAcceptEligible,
+            ...(review.productVisibility ? {productVisibility: review.productVisibility}:{}),
+            ...(review.productPresence ? {productPresence: review.productPresence}:{}),
+            productIdentity: review.checks.productIdentity,
+            productStability: review.checks.productStability,
+            ...(review.checks.storyActionAlignment ? {storyActionAlignment: review.checks.storyActionAlignment} : {}),
+            ...(review.audioTrackPresent !== undefined ? {
+              audioTrackPresent: review.audioTrackPresent
+            } : {})
+          });
+        }
+      } catch {
+        // Corrupt/unavailable immutable evidence cannot become a PASS.
+        // The rest of the saved assessments remain inspectable.
+      }
+    }
+    return [...results.values()];
   }
 
   async assess(input: {
@@ -259,10 +389,16 @@ export class VisualEditAssessmentService {
           "Evaluate a generated product-video clip for low-risk automatic selection and a fixed-duration trim window.",
         instructions: [
           "This is a visual quality gate, not a product-fact generator.",
-          "Compare generated frames against the canonical user-confirmed product image. Do not infer new features or claims.",
+          "First read clip.productVisibility as the authoritative visibility contract: NONE=no product in this clip, PARTIAL=at least a partial identifiable product, CLEAR=clearly visible product, HERO=prominent product showcase.",
+          "Report productPresence from actual sampled frames (ABSENT/PRESENT/UNCERTAIN), independently of whether a product was expected; visibilityCompliance reports whether the authored visibility requirement was met.",
+          "When productVisibility=NONE, absence is CORRECT. Do NOT lower confidence because the canonical product cannot be compared in this purely narrative clip. Product identity/stability are NOT_APPLICABLE and sceneConfidence must be based only on scene, subjects, visual quality, usage and trim. Unexpected product presence must fail.",
+          "When productVisibility=PARTIAL/CLEAR/HERO, the required product must actually appear to the prescribed extent. Absence or a mismatching product is a genuine failure, not a harmless omission. For a present product compare shape, pattern, color and proportions against canonical.",
+          "Compare generated frames against the canonical user-confirmed product image only when product is actually shown. Do not infer new features or claims.",
           "If product shape, color, logo/text, proportion or identity appears changed and the evidence is clear, mark the relevant check BLOCKED. If you cannot tell, mark UNCERTAIN rather than guessing.",
           "Check confirmed usage rules only against actions visibly supported by sampled frames. Never turn visual guesses into facts.",
-          "Product stability means the same product remains structurally consistent across sampled frames without obvious morphing, duplication, missing parts or identity drift.",
+          "Product stability means the same visible product remains structurally consistent across sampled frames without obvious morphing, duplication, missing parts or identity drift. When NONE/ABSENT, no product stability check is applicable.",
+          "Non-product sceneConfidence must be independent of product visibility; missing product in NONE must not cause MEDIUM confidence, but poor visuals, unclear actions, or insufficient evidence may.",
+          "Check the visually observable main story action and people/scene against clip purpose and segments. Sparse frames cannot verify exact dialogue, lip sync, full action timing, native effects or multi-clip narrative; do not claim they passed.",
           "Visual quality covers severe blur, broken geometry, unreadable required product presentation, or obvious generation defects.",
           "Cut quality chooses only from candidateWindows. Never invent timestamps and never shorten the director-required duration.",
           "Sampled frames are sparse evidence; confidence must be HIGH only when the sampled evidence clearly supports every PASS needed for automatic selection.",
@@ -299,6 +435,7 @@ export class VisualEditAssessmentService {
             }))
           },
           sourceDurationMs: media.durationMs,
+          audioTrackPresent: media.hasAudio,
           sampledFrameTimestampsMs: frames.map(frame => frame.timestampMs),
           candidateWindows: windows
         },
@@ -313,6 +450,10 @@ export class VisualEditAssessmentService {
         ],
         outputContract: {
           productIdentity: "PASS|BLOCKED|UNCERTAIN",
+          productPresence: "ABSENT|PRESENT|UNCERTAIN",
+          visibilityCompliance: "PASS|BLOCKED|UNCERTAIN",
+          sceneConfidence: "LOW|MEDIUM|HIGH",
+          storyActionAlignment: "PASS|BLOCKED|UNCERTAIN",
           productStability: "PASS|BLOCKED|UNCERTAIN",
           usageCompliance: "PASS|BLOCKED|UNCERTAIN",
           visualQuality: "PASS|BLOCKED|UNCERTAIN",
@@ -330,7 +471,16 @@ export class VisualEditAssessmentService {
       if (!windows.some(window => window.index === proposal.recommendedWindowIndex)) {
         throw new DomainValidationError("视觉模型返回了不存在的剪辑候选区间");
       }
-      const status = aggregateStatus(proposal);
+      const visiblePolicy = applyClipVisibilityPolicy(input.clip, proposal);
+      const checks = {
+        productIdentity: visiblePolicy.productIdentity,
+        productStability: visiblePolicy.productStability,
+        usageCompliance: proposal.usageCompliance,
+        visualQuality: proposal.visualQuality,
+        cutQuality: proposal.cutQuality,
+        storyActionAlignment: proposal.storyActionAlignment
+      };
+      const status = aggregateStatus(checks, visiblePolicy.confidence);
       const createdAt = new Date().toISOString();
       const body = {
         id: "visual-assessment-" + cacheKey,
@@ -341,6 +491,9 @@ export class VisualEditAssessmentService {
         outputArtifactId: output.artifact.id,
         outputArtifactHash: output.artifact.sha256,
         productTruthRef: truthRef(input.truth),
+        productVisibility: input.clip.productVisibility,
+        productPresence: proposal.productPresence,
+        audioTrackPresent: media.hasAudio,
         canonicalImageAssetId: canonicalAsset.id,
         canonicalImageArtifactId: canonical.artifact.id,
         canonicalImageHash: canonical.artifact.sha256,
@@ -349,18 +502,12 @@ export class VisualEditAssessmentService {
         requiredDurationMs: input.clip.durationMs,
         sampledFrameTimestampsMs: frames.map(frame => frame.timestampMs),
         candidateWindows: windows,
-        checks: {
-          productIdentity: proposal.productIdentity,
-          productStability: proposal.productStability,
-          usageCompliance: proposal.usageCompliance,
-          visualQuality: proposal.visualQuality,
-          cutQuality: proposal.cutQuality
-        },
-        confidence: proposal.confidence,
+        checks,
+        confidence: visiblePolicy.confidence,
         recommendedWindowIndex: proposal.recommendedWindowIndex,
         status,
-        autoAcceptEligible: status === "PASS" && proposal.confidence === "HIGH",
-        reasons: proposal.reasons,
+        autoAcceptEligible: status === "PASS" && visiblePolicy.confidence === "HIGH",
+        reasons: [...visiblePolicy.notes, ...proposal.reasons],
         ...(generation.metadata ? { aiExecution: generation.metadata } : {}),
         createdAt
       };

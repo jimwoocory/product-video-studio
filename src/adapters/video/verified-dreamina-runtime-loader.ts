@@ -12,6 +12,7 @@ import {
   type VerifiedDreaminaRuntime
 } from "./domestic-jimeng-cli-provider.js";
 import type { GenerationRequest } from "../../domain/schemas.js";
+import { assertAssetImageBindings } from "../../application/services/asset-image-bindings.js";
 
 const sha256Schema = z.string().regex(/^[a-f0-9]{64}$/i);
 const nonEmpty = z.string().trim().min(1);
@@ -222,7 +223,7 @@ function handleValues(handle: {
   };
 }
 
-function buildAgentSubmitArgs(
+export function buildAgentSubmitArgs(
   request: GenerationRequest,
   assets: readonly ResolvedGenerationAsset[],
   legacyModelVersion: string
@@ -259,6 +260,7 @@ function buildAgentSubmitArgs(
   const sorted = [...assets].sort(
     (a, b) => a.priority - b.priority || a.assetId.localeCompare(b.assetId)
   );
+  assertAssetImageBindings(request, sorted);
   const images = sorted.filter(
     (asset) => !asset.inputType || asset.inputType === "image"
   );

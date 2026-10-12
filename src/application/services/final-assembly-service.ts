@@ -132,7 +132,7 @@ export class FinalAssemblyService {
             item.generationAttemptId === attempt.id &&
             item.outputArtifactId === artifact.id &&
             item.outputArtifactHash === artifact.sha256 &&
-            (item.decision === "ACCEPT" || item.decision === "REDO")
+            (item.decision === "ACCEPT" || item.decision === "REDO" || item.decision === "STALE")
         )
         .sort((a, b) => b.decidedAt.localeCompare(a.decidedAt))[0];
       if (accept?.decision !== "ACCEPT") {

@@ -277,6 +277,30 @@ export class DouyinReplyDraftService {
         "只有 DRAFT 状态的回复草稿可以编辑或拒绝"
       );
     }
+
+    const writeIntents =
+      await this.repo.listLatestReplyWriteIntents({
+        projectId: draft.projectId,
+        awemeId: draft.awemeId
+      });
+    const activeWrite = writeIntents.find(
+      (item) =>
+        item.draftId === draft.id &&
+        [
+          "PENDING",
+          "SUBMISSION_UNKNOWN",
+          "REPLY_POSTED_CONFIRMED"
+        ].includes(item.status)
+    );
+    if (activeWrite) {
+      throw new DomainValidationError(
+        activeWrite.status ===
+        "REPLY_POSTED_CONFIRMED"
+          ? "这条回复已经确认发布，不能再编辑草稿"
+          : "这条回复存在进行中或状态不明的发布意图，禁止继续编辑或重试"
+      );
+    }
+
     if (draft.revision !== input.expectedRevision) {
       throw new DomainValidationError(
         "回复草稿已被更新，请刷新页面后重试"

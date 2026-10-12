@@ -59,7 +59,7 @@ export class AutoEditService {
         throw new AutoEditBlocked("OUTPUT_REVIEW_REQUIRED", "仍有镜头没有本轮可用结果，请在生成页明确采用或跳过");
       }
       const output = await this.verified(projectId, attempt.outputArtifactId, "video");
-      const review = decisions.filter(d => d.clipId === clip.id && d.clipHash === clip.contentHash && d.generationAttemptId === attempt.id && d.outputArtifactId === output.artifact.id && d.outputArtifactHash === output.artifact.sha256 && ["ACCEPT", "REDO"].includes(d.decision)).sort((a,b) => b.decidedAt.localeCompare(a.decidedAt))[0];
+      const review = decisions.filter(d => d.clipId === clip.id && d.clipHash === clip.contentHash && d.generationAttemptId === attempt.id && d.outputArtifactId === output.artifact.id && d.outputArtifactHash === output.artifact.sha256 && ["ACCEPT", "REDO", "STALE"].includes(d.decision)).sort((a,b) => b.decidedAt.localeCompare(a.decidedAt))[0];
       if (review?.decision !== "ACCEPT") throw new AutoEditBlocked("OUTPUT_REVIEW_REQUIRED", "自动剪辑只使用与当前镜头、尝试和产物哈希绑定的已采用结果");
       const media = await inspectMedia(output.file);
       let visualAssessment;

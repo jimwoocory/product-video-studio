@@ -2,6 +2,7 @@ import type { Project } from "../domain/schemas.js";
 import type { WorkflowNavigationState } from "../application/services/workflow-navigation.js";
 import type { StepAccessBlocked } from "../application/services/workflow-step-access.js";
 import { layout } from "./workbench-ui.js";
+import { pvsGlobalStyles, renderPvsGlobalHeader } from "./pvs-global-shell.js";
 
 function esc(value: unknown): string {
   return String(value ?? "")
@@ -67,9 +68,10 @@ export function renderSafeRequestErrorPage(input: {
 <style>
 :root{font-family:Inter,"Microsoft YaHei",system-ui,sans-serif;color:#171717;background:#f5f5f3}
 body{margin:0}.wrap{max-width:760px;margin:64px auto;padding:24px}.card{background:#fff;border:1px solid #deded8;border-radius:12px;padding:22px}.muted{color:#707070}.primary{display:inline-block;background:#171717;color:#fff;text-decoration:none;border-radius:9px;padding:11px 16px;font-weight:700}.technical{margin-top:18px;color:#666}code{word-break:break-all}
+${pvsGlobalStyles}
 </style>
 </head>
-<body><main class="wrap"><section class="card">
+<body>${renderPvsGlobalHeader("projects")}<main class="wrap"><section class="card">
 <h1>${esc(title)}</h1>
 <p>${esc(message)}</p>
 <p><a class="primary" href="${esc(backHref)}">返回项目</a></p>

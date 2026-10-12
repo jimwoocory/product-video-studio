@@ -350,6 +350,36 @@ export class AiSettingsService {
       };
     }
 
+    const providerDefaults = (await this.repo.listProviders())
+      .filter(
+        (provider) =>
+          provider.enabled &&
+          provider.hasSecret &&
+          provider.defaultModelId &&
+          provider.connectionStatus !== "FAILED"
+      )
+      .sort((a, b) => {
+        const rank = (value: AiProviderConfig["connectionStatus"]) =>
+          value === "CONNECTED" ? 0 : value === "UNTESTED" ? 1 : 2;
+        return (
+          rank(a.connectionStatus) - rank(b.connectionStatus) ||
+          a.id.localeCompare(b.id)
+        );
+      });
+    for (const candidate of providerDefaults) {
+      const modelId = candidate.defaultModelId!;
+      const model = await this.repo.getModel(candidate.id, modelId);
+      if (!model?.enabled) continue;
+      await this.requireSecret(candidate);
+      return {
+        source: "PROVIDER_DEFAULT",
+        providerId: candidate.id,
+        modelId,
+        configVersion: candidate.configVersion,
+        provider: candidate
+      };
+    }
+
     return {
       source: "HERMES_FALLBACK",
       providerId: "hermes-agent",

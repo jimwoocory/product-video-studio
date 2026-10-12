@@ -17,6 +17,7 @@ import type {
 import type { StructuredAiRuntime } from "../ports/structured-ai-runtime.js";
 import { UsageComplianceService } from "./usage-compliance.js";
 import { assertDirectorPlanTarget } from "./director-generation-target.js";
+import { assertV8DirectorConformance } from "./v8-director-conformance.js";
 import {assertReferenceBinding, referenceSetRef, type CreativeReferenceGuard} from "./creative-reference-binding.js";
 
 function assertSameRef(
@@ -102,6 +103,13 @@ export class ProductDirectorService {
     if (script.selectedCreativeId !== inputRaw.selectedCreativeId) {
       throw new DomainValidationError("脚本绑定的创意与当前选择不一致");
     }
+    if (inputRaw.v8DirectorDecision && inputRaw.directorV3Plan) {
+      throw new DomainValidationError("V8 和 V3 不能同时作为权威导演方案");
+    }
+    if (inputRaw.v8DirectorDecision &&
+      inputRaw.v8DirectorDecision.sourceScriptHash !== script.contentHash) {
+      throw new DomainValidationError("V8 导演决策不属于当前已确认剧本版本");
+    }
     assertSameRef(creativeBatch.productTruthRef, script.productTruthRef, "ProductTruth");
     assertSameRef(
       script.creativeBatchRef,
@@ -160,6 +168,7 @@ export class ProductDirectorService {
 
     assertReferenceBinding(generated.creativeReferenceSetRef,references,productTruth);
     assertPlanTraceability(productTruth, script, generated);
+    if (inputRaw.v8DirectorDecision) assertV8DirectorConformance(inputRaw.v8DirectorDecision, generated);
     assertDirectorPlanTarget(generated, inputRaw.generationTarget);
     assertHardForbiddenChangesPreserved(productTruth, generated);
 

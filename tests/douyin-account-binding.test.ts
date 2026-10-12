@@ -271,6 +271,27 @@ test("ops probe exception fails closed as UNKNOWN", async () => {
   assert.match(result.message, /bridge process failed/);
 });
 
+test("reuses supplied ops probe without an extra Bridge probe", async () => {
+  let probeCalls = 0;
+  const service = new DouyinAccountBindingService(
+    publisherRuntime(),
+    opsRuntime(opsReady, undefined, {
+      async probe() {
+        probeCalls += 1;
+        return { ok: true, ready: true, status: "READY" };
+      }
+    })
+  );
+
+  const result = await service.inspect({
+    ok: true,
+    ready: true,
+    status: "READY"
+  });
+  assert.equal(result.status, "MATCHED");
+  assert.equal(probeCalls, 0);
+});
+
 test("service returns MATCHED only after both runtimes provide matching strong IDs", async () => {
   const service = new DouyinAccountBindingService(
     publisherRuntime(),

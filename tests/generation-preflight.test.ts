@@ -251,7 +251,7 @@ test("bound director defaults flow into Preflight without manual settings; no ap
   assert.equal(workflow.attempts.length, 0);
 });
 
-test("changed registry invalidates old request chain and refuses to create replacements from a stale director target", async () => {
+test("changed registry does not invalidate old request chain and refuses replacement", async () => {
   const generation = new MemoryGenerationRepository();
   const workflow = new MemoryWorkflowRepository();
   const registry = standardRegistry();
@@ -262,7 +262,7 @@ test("changed registry invalidates old request chain and refuses to create repla
   const capability = { registry: async () => ({ ...registry, registryFingerprint: H.two }) } as unknown as DreaminaAgentCapabilityService;
   const service = new GenerationPreflightService(generation, workflow, new ReadyLegacyProbeProvider(), async () => 1, "seedance-2.0", undefined, capability);
   await assert.rejects(service.run({ projectId: plan.projectId, productTruth: makeProductTruth(), creativeBatch: batch, script, productionPlan: plan, assets: [] }), /能力表已变化/);
-  assert.equal(generation.staleCalls, 1);
+  assert.equal(generation.staleCalls, 0);
   assert.equal(generation.requests.length, 0);
   assert.equal(generation.approvals.length, 0);
 });
@@ -464,7 +464,7 @@ test("standard Preflight rejects native audio when the selected generation route
   );
   assert.equal(generation.requests.length, 0);
 });
-test("DREAMINA_NOT_FOUND produces BLOCKED preflight and no approval/attempt", async () => {
+test("DREAMINA_NOT_FOUND produces BLOCKED transient results without invalidating existing requests", async () => {
   const generation = new MemoryGenerationRepository();
   const workflow = new MemoryWorkflowRepository();
   const provider = new MissingDreaminaProvider();
@@ -495,10 +495,10 @@ test("DREAMINA_NOT_FOUND produces BLOCKED preflight and no approval/attempt", as
   assert.equal(result.reports[0]?.status, "BLOCKED");
   assert.deepEqual(result.reports[0]?.blockers, ["DREAMINA_NOT_FOUND"]);
   assert.equal(result.blocker?.reasonCode, "DREAMINA_NOT_FOUND");
-  assert.equal(generation.compiled.length, 1);
+  assert.equal(generation.compiled.length, 0);
   assert.equal(generation.approvals.length, 0);
   assert.equal(workflow.attempts.length, 0);
-  assert.equal(generation.staleCalls, 1);
+  assert.equal(generation.staleCalls, 0);
 });
 
 test("unresolved submission outcome blocks ordinary Preflight unless duplicate-cost risk is explicitly accepted", async () => {
@@ -546,7 +546,7 @@ test("unresolved submission outcome blocks ordinary Preflight unless duplicate-c
     assets: [],
     acceptedDuplicateSubmissionRisk: true
   });
-  assert.equal(generation.staleCalls, 1);
+  assert.equal(generation.staleCalls, 0);
   assert.equal(accepted.requests.length, 1);
   assert.equal(accepted.reports.length, 1);
   assert.equal(accepted.reports[0]?.status, "BLOCKED");
@@ -554,6 +554,39 @@ test("unresolved submission outcome blocks ordinary Preflight unless duplicate-c
     accepted.reports[0]?.blockers,
     ["DREAMINA_NOT_FOUND"]
   );
+});
+
+
+test("local redo only considers unknown external submissions for its selected Clip", async () => {
+  const generation = new MemoryGenerationRepository();
+  const workflow = new MemoryWorkflowRepository();
+  const service = new GenerationPreflightService(
+    generation, workflow, new MissingDreaminaProvider(), async () => 1
+  );
+  const truth = makeProductTruth();
+  const batch = makeBatch();
+  const script = makeScript(batch);
+  const plan = makePlan(script);
+  const second = {...makeValidClip(), id:"clip-independent",order:2};
+  plan.scenes[0]!.clips.push(second);
+  workflow.attempts.push({...makeAttempt(),clipId:second.id,projectId:truth.projectId,
+    status:"SUBMISSION_OUTCOME_UNKNOWN"});
+
+  // The separate clip's unresolved submission must not block local recheck.
+  const other = await service.run({
+    projectId: truth.projectId, productTruth:truth, creativeBatch:batch,
+    script, productionPlan:plan, assets:[], clipIds:["clip-1"]
+  });
+  assert.equal(other.overallStatus,"BLOCKED");
+  assert.equal(other.requests.length,1);
+  assert.equal(other.requests[0]!.clipId,"clip-1");
+  assert.equal(generation.staleCalls,0);
+
+  await assert.rejects(service.run({
+    projectId: truth.projectId, productTruth:truth, creativeBatch:batch,
+    script, productionPlan:plan, assets:[], clipIds:[second.id]
+  }), /explicit duplicate-submission cost-risk acceptance/);
+  assert.equal(generation.staleCalls,0);
 });
 
 test("RECONCILING also blocks ordinary Preflight and preserves old blocker when duplicate-cost risk is accepted", async () => {

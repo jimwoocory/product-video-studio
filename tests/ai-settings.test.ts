@@ -562,7 +562,7 @@ test("OpenAI-compatible runtime sends sampled reference frames as multimodal ima
   }
 });
 
-test("P1 AI model resolution honors step > project > system > Hermes fallback", async () => {
+test("P1 AI model resolution honors step > project > system > provider default > Hermes fallback", async () => {
   const repo = new MemoryAiSettingsRepository();
   const secrets = new MemorySecretStore();
   const settings = new AiSettingsService(repo, secrets);
@@ -600,6 +600,28 @@ test("P1 AI model resolution honors step > project > system > Hermes fallback", 
   await settings.setStepOverride("x", "SCRIPT", null);
   await settings.setProjectPreference("x", {});
   await settings.setSystemPreference({});
+  await settings.saveProvider({
+    id: "p",
+    name: "Provider",
+    baseUrl: "https://example.test/v1",
+    enabled: true,
+    defaultModelId: "system-model",
+    timeoutMs: 5000,
+    maxRetries: 0
+  });
+  const providerDefault = await settings.resolve("x", "SCRIPT");
+  assert.equal(providerDefault.source, "PROVIDER_DEFAULT");
+  assert.equal(providerDefault.modelId, "system-model");
+
+  await settings.saveProvider({
+    id: "p",
+    name: "Provider",
+    baseUrl: "https://example.test/v1",
+    enabled: false,
+    defaultModelId: "system-model",
+    timeoutMs: 5000,
+    maxRetries: 0
+  });
   const fallback = await settings.resolve("x", "SCRIPT");
   assert.equal(fallback.source, "HERMES_FALLBACK");
 });

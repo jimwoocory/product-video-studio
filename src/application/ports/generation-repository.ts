@@ -5,7 +5,18 @@ import type {
   UserApproval
 } from "../../domain/schemas.js";
 
+export type PreparedPreflightChain = {
+  projectId: string;
+  clipIds: string[];
+  staleAt: string;
+  compiledPrompts: CompiledPrompt[];
+  requests: GenerationRequest[];
+  reports: PreflightReport[];
+};
+
 export interface GenerationRepository {
+  /** Atomically invalidate only affected clips and persist a validated replacement chain. */
+  replacePreflightChain?(chain: PreparedPreflightChain): Promise<void>;
   markSubmissionChainStale(projectId: string, staleAt: string): Promise<void>;
   markRequestChainStale(generationRequestId: string, staleAt: string): Promise<void>;
   saveCompiledPrompt(prompt: CompiledPrompt): Promise<CompiledPrompt>;

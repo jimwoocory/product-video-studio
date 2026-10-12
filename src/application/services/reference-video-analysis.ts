@@ -14,7 +14,9 @@ import { hashValue } from "../../domain/hashing.js";
 import { DomainValidationError } from "../../domain/validation.js";
 import { LocalArtifactStore } from "../../adapters/store/local-artifact-store.js";
 import {
+  createReferenceVideoBrowserPreview,
   probeReferenceVideo,
+  referenceVideoNeedsBrowserPreview,
   sampleReferenceFrames
 } from "../../adapters/media/reference-video-media.js";
 
@@ -51,6 +53,16 @@ function profileContentHash(
   profile: Omit<ReferenceVideoProfile, "contentHash">
 ): string {
   return hashValue(profile);
+}
+
+export function referenceVideoBrowserPreviewRelativePath(
+  videoArtifactHash: string
+): string {
+  return (
+    "reference-video/previews/" +
+    videoArtifactHash +
+    "-browser-h264.mp4"
+  );
 }
 
 export class ReferenceVideoAnalysisService {
@@ -107,6 +119,39 @@ export class ReferenceVideoAnalysisService {
     );
 
     try {
+      if (referenceVideoNeedsBrowserPreview(mediaInfo)) {
+        const previewRelativePath =
+          referenceVideoBrowserPreviewRelativePath(artifact.sha256);
+        const existingPreview = (
+          await this.artifacts.listByProject(input.projectId, "OTHER")
+        ).find(
+          (item) =>
+            item.relativePath === previewRelativePath &&
+            item.integrityStatus === "READY" &&
+            item.mimeType === "video/mp4"
+        );
+        if (!existingPreview) {
+          const previewPath = path.join(
+            tempDir,
+            "browser-preview.mp4"
+          );
+          await createReferenceVideoBrowserPreview({
+            filePath: videoPath,
+            outputPath: previewPath
+          });
+          const previewBytes = await fs.readFile(previewPath);
+          await store.writeImmutable({
+            id: randomUUID(),
+            projectId: input.projectId,
+            kind: "OTHER",
+            relativePath: previewRelativePath,
+            immutable: true,
+            mimeType: "video/mp4",
+            bytes: previewBytes
+          });
+        }
+      }
+
       const sampledFrames = await sampleReferenceFrames({
         filePath: videoPath,
         outputDir: tempDir,

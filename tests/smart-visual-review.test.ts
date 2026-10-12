@@ -5,9 +5,13 @@ import { SmartFlowPause } from "../src/application/ports/smart-production.js";
 import type { SmartGenerationRun } from "../src/domain/smart-generation.js";
 import { makeProductTruth, makeValidClip, H, ISO } from "./fixtures.js";
 
-function harness(input: { enabled: boolean; eligible: boolean }) {
+function harness(input: { enabled: boolean; eligible: boolean; clipCount?: number; ineligibleClipIndices?: number[] }) {
   const projectId = "project-smart-visual";
   const clip = { ...makeValidClip(), id: "clip-smart-visual" };
+  const clips = Array.from({length:input.clipCount??1},(_,index)=>({
+    ...structuredClone(clip),id:index===0?clip.id:"clip-smart-visual-"+(index+1),
+    order:index+1
+  }));
   const truth = { ...makeProductTruth(), projectId };
   const project = {
     id: projectId,
@@ -31,7 +35,7 @@ function harness(input: { enabled: boolean; eligible: boolean }) {
     soundDirection: "fixture",
     productShowcaseRules: [],
     continuityLock: { product: { forbiddenChanges: truth.forbiddenChanges }, characters: [], environments: [] },
-    scenes: [{ id: "scene", order: 1, purpose: "fixture", location: "studio", visualState: "stable", stableElements: [], sourceBeatIds: [], requiredFactIds: [], clips: [clip] }],
+    scenes: [{ id: "scene", order: 1, purpose: "fixture", location: "studio", visualState: "stable", stableElements: [], sourceBeatIds: [], requiredFactIds: [], clips }],
     contentHash: H.b,
     confirmedAt: ISO
   };
@@ -44,6 +48,10 @@ function harness(input: { enabled: boolean; eligible: boolean }) {
     status: "SUCCEEDED",
     outputArtifactId: "video-smart-visual"
   };
+  const attempts = clips.map((c,index)=>({
+    ...attempt,id:index===0?attempt.id:"attempt-smart-visual-"+(index+1),
+    clipId:c.id,attemptNumber:1
+  }));
   const decisions: any[] = [];
   let visualCalls = 0;
   const service = new ApplicationSmartProduction({
@@ -54,10 +62,12 @@ function harness(input: { enabled: boolean; eligible: boolean }) {
       async listDecisions() { return decisions; }
     },
     workflow: {
-      async listGenerationAttempts() { return [attempt]; }
+      async listGenerationAttempts() { return attempts; }
     },
     visualReview: {
-      async assess() {
+      async assess({clip:c}:{clip:{id:string}}) {
+        const index=clips.findIndex(x=>x.id===c.id);
+        const eligible=input.eligible && !(input.ineligibleClipIndices??[]).includes(index);
         visualCalls++;
         return {
           artifactId: "visual-artifact",
@@ -66,10 +76,10 @@ function harness(input: { enabled: boolean; eligible: boolean }) {
           assessment: {
             contentHash: H.d,
             evaluatorVersion: "p1f06-visual-edit-v1",
-            autoAcceptEligible: input.eligible,
-            status: input.eligible ? "PASS" : "UNCERTAIN",
-            confidence: input.eligible ? "HIGH" : "MEDIUM",
-            reasons: [input.eligible ? "all gates pass" : "identity uncertain"]
+            autoAcceptEligible: eligible,
+            status: eligible ? "PASS" : "UNCERTAIN",
+            confidence: eligible ? "HIGH" : "MEDIUM",
+            reasons: [eligible ? "all gates pass" : "identity uncertain"]
           }
         };
       }
@@ -79,9 +89,9 @@ function harness(input: { enabled: boolean; eligible: boolean }) {
         decisions.push({
           id: "review-ai",
           projectId,
-          clipId: clip.id,
-          clipHash: clip.contentHash,
-          generationAttemptId: attempt.id,
+          clipId: value.clipId,
+          clipHash: clips.find(c=>c.id===value.clipId)!.contentHash,
+          generationAttemptId: value.generationAttemptId,
           outputArtifactId: attempt.outputArtifactId,
           outputArtifactHash: H.e,
           decision: value.decision,
@@ -89,7 +99,7 @@ function harness(input: { enabled: boolean; eligible: boolean }) {
           visualAssessment: value.visualAssessment,
           decidedAt: ISO
         });
-        project.status = "READY_TO_ASSEMBLE";
+        if(decisions.length>=clips.length)project.status="READY_TO_ASSEMBLE";
         return { decision: decisions.at(-1), projectStatus: project.status };
       }
     }
@@ -97,7 +107,7 @@ function harness(input: { enabled: boolean; eligible: boolean }) {
   const run = {
     id: "run-smart-visual",
     projectId,
-    attemptIds: [attempt.id],
+    attemptIds: attempts.map(a=>a.id),
     options: {
       autoSelectLowRiskClips: input.enabled
     }
@@ -126,6 +136,29 @@ test("smart run falls back to human review when visual evidence is uncertain", a
   );
   assert.equal(h.getVisualCalls(), 1);
   assert.equal(h.decisions.length, 0);
+});
+
+test("checks all six shots before a single AI acceptance and pinpoints every failing shot", async()=>{
+  const h=harness({enabled:true,eligible:true,clipCount:6,ineligibleClipIndices:[0,4]});
+  await assert.rejects(h.service.reviewClips(h.run),(error:unknown)=>{
+    assert.ok(error instanceof SmartFlowPause);
+    const e=error as SmartFlowPause;
+    assert.equal(e.code,"VISUAL_REVIEW_REQUIRED");
+    assert.match(e.message,/视频 1/);
+    assert.match(e.message,/视频 5/);
+    assert.doesNotMatch(e.message,/UNCERTAIN\/MEDIUM/);
+    return true;
+  });
+  assert.equal(h.getVisualCalls(),6);
+  assert.equal(h.decisions.length,0,"No AI acceptance may precede the last shot's review");
+});
+
+test("six independently high-confidence shots are adopted only after their full set passes", async()=>{
+  const h=harness({enabled:true,eligible:true,clipCount:6});
+  await h.service.reviewClips(h.run);
+  assert.equal(h.getVisualCalls(),6);
+  assert.equal(h.decisions.length,6);
+  assert.ok(h.decisions.every(d=>d.source==="AI_VISUAL_GATE"&&d.decision==="ACCEPT"));
 });
 
 test("smart run never invokes visual auto-review unless the user explicitly enabled it", async () => {

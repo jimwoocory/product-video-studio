@@ -682,15 +682,9 @@ test("P1F-01 generation page exposes ordered workflow navigation and video-edit 
   });
 
   const orderedLabels = [
-    "1 产品输入",
-    "2 联网研究",
-    "3 产品事实",
-    "4 创意方案",
-    "5 脚本",
-    "6 导演分镜",
-    "7 视频生成",
-    "8 视频剪辑",
-    "9 成片与发布"
+    "1 产品资料",
+    "2 智能生成",
+    "3 成片 / 发布"
   ];
   let previous = -1;
   for (const label of orderedLabels) {
@@ -699,13 +693,13 @@ test("P1F-01 generation page exposes ordered workflow navigation and video-edit 
     previous = index;
   }
   assert.match(html, /辅助工具/);
+  assert.match(html, />联网研究<\/a>/);
   assert.match(html, />参考视频<\/a>/);
-  assert.match(html, />智能生成<\/a>/);
   assert.match(html, />模型设置<\/a>/);
+  assert.match(html, /高级兼容工具/);
+  assert.match(html, /旧创意、脚本、导演、生成和时间线页面仅用于历史任务/);
   assert.match(html, /当前位置：视频生成 · 本页任务：查看已采用镜头与生成记录/);
-  assert.match(html, /继续主流程：<a href="\/projects\/project-1\/timeline">视频剪辑<\/a> · 调整并确认视频剪辑方案/);
-  assert.match(html, /8 视频剪辑<\/span><small>继续<\/small>/);
-  assert.doesNotMatch(html, /9 成片与发布<\/span><small>继续<\/small>/);
+  assert.match(html, /当前任务下一步：<a href="\/projects\/project-1\/timeline">调整并确认视频剪辑方案<\/a>/);
   assert.match(html, /id="enter-timeline" href="\/projects\/project-1\/timeline">进入视频剪辑/);
   assert.match(html, /id="standard-generation-config"/);
   assert.match(html, /id="standard-model"/);
@@ -741,13 +735,13 @@ test("P1F-01 manual product input uses managed image and Logo material controls"
     commandAttempts: []
   });
   assert.match(html, /id="product-image-list"/);
-  assert.match(html, /<label[^>]*for="product-image-input"[^>]*id="product-image-pick"/);
+  assert.match(html, /<button[^>]*id="product-image-pick"[^>]*>选择产品图片<\/button>/);
   assert.match(html, /class="file-picker-input" id="product-image-input"/);
-  assert.match(html, /<label[^>]*for="product-logo-input"[^>]*id="product-logo-pick"/);
+  assert.match(html, /<button[^>]*id="product-logo-pick"[^>]*>选择 Logo<\/button>/);
   assert.match(html, /class="file-picker-input" id="product-logo-input"/);
   assert.match(html, /fileInput\.showPicker\(\)/);
-  assert.doesNotMatch(html, /productMaterialManager\.pickFiles\(\)/);
-  assert.doesNotMatch(html, /productMaterialManager\.pickLogo\(\)/);
+  assert.match(html, /productMaterialManager\.pickFiles\(\)/);
+  assert.match(html, /productMaterialManager\.pickLogo\(\)/);
   assert.match(html, /可继续追加/);
   assert.match(html, /清空全部产品图片/);
   assert.match(html, /pvsCreateMaterialManager/);
@@ -772,6 +766,28 @@ test("P1 project creation exposes 10-120 second quick and custom duration contro
   }
   assert.match(html, /targetDurationMs/);
   assert.match(html, /高级信息/);
+});
+
+test("project list exposes safe delete controls and its inline JavaScript parses", () => {
+  const project: Project = {
+    id: "delete-project-1",
+    name: "待删除测试项目",
+    status: "DRAFT",
+    targetPlatform: "douyin",
+    targetDurationMs: 30000,
+    aspectRatio: "9:16",
+    createdAt: ISO,
+    updatedAt: ISO
+  };
+  const html = renderProjectsPage([project], new Map());
+  assert.match(html, /data-project-id="delete-project-1"/);
+  assert.match(html, /data-project-name="待删除测试项目"/);
+  assert.match(html, new RegExp(">删除项目<\\/button>"));
+  assert.match(html, /第二次确认：请输入完整项目名称后才能删除/);
+  assert.match(html, /method:'DELETE'/);
+  for (const match of html.matchAll(new RegExp("<script>([\\s\\S]*?)<\\/script>", "g"))) {
+    new Script(match[1]!);
+  }
 });
 
 test("P1 generation page auto-polls submitted attempts and keeps manual fallback", () => {

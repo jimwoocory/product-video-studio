@@ -93,6 +93,9 @@ export function planAutoEdit(input: {
   for (const source of sources) {
     const { clip, media } = source;
     if (!media.hasVideo || media.durationMs <= 0) throw new AutoEditBlocked("INVALID_VIDEO", "已采用产物不是可播放的视频");
+    if (plan.v8Source && clip.segments.some(s=>s.v8?.spoken || s.ambientSound.kind !== "NONE") && !media.hasAudio) {
+      throw new AutoEditBlocked("V8_NATIVE_AUDIO_REQUIRED", "V8 原生对白/环境声音轨缺失，请人工核查原视频；不能静默转成本地配音或无声成片", true);
+    }
     if (media.durationMs + 100 < clip.durationMs) throw new AutoEditBlocked("VIDEO_TOO_SHORT", "已采用视频短于导演镜头，不能静默裁掉动作和台词；请在手工时间线调整");
     let inMs = 0;
     let outMs = Math.min(clip.durationMs, media.durationMs);

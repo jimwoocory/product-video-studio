@@ -125,6 +125,8 @@ export async function handleDouyinOpsHttp(
   const globalPage = url.pathname === "/douyin-ops";
   const globalApi =
     url.pathname === "/api/douyin/ops/status";
+  const researchReadiness =
+    url.pathname === "/api/douyin/ops/research-readiness";
   const launch =
     url.pathname === "/api/douyin/ops/launch";
   const projectPage = url.pathname.match(
@@ -173,6 +175,7 @@ export async function handleDouyinOpsHttp(
   if (
     !globalPage &&
     !globalApi &&
+    !researchReadiness &&
     !launch &&
     !projectPage &&
     !projectApi &&
@@ -223,6 +226,17 @@ export async function handleDouyinOpsHttp(
         return true;
       }
       json(res, 200, await service.global());
+      return true;
+    }
+
+    if (researchReadiness) {
+      if (req.method !== "GET") {
+        json(res, 405, { message: "研究连接状态只允许读取" });
+        return true;
+      }
+      // Deliberately bypass the full operations dashboard. The optional
+      // research gate must never wait for published works / project bindings.
+      json(res, 200, await service.researchReadiness());
       return true;
     }
 

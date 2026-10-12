@@ -21,6 +21,25 @@ import { toDreaminaCliModel } from "./dreamina-agent-capability.js";
 import { assertDirectorPlanTarget, assertProfileMatchesDirectorTarget } from "./director-generation-target.js";
 import type {CreativeReferenceSet} from "../../domain/creative-reference.js";
 import {assertReferenceBinding,referenceSetRef} from "./creative-reference-binding.js";
+import {
+  productionAssetSetRef,
+  type ProductionAssetSet
+} from "../../domain/production-strategy.js";
+import {
+  assertSeedanceModelPromptV2,
+  buildSeedanceModelPromptV2,
+  SEEDANCE_MODEL_PROMPT_V2_VERSION
+} from "./seedance-model-prompt-v2.js";
+import type { DirectorV3Plan } from "../../domain/director-v3.js";
+import {
+  assertSeedancePromptV3,
+  buildSeedancePromptV3
+} from "./seedance-model-prompt-v3.js";
+import type { SmartGenerationRun } from "../../domain/smart-generation.js";
+import { assertV8PromptBinding } from "./v8-production-binding.js";
+import { compileV8AuthoritativePrompts } from "./v8-authoritative-prompt.js";
+import { SEEDANCE_PROMPT_V3_VERSION } from "../../domain/director-v3.js";
+import { buildAssetImageBindings } from "./asset-image-bindings.js";
 
 export const PROMPT_COMPILER_TEMPLATE_VERSION = "p0-seedance-v1";
 const MODEL_AWARE_TEXT_POLICY_VERSION = "post-production-text-v1";
@@ -41,7 +60,12 @@ export type PromptCompilerInput = {
   videoResolution?: string;
   generateAudio?: boolean;
   generationProfile?: GenerationProfile;
+  dreaminaOperation?: import("../../domain/schemas.js").DreaminaVideoOperation;
   creativeReferenceSet?: CreativeReferenceSet | null;
+  productionAssetSet?: ProductionAssetSet;
+  directorV3Plan?: DirectorV3Plan;
+  promptV3Override?: string;
+  v8Run?: SmartGenerationRun;
   assets: AssetRef[];
 };
 
@@ -120,6 +144,25 @@ export function compileSeedancePrompt(input: PromptCompilerInput): CompiledPromp
   const plan = productionPlanSchema.parse(input.productionPlan);
   const references=input.creativeReferenceSet;
   for(const source of [batch,script,plan])assertReferenceBinding(source.creativeReferenceSetRef,references,truth);
+  const productionAssets = input.productionAssetSet;
+  if (productionAssets) {
+    const expected = productionAssetSetRef(productionAssets);
+    if (
+      !script.productionAssetSetRef ||
+      hashValue(script.productionAssetSetRef) !== hashValue(expected) ||
+      !plan.productionAssetSetRef ||
+      hashValue(plan.productionAssetSetRef) !== hashValue(expected)
+    ) {
+      throw new DomainValidationError(
+        "ProductionAssetSet binding mismatch between script, director plan and Prompt Compiler"
+      );
+    }
+    if (productionAssets.status !== "READY") {
+      throw new DomainValidationError(
+        "Prompt Compiler requires READY ProductionAssetSet"
+      );
+    }
+  }
 
   if (truth.status !== "CONFIRMED") {
     throw new DomainValidationError("Prompt Compiler requires CONFIRMED ProductTruth");
@@ -174,13 +217,58 @@ export function compileSeedancePrompt(input: PromptCompilerInput): CompiledPromp
   }
   const scene = containingScenes[0]!;
   const clip = scene.clips.find((item) => item.id === input.clipId)!;
+  const flattenedClips = plan.scenes.flatMap((item) => item.clips);
+  const flattenedClipIndex = flattenedClips.findIndex(
+    (item) => item.id === clip.id
+  );
+  const directorV3Contract = input.directorV3Plan
+    ? input.directorV3Plan.clipContracts[flattenedClipIndex]
+    : undefined;
+  if (input.directorV3Plan) {
+    if (!directorV3Contract) {
+      throw new DomainValidationError(
+        "Seedance Prompt V3 找不到当前 Clip 对应的 Clip Contract"
+      );
+    }
+    if (
+      directorV3Contract.durationMs !== clip.durationMs ||
+      hashValue(directorV3Contract.sourceBeatIds) !==
+        hashValue(clip.sourceBeatIds)
+    ) {
+      throw new DomainValidationError(
+        "Seedance Prompt V3 的 Clip Contract 已与正式分镜失配"
+      );
+    }
+  }
   assertDirectorPlanTarget(plan);
   if (plan.generationTarget) {
     if (!profile) throw new DomainValidationError("模型感知分镜必须使用当前能力表生成的 GenerationProfile 编译，不能回退到旧参数");
     assertProfileMatchesDirectorTarget(plan.generationTarget, profile);
   }
-  const generateAudio = input.generateAudio ?? profile?.nativeAudioOutputRequested ??
-    clip.segments.some((segment) => segment.dialogueOrNarration.kind !== "NONE" || segment.ambientSound.kind !== "NONE");
+  let v8Package: ReturnType<typeof compileV8AuthoritativePrompts>[number] | undefined;
+  if (plan.v8Source || plan.scenes.some(s => s.clips.some(c => c.segments.some(s => s.v8))) || input.v8Run) {
+    const run = input.v8Run;
+    if (!run || run.options.directorPipeline !== "V8" || input.directorV3Plan || input.promptV3Override ||
+        run.projectId !== truth.projectId || run.productionPlan?.contentHash !== plan.contentHash ||
+        hashValue(run.productionPlan) !== hashValue(plan) || hashValue(run.script) !== hashValue(script) || !productionAssets ||
+        run.productionAssetSet?.contentHash !== productionAssets.contentHash) {
+      throw new DomainValidationError("V8 正式分镜必须经本任务已采用的 PromptPackage 编译，不能从旧 V3 或直接预检入口绕过审核");
+    }
+    assertV8PromptBinding(run);
+    const packages = compileV8AuthoritativePrompts({ script, truth, decision: run.v8Director!.decision,
+      plan, assets: productionAssets, speakerBindings: run.v8Prompts!.voiceBindings,
+      includeImageReferences: run.v8Prompts!.imageBindingMode === "V1" });
+    if (hashValue(packages) !== hashValue(run.v8Prompts!.packages)) throw new DomainValidationError("V8 PromptPackage 与实际分镜重编译结果不一致，禁止使用编辑后丢失语义的 Prompt");
+    v8Package = packages.find(p => p.clipId === clip.id);
+    if (!v8Package || !profile?.nativeAudioOutputRequested) throw new DomainValidationError("V8 当前模型声音能力或当前镜头提示词缺失，请重新核实并采用");
+  }
+  const v8Binding = v8Package ? { runId: input.v8Run!.id, screenplayHash: input.v8Run!.v8Screenplay!.screenplayHash,
+    directorRecordHash: input.v8Run!.v8Director!.contentHash, promptRecordHash: input.v8Run!.v8Prompts!.contentHash,
+    promptPackageHash: v8Package.contentHash } : undefined;
+  const generateAudio = directorV3Contract
+    ? directorV3Contract.audio.mode === "NATIVE"
+    : input.generateAudio ?? profile?.nativeAudioOutputRequested ??
+      clip.segments.some((segment) => segment.dialogueOrNarration.kind !== "NONE" || segment.ambientSound.kind !== "NONE");
   const aspectRatio = input.aspectRatio ?? profile?.aspectRatio ?? "9:16";
   const videoResolution = input.videoResolution ?? profile?.videoResolution;
   if (profile && (
@@ -190,7 +278,11 @@ export function compileSeedancePrompt(input: PromptCompilerInput): CompiledPromp
   )) {
     throw new DomainValidationError("Prompt 参数与已验证的模型、画幅、分辨率、时长或声音策略不一致");
   }
-  const templateVersion = profile
+  const templateVersion = v8Package ? "v8-authoritative-prompt-1" : directorV3Contract
+    ? SEEDANCE_PROMPT_V3_VERSION
+    : productionAssets
+    ? SEEDANCE_MODEL_PROMPT_V2_VERSION
+    : profile
     ? `p1f04-${toDreaminaCliModel(model)}-${profile.operation}-v3-posttext-identity-mask`
     : PROMPT_COMPILER_TEMPLATE_VERSION;
 
@@ -230,7 +322,7 @@ export function compileSeedancePrompt(input: PromptCompilerInput): CompiledPromp
       const asset = assetById.get(usage.assetId);
       const selected=references?.entries.find(e=>e.assetId===usage.assetId);
       if(selected&&(selected.role!==usage.role||selected.artifactHash!==asset?.sha256||selected.artifactId!==asset?.artifactId))throw new DomainValidationError("研究参考的用途或素材哈希与用户确认不一致");
-      if((usage.assetId.startsWith("research-ref-")||["PRODUCT_ANGLE","WEARING_REFERENCE","USAGE_ACTION_REFERENCE","SCENE_REFERENCE","LOGO_REFERENCE"].includes(usage.role))&&!selected)throw new DomainValidationError("未经确认的研究参考不得编译进视频请求");
+      if(usage.assetId.startsWith("research-ref-")&&!selected)throw new DomainValidationError("未经确认的研究参考不得编译进视频请求");
       if (!asset) {
         if (usage.required) {
           throw new DomainValidationError(`Required reference asset missing: ${usage.assetId}`);
@@ -285,10 +377,12 @@ export function compileSeedancePrompt(input: PromptCompilerInput): CompiledPromp
       `command_help_sha256=${profile.commandHelpSha256}`,
       `readable_text_policy=POST_PRODUCTION_ONLY`,
       `readable_text_policy_version=${MODEL_AWARE_TEXT_POLICY_VERSION}`,
+      `background_music_policy=FORBIDDEN_IN_MODEL_OUTPUT`,
       "Preserve confirmed product identity and usage rules. Follow the explicit segment timing; do not add product claims.",
       "Generate NO readable text in pixels: no words, letters, numbers, subtitles, captions, labels, brand/model copy, disclaimers, UI copy or CTA. Leave clean negative space where overlays are planned. Exact copy is rendered later by the audited post-production text track.",
-      generateAudio ? "Generate only the specified native dialogue/narration and ambient audio."
-        : "Native audio output is not requested. Speech and ambience are separate post-production cues, not a native voice instruction."
+      "Do NOT generate background music. No BGM, no music, no musical score, no soundtrack, no song, and no instrumental bed. Background music is added only once in post-production across the full assembled video.",
+      generateAudio ? "Generate only the specified native dialogue/narration, natural ambient sound and required action sound effects."
+        : "Native audio output is not requested. Speech, ambience and action sound effects are separate post-production cues, not a native voice instruction."
     ] : []),
     "",
     "[PRODUCT]",
@@ -377,7 +471,7 @@ export function compileSeedancePrompt(input: PromptCompilerInput): CompiledPromp
   }
   if (!assetManifest.length) lines.push("NONE");
 
-  const promptText = redactModelFacingIdentity(
+  const legacyAuditPrompt = redactModelFacingIdentity(
     lines.join("\n").trimEnd(),
     truth
   );
@@ -409,8 +503,73 @@ export function compileSeedancePrompt(input: PromptCompilerInput): CompiledPromp
     promptSection: `FORBIDDEN_CHANGES/${item.id}`
   }));
 
+  const auditContractHash = hashValue({
+    ...(v8Binding ? { v8Binding } : {}),
+    compilerTemplateVersion: templateVersion,
+    ...(profile ? { generationProfile: profile } : {}),
+    productTruthRef: ref("ProductTruth", truth.id, truth.version, truth.contentHash),
+    creativeBatchRef: ref("CreativeBatch", batch.id, batch.version, batch.contentHash),
+    scriptRef: ref("ScriptDraft", script.id, script.version, script.contentHash),
+    productionPlanRef: ref("ProductionPlan", plan.id, plan.version, plan.contentHash),
+    ...(productionAssets
+      ? { productionAssetSetRef: productionAssetSetRef(productionAssets) }
+      : {}),
+    clipHash: clip.contentHash,
+    assetManifest,
+    factMapping,
+    segmentMapping,
+    constraintMapping,
+    legacyAuditPrompt
+  });
+
+  const promptText = v8Package ? v8Package.promptText : directorV3Contract
+    ? (
+        input.promptV3Override ??
+        buildSeedancePromptV3({
+          truth,
+          plan,
+          scene,
+          clip,
+          contract: directorV3Contract,
+          ...(productionAssets
+            ? { productionAssetSet: productionAssets }
+            : {}),
+          creativeReferences: references,
+          model,
+          aspectRatio,
+          ...(videoResolution
+            ? { videoResolution }
+            : {})
+        })
+      )
+    : productionAssets
+    ? buildSeedanceModelPromptV2({
+        truth,
+        plan,
+        scene,
+        clip,
+        productionAssetSet: productionAssets,
+        creativeReferences: references,
+        model,
+        aspectRatio,
+        ...(videoResolution ? { videoResolution } : {}),
+        generateAudio
+      })
+    : legacyAuditPrompt;
+  if (directorV3Contract) {
+    assertSeedancePromptV3(promptText, directorV3Contract);
+  } else if (productionAssets && !v8Package) {
+    assertSeedanceModelPromptV2(promptText, generateAudio);
+  }
+
+  const imageBindings = buildAssetImageBindings({
+    promptText,
+    assetManifest,
+    dreaminaOperation: input.dreaminaOperation ?? profile?.operation
+  });
   const compiledPromptHash = hashValue({
     ...(referenceSetRef(references)?{creativeReferenceSetRef:referenceSetRef(references)}:{}),
+    ...(v8Binding ? { v8Binding } : {}),
     compilerTemplateVersion: templateVersion,
     ...(profile ? { generationProfile: profile } : {}),
     productTruthRef: ref("ProductTruth", truth.id, truth.version, truth.contentHash),
@@ -420,6 +579,14 @@ export function compileSeedancePrompt(input: PromptCompilerInput): CompiledPromp
     clipHash: clip.contentHash,
     model,
     promptText,
+    ...(imageBindings.length ? { imageBindings } : {}),
+    auditContractHash,
+    ...(directorV3Contract
+      ? {
+          directorV3PlanHash: input.directorV3Plan!.contentHash,
+          audioPolicy: "V3_NATIVE_NO_BGM"
+        }
+      : {}),
     assetManifest,
     factMapping,
     segmentMapping,
@@ -447,9 +614,20 @@ export function compileSeedancePrompt(input: PromptCompilerInput): CompiledPromp
     segmentHashes: Object.fromEntries(
       sortedSegments.map((segment) => [segment.id, hashValue(segment)])
     ),
+    ...(v8Binding ? { v8Binding } : {}),
     compilerTemplateVersion: templateVersion,
     ...(profile ? { generationProfile: profile } : {}),
+    ...(directorV3Contract || v8Package
+      ? { audioPolicy: "V3_NATIVE_NO_BGM" as const }
+      : {}),
+    ...(productionAssets
+      ? {
+          productionAssetSetRef: productionAssetSetRef(productionAssets),
+          auditContractHash
+        }
+      : {}),
     promptText,
+    ...(imageBindings.length ? { imageBindings } : {}),
     inputAssetManifest: assetManifest,
     factMapping,
     segmentMapping,

@@ -718,6 +718,9 @@ export class ResearchService {
     projectId: string;
     mode: ResearchMode;
     goal: string;
+    // Research may precede ProductTruth review; use saved user-entered identity
+    // as discovery keywords only, never as confirmed product claims.
+    productInput?: { productName: string; brand?: string; category?: string };
     sourceUrls: Array<{
       url: string;
       sourceType: ResearchEvidenceSourceType;
@@ -743,7 +746,7 @@ export class ResearchService {
     const workspace = await this.productFlow.getWorkspace(input.projectId);
     const identity = buildResearchIdentity({
       projectName: workspace?.project.name,
-      productTruth: workspace?.productTruth
+      productTruth: workspace?.productTruth ?? input.productInput
     });
     if (mode === "DEEP") {
       const known = new Map(sourceUrls.map((item) => [item.url, item]));

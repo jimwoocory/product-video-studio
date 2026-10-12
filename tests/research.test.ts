@@ -35,7 +35,10 @@ import type {
 import type { ProductFlowService } from "../src/application/services/product-flow.js";
 import { ResearchService } from "../src/application/services/research-service.js";
 import { HttpWebResearchProvider } from "../src/adapters/research/http-web-research-provider.js";
-import { marketVideoCandidateWithinTimeRange } from "../src/adapters/research/douyin-cli-market-video-provider.js";
+import {
+  douyinEnvelopeRequiresVerification,
+  marketVideoCandidateWithinTimeRange
+} from "../src/adapters/research/douyin-cli-market-video-provider.js";
 import { confirmProductTruthDraft } from "../src/application/services/review-actions.js";
 import { makeProductTruth } from "./fixtures.js";
 import type {
@@ -646,6 +649,38 @@ test("Douyin market-video time filter is enforced locally even when upstream ret
   );
   assert.equal(
     marketVideoCandidateWithinTimeRange(base, "WEEK", now),
+    false
+  );
+});
+
+test("Douyin successful JSON with verify_check is treated as verification/risk control", () => {
+  assert.equal(
+    douyinEnvelopeRequiresVerification({
+      ok: true,
+      data: {
+        status_code: 0,
+        data: [],
+        search_nil_info: {
+          search_nil_type: "verify_check",
+          search_nil_item: "verify_check",
+          text_type: 9
+        }
+      }
+    }),
+    true
+  );
+  assert.equal(
+    douyinEnvelopeRequiresVerification(
+      { ok: true, data: { status_code: 0, data: [] } },
+      "verify_check detected (count=1)"
+    ),
+    true
+  );
+  assert.equal(
+    douyinEnvelopeRequiresVerification({
+      ok: true,
+      data: { status_code: 0, data: [] }
+    }),
     false
   );
 });

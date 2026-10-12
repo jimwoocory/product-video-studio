@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import http from "node:http";
 import fs from "node:fs/promises";
 import path from "node:path";
+import vm from "node:vm";
 import type {
   DouyinOpsGlobalView,
   DouyinOpsProjectView,
@@ -14,6 +15,7 @@ import {
 } from "../src/web/douyin-ops-ui.js";
 import { handleDouyinOpsHttp } from "../src/web/douyin-ops-http.js";
 import { WindowsDouyinOpsLauncher } from "../src/adapters/douyin/windows-douyin-ops-launcher.js";
+import { renderPvsGlobalHeader } from "../src/web/pvs-global-shell.js";
 
 const work = {
   awemeId: "7685693367372964337",
@@ -258,6 +260,30 @@ test("global Douyin ops page is visual, Chinese and exposes only explicit single
   assert.doesNotMatch(html, /campaign run/);
 });
 
+test("offline Douyin Bridge displays unknown account status instead of logged out", () => {
+  const offlineView: DouyinOpsGlobalView = {
+    ...globalView,
+    runtime: {
+      ok: false,
+      ready: false,
+      status: "SITE_OFFLINE",
+      message: "抖音主页面未连接"
+    },
+    account: {
+      ...globalView.account,
+      ops: {
+        ...globalView.account.ops,
+        available: false,
+        nickname: "",
+        runtimeStatus: "SITE_OFFLINE"
+      }
+    }
+  };
+  const html = renderDouyinOpsGlobalPage(offlineView);
+  assert.match(html, /运营账号：<\/b>状态未知（运营连接未就绪）/);
+  assert.doesNotMatch(html, /运营账号：<\/b>未登录/);
+});
+
 test("project page keeps persisted metrics/comments visible while runtime is offline", () => {
   const html = renderDouyinOpsProjectPage(projectView);
   assert.match(html, /发布后表现/);
@@ -293,6 +319,74 @@ test("project page keeps persisted metrics/comments visible while runtime is off
   assert.doesNotMatch(html, /发送私信|自动点赞|批量发布/);
 });
 
+test("Douyin ops inline scripts parse, including manual work-binding controls", () => {
+  const candidatesView: DouyinOpsProjectView = {
+    ...projectView,
+    binding: null,
+    candidates: [work],
+    candidatesStatus: "READY"
+  };
+  for (const [name, html] of [
+    ["global", renderDouyinOpsGlobalPage(globalView)],
+    ["project", renderDouyinOpsProjectPage(candidatesView)]
+  ] as const) {
+    const scripts = [...html.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/gi)];
+    assert.ok(scripts.length > 0, name + " must contain browser handlers");
+    scripts.forEach((match, index) => {
+      assert.doesNotThrow(() => new vm.Script(match[1]!, {
+        filename: name + "-inline-" + index + ".js"
+      }), name + " browser JavaScript must parse");
+    });
+  }
+  assert.match(renderDouyinOpsProjectPage(candidatesView), /确认绑定这条作品/);
+});
+
+test("work-binding click registers an event and only posts when the user confirms", async () => {
+  const html = renderDouyinOpsProjectPage({
+    ...projectView, binding: null, candidates: [work], candidatesStatus: "READY"
+  });
+  const script = [...html.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/gi)][0]?.[1];
+  assert.ok(script);
+  let handler: (() => Promise<void>) | undefined;
+  let consent = false;
+  let reloadCount = 0;
+  const requests: Array<{ url: string; method: string; body: unknown }> = [];
+  const button = {
+    dataset: { aweme: work.awemeId, url: work.externalUrl },
+    disabled: false,
+    addEventListener(event: string, callback: () => Promise<void>) {
+      if (event === "click") handler = callback;
+    }
+  };
+  const message = { textContent: "" };
+  vm.runInNewContext(script, {
+    document: {
+      querySelectorAll: (selector: string) => selector === ".bind-work" ? [button] : [],
+      querySelector: (selector: string) => selector === "#bind-message" ? message : null
+    },
+    confirm: () => consent,
+    fetch: async (url: string, options: { method: string; body: string }) => {
+      requests.push({ url, method: options.method, body: JSON.parse(options.body) });
+      return { ok: true, json: async () => ({ binding: { status: "BOUND" } }) };
+    },
+    location: { reload: () => { reloadCount += 1; } },
+    encodeURIComponent,
+    setTimeout
+  });
+  assert.ok(handler, "each candidate has a click handler");
+  await handler();
+  assert.equal(requests.length, 0, "do not bind unless explicitly confirmed");
+  assert.equal(reloadCount, 0);
+  consent = true;
+  await handler();
+  assert.deepEqual(requests, [{
+    url: "/api/projects/project-1/douyin/binding/confirm",
+    method: "POST",
+    body: { awemeId: work.awemeId, externalUrl: work.externalUrl, confirmed: true }
+  }]);
+  assert.equal(reloadCount, 1);
+});
+
 test("publisher account check has a bounded UI timeout", async () => {
   const source = await fs.readFile(
     path.resolve(
@@ -310,6 +404,66 @@ test("publisher account check has a bounded UI timeout", async () => {
   );
 });
 
+test("Windows launcher reports success only with an actual Bridge-connected Douyin tab", {
+  skip: process.platform !== "win32"
+}, async () => {
+  let reuseCalls = 0;
+  let reloadCalls = 0;
+  const launcher = new WindowsDouyinOpsLauncher(
+    path.resolve("package.json"),
+    async () => { reuseCalls++; return true; },
+    async () => true,
+    async () => { reloadCalls++; return true; }
+  );
+  const result = await launcher.launch();
+  assert.equal(result.ok, true);
+  assert.equal(result.status, "STARTED");
+  assert.match(result.message, /已确认.*Bridge 实际连通/);
+  assert.equal(reuseCalls, 1);
+  assert.equal(reloadCalls, 0);
+});
+
+test("Existing browser without Bridge fails closed and does not launch another Chrome", {
+  skip: process.platform !== "win32"
+}, async () => {
+  let refreshCalls = 0;
+  const launcher = new WindowsDouyinOpsLauncher(
+    path.resolve("package.json"),
+    async () => true,
+    async () => false,
+    async () => { refreshCalls++; return false; },
+    async () => false
+  );
+  const result = await launcher.launch();
+  assert.equal(result.ok, false);
+  assert.equal(result.status, "FAILED");
+  assert.match(result.message, /没有重复启动浏览器/);
+  assert.match(result.message, /CDP Bridge/);
+  assert.equal(refreshCalls, 0);
+});
+
+test("Explicit recovery reloads exactly one existing Douyin tab and requires Bridge readiness", {
+  skip: process.platform !== "win32"
+}, async () => {
+  let checks = 0;
+  let reloadCalls = 0;
+  let startCalls = 0;
+  const launcher = new WindowsDouyinOpsLauncher(
+    path.resolve("package.json"),
+    async () => true,
+    async () => ++checks > 1,
+    async () => { reloadCalls++; return true; },
+    async () => { startCalls++; return true; }
+  );
+  const result = await launcher.launch();
+  assert.equal(result.ok, true);
+  assert.equal(result.status, "STARTED");
+  assert.match(result.message, /Bridge 已确认恢复/);
+  assert.equal(reloadCalls, 0);
+  assert.equal(startCalls, 1);
+  assert.equal(checks, 2);
+});
+
 test("Windows launcher fails closed when the fixed launcher is missing", async () => {
   const launcher = new WindowsDouyinOpsLauncher(
     path.resolve("definitely-missing-douyin-launcher.cmd")
@@ -324,7 +478,7 @@ test("Windows launcher fails closed when the fixed launcher is missing", async (
     ),
     "utf8"
   );
-  assert.match(source, /execFile\(/);
+  assert.match(source, /spawn\(/);
   assert.match(source, /shell:\s*false/);
   assert.doesNotMatch(source, /exec\(/);
 });
@@ -850,23 +1004,13 @@ test("Douyin ops HTTP exposes only P0 local/read actions", async () => {
 });
 
 test("main PVS server and workbench navigation register Douyin ops", async () => {
-  const [serverSource, workbenchSource] =
-    await Promise.all([
-      fs.readFile(
-        path.resolve("src/web/server.ts"),
-        "utf8"
-      ),
-      fs.readFile(
-        path.resolve("src/web/workbench-ui.ts"),
-        "utf8"
-      )
-    ]);
+  const serverSource = await fs.readFile(path.resolve("src/web/server.ts"), "utf8");
   assert.match(
     serverSource,
     /handleDouyinOpsHttp\(req, res, url, deps\)/
   );
   assert.match(
-    workbenchSource,
-    /href="\/douyin-ops">抖音运营/
+    renderPvsGlobalHeader("studio"),
+    /href="\/douyin-ops"[^>]*>抖音运营/
   );
 });

@@ -254,7 +254,7 @@ test("confirmed standard Timeline can render even when an old project status sti
   });
   assert.match(html, /当前要做：<\/b>渲染并确认最终成片/);
   assert.match(html, /当前位置：成片与发布 · 本页任务：渲染并确认最终成片/);
-  assert.match(html, /继续主流程：<a href="\/projects\/project-timeline-ui\/final">成片与发布<\/a> · 渲染并确认最终成片/);
+  assert.match(html, /当前任务下一步：<a href="\/projects\/project-timeline-ui\/final">渲染并确认最终成片<\/a>/);
   assert.match(html, /id="render-final"/);
   assert.doesNotMatch(html, /id="render-final" disabled/);
 });
@@ -277,6 +277,5 @@ test("Timeline page uses page-specific next-step guidance instead of stale gener
   });
   assert.match(html, /当前要做：<\/b>调整并确认视频剪辑方案/);
   assert.match(html, /当前位置：视频剪辑 · 本页任务：调整并确认视频剪辑方案/);
-  assert.match(html, /继续主流程：<a href="\/projects\/project-timeline-ui\/final">成片与发布<\/a> · 渲染并确认最终成片/);
-  assert.doesNotMatch(html, /继续主流程：[^<]*视频生成/);
+  assert.match(html, /当前任务下一步：<a href="\/projects\/project-timeline-ui\/final">渲染并确认最终成片<\/a>/);
 });

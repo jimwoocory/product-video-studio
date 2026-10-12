@@ -23,8 +23,11 @@ test("create project and product image/logo pickers respond to real browser clic
   await page.locator('#product-form input[name="category"]').fill("测试产品");
   await page.locator('#product-form textarea[name="featureDescription"]').fill("用于浏览器文件选择回归测试，不提交生成。");
 
+  await expect(page.locator("button#product-image-pick")).toBeVisible();
+  await expect(page.locator("button#product-logo-pick")).toBeVisible();
+
   const imageChooserPromise = page.waitForEvent("filechooser");
-  await page.getByText("选择产品图片", { exact: true }).click();
+  await page.locator("button#product-image-pick").click();
   const imageChooser = await imageChooserPromise;
   await imageChooser.setFiles({
     name: "product.png",
@@ -38,7 +41,7 @@ test("create project and product image/logo pickers respond to real browser clic
   await expect(page.locator("#product-image-list")).toContainText("尚未选择产品图片。");
 
   const secondImageChooserPromise = page.waitForEvent("filechooser");
-  await page.getByText("选择产品图片", { exact: true }).click();
+  await page.locator("button#product-image-pick").click();
   const secondImageChooser = await secondImageChooserPromise;
   await secondImageChooser.setFiles({
     name: "product-2.png",
@@ -48,7 +51,7 @@ test("create project and product image/logo pickers respond to real browser clic
   await expect(page.locator("#product-image-list")).toContainText("product-2.png");
 
   const logoChooserPromise = page.waitForEvent("filechooser");
-  await page.getByText("选择 Logo", { exact: true }).click();
+  await page.locator("button#product-logo-pick").click();
   const logoChooser = await logoChooserPromise;
   await logoChooser.setFiles({
     name: "logo.png",

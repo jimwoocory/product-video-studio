@@ -9,22 +9,28 @@ function collectBrowserErrors(page) {
   return errors;
 }
 
-test("historical page keeps its own task while resume points to the real workflow position", async ({ page }) => {
+test("project navigation exposes the V2 smart-production main chain while legacy pages remain reachable", async ({ page }) => {
   const errors = collectBrowserErrors(page);
 
   await page.goto("/projects/e2e-ready/product");
   await expect(page.getByRole("heading", { name: "产品输入", level: 1 })).toBeVisible();
   await expect(page.locator(".workflow-nav")).toContainText("当前位置：产品输入 · 本页任务：检查或更新产品资料");
-  await expect(page.locator(".workflow-nav")).toContainText("继续主流程：");
-  await expect(page.locator('.workflow-nav-head a[href="/projects/e2e-ready/generate"]')).toHaveText("视频生成");
+  await expect(page.locator(".workflow-nav")).toContainText("智能生产主链");
+  await expect(page.locator(".workflow-nav-head")).toContainText("当前任务下一步：");
+  await expect(page.locator("#workflow-read-model")).toContainText("审核产品事实与使用规则");
+  await expect(page.locator(".main-steps")).toContainText("1 产品资料");
+  await expect(page.locator(".main-steps")).toContainText("2 智能生成");
+  await expect(page.locator(".main-steps")).toContainText("3 成片 / 发布");
   await expect(page.locator(".step-current")).toHaveCount(1);
-  await expect(page.locator(".step-next")).toHaveCount(1);
+  await expect(page.locator(".main-steps")).not.toContainText("导演分镜");
+  await expect(page.locator(".main-steps")).not.toContainText("视频剪辑");
 
-  await page.getByRole("link", { name: /2 联网研究/ }).click();
+  await page.getByRole("link", { name: "联网研究" }).click();
   await expect(page).toHaveURL(/\/projects\/e2e-ready\/research$/);
   await expect(page.locator(".workflow-nav")).toContainText("当前位置：联网研究 · 本页任务：补充公开证据并筛选可用研究结果");
-  await expect(page.locator('.workflow-nav-head a[href="/projects/e2e-ready/generate"]')).toHaveText("视频生成");
-  await expect(page.locator(".step-current")).toHaveCount(1);
+  await expect(page.locator(".workflow-nav-head")).toContainText("当前任务下一步：");
+  await expect(page.locator("#workflow-read-model")).toContainText("审核产品事实与使用规则");
+  await expect(page.locator(".main-steps")).not.toContainText("创意方案");
 
   expect(errors).toEqual([]);
 });

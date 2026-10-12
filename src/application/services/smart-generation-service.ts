@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { hashValue } from "../../domain/hashing.js";
+import { auditNarrativeTiming, isScriptDurationWithinTolerance } from "./script-narrative-timing.js";
 import { DomainValidationError } from "../../domain/validation.js";
 import {
   smartRunOptionsSchema, smartRunSchema, runnableSmartStatuses, closedSmartStatuses,
@@ -9,19 +10,56 @@ import type { SmartRunRepository } from "../ports/smart-run-repository.js";
 import { SmartFlowPause, type SmartProduction } from "../ports/smart-production.js";
 import { withSerialOperation } from "./serial-operation.js";
 import { postProductionSettingsSchema } from "../../domain/auto-edit.js";
+import {
+  directorV3ClipContractSchema,
+  directorV3PlanSchema,
+  seedancePromptV3DraftSchema
+} from "../../domain/director-v3.js";
+import { assertSeedancePromptV3 } from "./seedance-model-prompt-v3.js";
+import { sealV8, v8VoiceBindingsSchema, type V8PromptRecord } from "../../domain/v8-production.js";
+import { assertV8DecisionBinding, assertV8PlanBinding, assertV8PromptBinding } from "./v8-production-binding.js";
+import { reviseProductionPlanDraft, type ProductionPlanSegmentRevision } from "./review-actions.js";
+import { v8DetailedProposalSchema } from "../../domain/v8-screenplay.js";
 
-export type SmartReviewAction = "SELECT_CREATIVE" | "CONFIRM_SCRIPT" | "CONFIRM_PLAN";
+export type SmartReviewAction =
+  | "SELECT_CREATIVE"
+  | "CONFIRM_ASSET"
+  | "CONFIRM_SCRIPT"
+  | "CONFIRM_PLAN"
+  | "CONFIRM_V8_DIRECTOR"
+  | "CONFIRM_V8_PROMPTS";
 
 /** Durable orchestrator. Planning/review can never manufacture permission to spend credits. */
 export class SmartGenerationService {
   constructor(private readonly repo: SmartRunRepository, private readonly production: SmartProduction) {}
 
-  async create(projectId: string, requestKey: string, rawOptions: unknown): Promise<SmartGenerationRun> {
+  async create(
+    projectId: string,
+    requestKey: string,
+    rawOptions: unknown,
+    workflowVersion: 1 | 2 = 1
+  ): Promise<SmartGenerationRun> {
     const options = smartRunOptionsSchema.parse(rawOptions);
+    if (options.directorPipeline === "V8" && (
+      process.env.PVS_V8_UNIFIED_DIRECTOR_AUTHORING !== "1" ||
+      workflowVersion !== 2 ||
+      options.reviewMode !== "MANUAL" ||
+      options.directorVersion !== 3
+    )) {
+      throw new DomainValidationError(
+        "V8 详细创作只允许在显式试点开关开启后，使用全新 V2 任务及逐阶段人工确认；旧项目不会自动切换"
+      );
+    }
     const initial = await this.production.initial(projectId);
     const now = new Date().toISOString();
+    const id = randomUUID();
+    const autoAdvanceGrant = process.env.PVS_SMART_WORKER_MANAGED_NEW_RUNS === "1" && workflowVersion === 2
+      ? { projectId, runId: id, authorizedAt: now, source: "USER_CREATED" as const }
+      : undefined;
     return this.repo.create(smartRunSchema.parse({
-      id: randomUUID(), projectId, requestKey, revision: 1,
+      id, projectId, requestKey, revision: 1,
+      ...(autoAdvanceGrant ? { autoAdvanceGrant } : {}),
+      workflowVersion,
       inputHash: hashValue({ projectId, options, targetDurationMs: initial.targetDurationMs }),
       status: "PLANNING", stage: "SOURCES", options,
       targetDurationMs: initial.targetDurationMs, expectedWorkspace: initial.binding,
@@ -29,8 +67,68 @@ export class SmartGenerationService {
     }));
   }
 
+  /** Explicitly allow ONE existing, still-unpaid task to use managed scheduling. */
+  async authorizeAutoAdvance(projectId: string, id: string, input: {
+    expectedRevision: number; confirmCurrentTask: boolean;
+  }): Promise<SmartGenerationRun> {
+    if (process.env.PVS_SMART_WORKER_MANAGED_NEW_RUNS !== "1")
+      throw new DomainValidationError("当前没有启用安全的新任务自动调度");
+    if (input.confirmCurrentTask !== true)
+      throw new DomainValidationError("请明确授权当前这条任务继续非付费规划");
+    return this.exclusive(projectId, id, async (run, owner) => {
+      if (run.revision !== input.expectedRevision)
+        throw new DomainValidationError("任务版本已改变，请刷新后重新确认");
+      if (run.autoAdvanceGrant) return run;
+      if (run.workflowVersion !== 2 || run.status !== "PLANNING" ||
+          run.stage !== "SOURCES" || run.pendingInstall ||
+          run.paidScope || run.consent || run.assetConsent ||
+          run.attemptIds.length > 0)
+        throw new DomainValidationError("仅允许当前尚未生成、尚未付费的新制作任务恢复后台规划，历史生成授权不得继承");
+      return this.save(run, owner, {
+        autoAdvanceGrant: { projectId, runId: run.id,
+          authorizedAt: new Date().toISOString(), source: "USER_RESUMED" }
+      }, "用户明确授权本条新制作任务继续后台规划；图片和视频付费仍须逐项确认");
+    });
+  }
+
   get(projectId: string, id: string) { return this.repo.get(projectId, id); }
   list(projectId?: string) { return this.repo.list(projectId); }
+
+  async previewDirectorV3(projectId: string) {
+    if (!this.production.previewV3) {
+      throw new DomainValidationError(
+        "Director V3 影子预演服务尚未配置"
+      );
+    }
+    const runs = await this.repo.list(projectId);
+    const candidates = runs
+      .filter(
+        (run) =>
+          Boolean(
+            run.script &&
+            run.creativeBatch &&
+            run.selectedCreativeId
+          )
+      )
+      .sort(
+        (a, b) =>
+          new Date(b.updatedAt).getTime() -
+          new Date(a.updatedAt).getTime()
+      );
+    const source =
+      candidates.find(
+        (run) => run.attemptIds.length > 0
+      ) ?? candidates[0];
+    if (!source) {
+      throw new DomainValidationError(
+        "当前项目没有可用于 Director V3 A/B 的真实脚本任务"
+      );
+    }
+    return withSerialOperation(
+      "director-v3-preview:" + projectId,
+      () => this.production.previewV3!(source)
+    );
+  }
 
   private async require(projectId: string, id: string): Promise<SmartGenerationRun> {
     const run = await this.repo.get(projectId, id);
@@ -55,8 +153,42 @@ export class SmartGenerationService {
   }
 
   private runnable(stage: SmartStage): SmartGenerationRun["status"] {
-    return stage === "APPROVAL" ? "APPROVING" : stage === "GENERATION" ? "GENERATING"
+    return stage === "ASSET_PREP" ? "ASSET_PREPARING"
+      : stage === "APPROVAL" ? "APPROVING" : stage === "GENERATION" ? "GENERATING"
       : stage === "AUTO_EDIT" ? "AUTO_EDITING" : stage === "RENDER" ? "RENDERING" : "PLANNING";
+  }
+
+  private assertDirectorV3Editable(
+    run: SmartGenerationRun,
+    expectedRevision: number
+  ): void {
+    if (run.revision !== expectedRevision) {
+      throw new DomainValidationError(
+        "任务已更新，请刷新页面后重新修改"
+      );
+    }
+    if (run.options.directorVersion !== 3 ||
+        run.options.directorPipeline === "V8") {
+      throw new DomainValidationError(
+        "V8 与 Director V3 编辑入口互斥，不能用旧 V3 编辑器覆盖 V8 剧本或导演结果"
+      );
+    }
+    if (
+      run.pendingInstall ||
+      run.attemptIds.length > 0 ||
+      [
+        "GENERATION",
+        "CLIP_REVIEW",
+        "AUTO_EDIT",
+        "RENDER",
+        "FINAL_REVIEW",
+        "DONE"
+      ].includes(run.stage)
+    ) {
+      throw new DomainValidationError(
+        "当前任务已经进入真实生成或下游阶段，不能覆盖导演内容；请新建一轮重做"
+      );
+    }
   }
 
   /** A single bounded step. The web worker repeatedly calls this; GET endpoints never run work. */
@@ -69,12 +201,38 @@ export class SmartGenerationService {
           const expectedWorkspace = await this.production.install(run);
           let stage = run.stage;
           let status: SmartGenerationRun["status"] = "PLANNING";
-          if (pending === "CREATIVE") status = run.options.reviewMode === "MANUAL" ? "WAITING_FOR_CREATIVE_REVIEW" : "PLANNING";
-          if (pending === "SELECT_CREATIVE") stage = "SCRIPT";
-          if (pending === "SCRIPT") status = run.options.reviewMode === "MANUAL" ? "WAITING_FOR_SCRIPT_REVIEW" : "PLANNING";
+          if (pending === "CREATIVE") {
+            status =
+              run.workflowVersion === 2 ||
+              run.options.reviewMode === "MANUAL"
+                ? "WAITING_FOR_CREATIVE_REVIEW"
+                : "PLANNING";
+          }
+          if (pending === "SELECT_CREATIVE") {
+            stage =
+              run.workflowVersion === 2
+                ? "PRODUCTION_PLANNING"
+                : "SCRIPT";
+          }
+          if (pending === "SCRIPT") {
+            status =
+              run.options.directorPipeline === "V8" ||
+              (run.workflowVersion !== 2 && run.options.reviewMode === "MANUAL")
+                ? "WAITING_FOR_SCRIPT_REVIEW"
+                : "PLANNING";
+          }
           if (pending === "CONFIRM_SCRIPT") stage = "DIRECTOR";
-          if (pending === "DIRECTOR") status = run.options.reviewMode === "MANUAL" ? "WAITING_FOR_PLAN_REVIEW" : "PLANNING";
-          if (pending === "CONFIRM_PLAN") stage = "PREFLIGHT";
+          if (pending === "DIRECTOR") {
+            status =
+              (run.options.directorPipeline === "V8" || run.workflowVersion !== 2) &&
+              run.options.reviewMode === "MANUAL"
+                ? "WAITING_FOR_PLAN_REVIEW"
+                : "PLANNING";
+          }
+          if (pending === "CONFIRM_PLAN") {
+            stage = "PREFLIGHT";
+            if (run.options.directorPipeline === "V8") status = "WAITING_FOR_PROMPT_REVIEW";
+          }
           return this.save(run, owner, { expectedWorkspace, pendingInstall: undefined, stage, status, blocker: undefined }, "已将本阶段结果接入现有版本链，历史版本保留");
         }
         if (run.stage !== "SOURCES") await this.production.assertCurrent(run);
@@ -83,28 +241,400 @@ export class SmartGenerationService {
             return this.save(run, owner, { ...await this.production.sources(run), stage: "CREATIVE", status: "PLANNING", blocker: undefined }, "产品事实及素材来源检查通过，未执行付费生成");
           case "CREATIVE":
             if (!run.creativeBatch) return this.save(run, owner, { creativeBatch: await this.production.creative(run), pendingInstall: "CREATIVE" }, "创意结果已持久化，准备接入版本链");
+            if (run.workflowVersion === 2) {
+              return this.save(
+                run,
+                owner,
+                { status: "WAITING_FOR_CREATIVE_REVIEW" },
+                "V2 主链等待用户选择一个创意方向"
+              );
+            }
             if (run.options.reviewMode !== "AUTO") return this.save(run, owner, { status: "WAITING_FOR_CREATIVE_REVIEW" }, "等待选择创意");
             // AUTO is an explicit user option. The deterministic choice is recorded, not represented as a human decision.
             const selected = run.creativeBatch.concepts.find((c) => c.generationRisk === "LOW") ?? run.creativeBatch.concepts[0]!;
             return this.save(run, owner, { selectedCreativeId: selected.id, pendingInstall: "SELECT_CREATIVE" }, "按已启用的自动创作模式选择首个低生成风险方案；不代表效果评分");
+          case "PRODUCTION_PLANNING":
+            if (run.workflowVersion !== 2) {
+              throw new DomainValidationError("旧任务不能进入 V2 制作策略阶段");
+            }
+            if (!run.productionStrategy) {
+              if (!this.production.planProduction) {
+                throw new SmartFlowPause(
+                  "BLOCKED",
+                  "PRODUCTION_PLANNER_NOT_READY",
+                  "制作策略规划器尚未配置"
+                );
+              }
+              return this.save(
+                run,
+                owner,
+                { productionStrategy: await this.production.planProduction(run) },
+                "已根据所选创意分析角色、场景、道具与产品参考需求"
+              );
+            }
+            return this.save(
+              run,
+              owner,
+              { stage: "ASSET_PREP", status: "PLANNING" },
+              "制作策略已锁定，开始准备本轮所需固定资产"
+            );
+          case "ASSET_PREP": {
+            if (run.workflowVersion !== 2) {
+              throw new DomainValidationError("旧任务不能进入 V2 制作资产阶段");
+            }
+            if (!this.production.prepareProductionAssets || !this.production.advanceProductionAssets) {
+              throw new SmartFlowPause(
+                "BLOCKED",
+                "PRODUCTION_ASSET_SERVICE_NOT_READY",
+                "制作资产服务尚未配置"
+              );
+            }
+            if (!run.productionAssetSet) {
+              const prepared = await this.production.prepareProductionAssets(run);
+              if (prepared.set.status === "FAILED") {
+                return this.save(
+                  run,
+                  owner,
+                  {
+                    productionAssetSet: prepared.set,
+                    assetPaidScope: prepared.paidScope,
+                    status: "BLOCKED",
+                    blocker: {
+                      code: "PRODUCTION_ASSET_PREP_FAILED",
+                      message: prepared.set.entries
+                        .filter(item => item.status === "FAILED")
+                        .map(item => item.errorMessage ?? item.label)
+                        .join("；") || "制作资产准备失败",
+                      retryable: true
+                    }
+                  },
+                  "制作资产准备遇到阻塞"
+                );
+              }
+              if (prepared.set.status === "NEEDS_REVIEW") {
+                return this.save(
+                  run,
+                  owner,
+                  {
+                    productionAssetSet: prepared.set,
+                    assetPaidScope: prepared.paidScope,
+                    status: "WAITING_FOR_ASSET_REVIEW"
+                  },
+                  "现有制作参考需要用户确认"
+                );
+              }
+              if (prepared.paidScope) {
+                return this.save(
+                  run,
+                  owner,
+                  {
+                    productionAssetSet: prepared.set,
+                    assetPaidScope: prepared.paidScope,
+                    assetConsent: undefined,
+                    status: "READY_FOR_ASSET_PAID_CONFIRM"
+                  },
+                  "需要生成新的角色/场景制作资产，等待一次明确积分确认"
+                );
+              }
+              return this.save(
+                run,
+                owner,
+                {
+                  productionAssetSet: prepared.set,
+                  stage: "SCRIPT",
+                  status: "PLANNING"
+                },
+                "本轮无需新增付费制作资产，直接进入脚本"
+              );
+            }
+            if (
+              run.productionAssetSet.status === "PLANNED" &&
+              run.assetPaidScope &&
+              !run.assetConsent
+            ) {
+              return this.save(
+                run,
+                owner,
+                { status: "READY_FOR_ASSET_PAID_CONFIRM" },
+                "等待制作资产付费确认"
+              );
+            }
+            if (
+              run.assetPaidScope &&
+              (!run.assetConsent ||
+                run.assetConsent.scopeHash !== run.assetPaidScope.hash)
+            ) {
+              throw new SmartFlowPause(
+                "READY_FOR_ASSET_PAID_CONFIRM",
+                "ASSET_PAID_CONFIRM_REQUIRED",
+                "需要先明确确认本轮角色/场景制作资产的积分生成"
+              );
+            }
+            const nextSet = await this.production.advanceProductionAssets(run);
+            if (nextSet.contentHash === run.productionAssetSet.contentHash) {
+              return run;
+            }
+            if (nextSet.status === "FAILED") {
+              // Keep receiving already-paid independent assets even if another
+              // asset has a local result failure. No new submit is triggered here.
+              const otherInFlight = nextSet.entries.some(item =>
+                item.source === "DREAMINA_GENERATED" &&
+                ["SUBMITTED", "PROCESSING"].includes(item.status)
+              );
+              const unsafeUnknown = nextSet.entries.some(item =>
+                item.status === "SUBMISSION_UNKNOWN"
+              );
+              if (otherInFlight && !unsafeUnknown) {
+                return this.save(
+                  run, owner,
+                  { productionAssetSet: nextSet, status: "ASSET_PREPARING", blocker: undefined },
+                  "有制作资产接收失败，但继续查询其他已提交的图片；不会重复付费生图"
+                );
+              }
+              const stale = nextSet.entries.find(
+                item =>
+                  item.status === "SUBMISSION_UNKNOWN" &&
+                  item.errorCode === "ASSET_REMOTE_RESULT_STALE"
+              );
+              const unknown = nextSet.entries.some(
+                item => item.status === "SUBMISSION_UNKNOWN"
+              );
+              return this.save(
+                run,
+                owner,
+                {
+                  productionAssetSet: nextSet,
+                  status: "BLOCKED",
+                  blocker: {
+                    code: stale
+                      ? "ASSET_REMOTE_RESULT_STALE"
+                      : unknown
+                        ? "ASSET_SUBMISSION_OUTCOME_UNKNOWN"
+                      : "PRODUCTION_ASSET_GENERATION_FAILED",
+                    message: stale
+                      ? stale.errorMessage ??
+                        "即梦制作资产任务长时间没有返回产物；不会自动重提，需要重新授权后才能生成。"
+                      : unknown
+                        ? "有制作资产提交结果未知；禁止自动重提，需先核查即梦任务"
+                      : nextSet.entries
+                          .filter(item => item.status === "FAILED")
+                          .map(item => item.errorMessage ?? item.label)
+                          .join("；") || "制作资产生成失败",
+                    retryable: !unknown
+                  }
+                },
+                "制作资产生成暂停"
+              );
+            }
+            if (nextSet.status === "NEEDS_REVIEW") {
+              const assetByKey = new Map(nextSet.entries.map(item => [item.key, item] as const));
+              const stillPreparing = nextSet.entries.some(
+                item =>
+                  item.source === "DREAMINA_GENERATED" &&
+                  (
+                    ["SUBMITTED", "PROCESSING"].includes(item.status) ||
+                    (
+                      item.status === "PLANNED" &&
+                      item.dependsOnAssetKeys.every(
+                        key => assetByKey.get(key)?.status === "READY"
+                      )
+                    )
+                  )
+              );
+              if (stillPreparing) {
+                return this.save(
+                  run,
+                  owner,
+                  {
+                    productionAssetSet: nextSet,
+                    status: "ASSET_PREPARING"
+                  },
+                  "已有制作资产图片返回，继续完成本轮其余已授权资产；全部返回后统一给用户看图确认"
+                );
+              }
+              return this.save(
+                run,
+                owner,
+                {
+                  productionAssetSet: nextSet,
+                  status: "WAITING_FOR_ASSET_REVIEW"
+                },
+                "本轮制作资产图片已准备完成，等待用户逐项看图确认或重新生成"
+              );
+            }
+            if (nextSet.status === "READY") {
+              return this.save(
+                run,
+                owner,
+                {
+                  productionAssetSet: nextSet,
+                  stage: "SCRIPT",
+                  status: "PLANNING",
+                  blocker: undefined
+                },
+                "本轮角色、场景和产品制作资产已准备完成，进入脚本"
+              );
+            }
+            return this.save(
+              run,
+              owner,
+              {
+                productionAssetSet: nextSet,
+                status: "ASSET_PREPARING"
+              },
+              "制作资产生成正在推进；不会重复提交已创建任务"
+            );
+          }
           case "SCRIPT":
-            if (!run.script) return this.save(run, owner, { script: await this.production.script(run), pendingInstall: "SCRIPT" }, "脚本草稿已持久化");
-            if (run.options.reviewMode !== "AUTO") return this.save(run, owner, { status: "WAITING_FOR_SCRIPT_REVIEW" }, "等待确认脚本");
+            if (!run.script) {
+              if (run.options.directorPipeline === "V8") {
+                if (!this.production.scriptV8) {
+                  throw new SmartFlowPause("BLOCKED", "V8_SCREENPLAY_SERVICE_MISSING",
+                    "V8 详细剧本生成能力未配置，未改动旧版本或调用即梦", false);
+                }
+                const result = await this.production.scriptV8(run);
+                const record = {
+                  format: "PVS_V8_SCREENPLAY_V1" as const,
+                  status: "DRAFT" as const,
+                  screenplay: result.screenplay,
+                  screenplayHash: hashValue(result.screenplay),
+                  sourceScriptHash: result.script.contentHash,
+                  brief: run.options.requestText
+                };
+                return this.save(run, owner, {
+                  script: result.script,
+                  v8Screenplay: record,
+                  pendingInstall: "SCRIPT"
+                }, "V8 详细剧本和兼容 ScriptDraft 已分别保存且绑定同一版本，等待人工阅读确认");
+              }
+              if (run.options.directorVersion === 3) {
+                if (!this.production.scriptV3) {
+                  throw new SmartFlowPause(
+                    "BLOCKED",
+                    "DIRECTOR_V3_SCRIPT_UNAVAILABLE",
+                    "Director V3 脚本 QA 服务尚未配置",
+                    false
+                  );
+                }
+                const result = await this.production.scriptV3(run);
+                return this.save(
+                  run,
+                  owner,
+                  {
+                    script: result.script,
+                    scriptFeasibility: result.feasibility,
+                    pendingInstall: "SCRIPT"
+                  },
+                  "Director V3 脚本已通过可生成性 QA 并持久化"
+                );
+              }
+              return this.save(run, owner, { script: await this.production.script(run), pendingInstall: "SCRIPT" }, "脚本草稿已持久化");
+            }
+            if (run.options.directorPipeline === "V8") {
+              return this.save(run, owner, { status: "WAITING_FOR_SCRIPT_REVIEW" },
+                "V8 详细剧本必须人工确认，不能由自动模式代签");
+            }
+            if (run.workflowVersion !== 2 && run.options.reviewMode !== "AUTO") return this.save(run, owner, { status: "WAITING_FOR_SCRIPT_REVIEW" }, "等待确认脚本");
             return this.save(run, owner, { script: await this.production.confirmScript(run), pendingInstall: "CONFIRM_SCRIPT" }, "自动模式：脚本约束检查通过，准备保存确认版本");
           case "DIRECTOR":
-            if (!run.productionPlan) return this.save(run, owner, { productionPlan: await this.production.director(run), pendingInstall: "DIRECTOR" }, "模型感知分镜已持久化");
-            if (run.options.reviewMode !== "AUTO") return this.save(run, owner, { status: "WAITING_FOR_PLAN_REVIEW" }, "等待确认分镜");
+            if (run.options.directorPipeline === "V8") {
+              if (!this.production.buildDirectorV8 || !this.production.directorV8) {
+                throw new SmartFlowPause("BLOCKED", "V8_DIRECTOR_ADOPTION_NOT_READY",
+                  "V8 正式导演执行器未配置，请核实部署；不会回退 V3 或复用付费许可", false);
+              }
+              if (!run.v8Director) {
+                return this.save(run, owner, { v8Director: await this.production.buildDirectorV8(run),
+                  status: "WAITING_FOR_DIRECTOR_REVIEW", paidScope: undefined, consent: undefined },
+                  "V8 Shot-first 镜头及可变时长已保存，等待人工采用导演约束");
+              }
+              assertV8DecisionBinding(run);
+              if (run.v8Director.status !== "CONFIRMED") return this.save(run, owner,
+                { status: "WAITING_FOR_DIRECTOR_REVIEW" }, "等待明确采用 V8 导演镜头表");
+              if (!run.productionPlan) return this.save(run, owner,
+                { productionPlan: await this.production.directorV8(run), pendingInstall: "DIRECTOR" },
+                "ProductDirector 按已采用 V8 镜头细化正式分镜，语义 Gate 通过后等待人工审核");
+              return this.save(run, owner, { status: "WAITING_FOR_PLAN_REVIEW" }, "V8 正式分镜必须人工审核");
+            }
+            if (!run.productionPlan) {
+              if (run.options.directorVersion === 3) {
+                if (!this.production.directorV3) {
+                  throw new SmartFlowPause(
+                    "BLOCKED",
+                    "DIRECTOR_V3_PLANNER_UNAVAILABLE",
+                    "Director V3 分镜规划器尚未配置",
+                    false
+                  );
+                }
+                const result = await this.production.directorV3(run);
+                return this.save(
+                  run,
+                  owner,
+                  {
+                    productionPlan: result.productionPlan,
+                    directorV3Plan: result.directorV3Plan,
+                    seedancePromptDrafts:
+                      result.seedancePromptDrafts,
+                    pendingInstall: "DIRECTOR"
+                  },
+                  "Director V3 Clip Contract 与正式分镜已持久化"
+                );
+              }
+              return this.save(run, owner, { productionPlan: await this.production.director(run), pendingInstall: "DIRECTOR" }, "模型感知分镜已持久化");
+            }
+            if (run.workflowVersion !== 2 && run.options.reviewMode !== "AUTO") return this.save(run, owner, { status: "WAITING_FOR_PLAN_REVIEW" }, "等待确认分镜");
             return this.save(run, owner, { productionPlan: await this.production.confirmPlan(run), pendingInstall: "CONFIRM_PLAN" }, "自动模式：分镜约束检查通过，准备保存确认版本");
           case "PREFLIGHT":
+            if (run.options.directorPipeline === "V8") {
+              if (run.v8Prompts?.status !== "CONFIRMED") return this.save(run, owner,
+                { status: "WAITING_FOR_PROMPT_REVIEW" }, "请绑定角色声线、查看逐镜提示词后明确采用");
+              assertV8PromptBinding(run);
+              if (!this.production.validatePromptsV8) throw new DomainValidationError("V8 Prompt 语义校验未配置，禁止进入付费检查");
+              await this.production.validatePromptsV8(run);
+            }
             return this.save(run, owner, { paidScope: await this.production.preparePaidScope(run), consent: undefined, status: "READY_FOR_PAID_CONFIRM", blocker: undefined }, "精确镜头和费用范围已准备；必须明确确认后才能提交");
           case "APPROVAL":
             await this.production.validatePaidScope(run);
-            return this.save(run, owner, { attemptIds: await this.production.approve(run), status: "GENERATING", stage: "GENERATION", blocker: undefined }, "按已保存的明确确认创建各镜头独立审批和尝试");
+            {
+              const approvedIds=await this.production.approve(run);
+              const staged=run.options.directorPipeline==="V8" &&
+                run.v8Prompts?.imageBindingMode==="V1";
+              return this.save(run, owner, {
+                attemptIds:staged ? [...run.attemptIds,...approvedIds] : approvedIds,
+                ...(staged ? {activeBatchAttemptIds:approvedIds} : {}),
+                status:"GENERATING", stage:"GENERATION", blocker:undefined
+              }, "按当前已确认费用范围建立本批独立尝试；历史批次不重复授权或提交");
+            }
           case "GENERATION": {
             const result = await this.production.generate(run);
+            const batch=run.paidScope?.continuityBatch;
+            if (result.done && batch && run.paidScope && run.activeBatchAttemptIds) {
+              const previous=run.completedContinuityWaves ?? [];
+              if (previous.some(item=>item.scopeHash===run.paidScope!.hash)) {
+                return this.save(run,owner,{stage:"CLIP_REVIEW",status:"PLANNING"}, "本批已归档，进入逐镜审核");
+              }
+              return this.save(run,owner,{
+                stage:"CLIP_REVIEW",status:"PLANNING",
+                completedContinuityWaves:[...previous,{
+                  scopeHash:run.paidScope.hash,clipIds:batch.clipIds,
+                  attemptIds:run.activeBatchAttemptIds
+                }]
+              },"本批已生成并保留审批凭据；只允许用户审核后准备下一批");
+            }
             return this.save(run, owner, result.done ? { stage: "CLIP_REVIEW", status: "PLANNING" } : {}, result.done ? "已完成本轮提交、查询与下载，准备选片检查" : "本轮生成推进完成，等待下次查询；不重复提交");
           }
           case "CLIP_REVIEW":
+            if (run.options.directorPipeline==="V8" &&
+                run.v8Prompts?.imageBindingMode==="V1" && run.productionPlan) {
+              const attemptedCount=(run.completedContinuityWaves??[])
+                .flatMap(wave=>wave.clipIds).filter((id,i,ids)=>ids.indexOf(id)===i).length;
+              if (attemptedCount < run.v8Prompts.packages.length) {
+                const next=await this.production.preparePaidScope(run);
+                return this.save(run,owner,{
+                  paidScope:next,consent:undefined,activeBatchAttemptIds:[],
+                  status:"READY_FOR_PAID_CONFIRM",stage:"PREFLIGHT",blocker:undefined
+                },"已核对上一批人工审核，生成新的镜头与积分范围；需重新明确授权后才会生成");
+              }
+            }
             await this.production.reviewClips(run);
             return this.save(run, owner, { stage: "AUTO_EDIT", status: "AUTO_EDITING", blocker: undefined }, "选片约束通过，进入自动剪辑");
           case "AUTO_EDIT":
@@ -115,14 +645,24 @@ export class SmartGenerationService {
         }
       } catch (error) {
         const pause = error instanceof SmartFlowPause ? error : null;
-        return this.save(run, owner, { status: pause?.status ?? "FAILED", blocker: {
-          code: pause?.code ?? "SMART_STAGE_FAILED", message: error instanceof Error ? error.message : String(error), retryable: pause?.retryable ?? true
+        const v8SemanticError = run.options.directorPipeline === "V8";
+        return this.save(run, owner, { status: pause?.status ?? (v8SemanticError ? "BLOCKED" : "FAILED"), blocker: {
+          code: pause?.code ?? (v8SemanticError ? "V8_PRODUCTION_GATE_BLOCKED" : "SMART_STAGE_FAILED"), message: error instanceof Error ? error.message : String(error), retryable: pause?.retryable ?? true
         } }, "当前步骤已暂停，未将失败标记为完成");
       }
     });
   }
 
-  async review(projectId: string, id: string, input: { action: SmartReviewAction; expectedRevision: number; creativeId?: string }): Promise<SmartGenerationRun> {
+  async review(projectId: string, id: string, input: {
+    action: SmartReviewAction;
+    expectedRevision: number;
+    creativeId?: string;
+    assetKey?: string;
+    confirmV8Screenplay?: boolean;
+    screenplayHash?: string;
+    confirmV8Review?: boolean;
+    artifactHash?: string;
+  }): Promise<SmartGenerationRun> {
     return this.exclusive(projectId, id, async (run, owner) => {
       if (run.revision !== input.expectedRevision) throw new DomainValidationError("任务版本已更新，请刷新后再审核");
       await this.production.assertCurrent(run);
@@ -130,13 +670,662 @@ export class SmartGenerationService {
         if (!run.creativeBatch?.concepts.some((c) => c.id === input.creativeId)) throw new DomainValidationError("请选择本轮创意方案");
         return this.save(run, owner, { selectedCreativeId: input.creativeId, pendingInstall: "SELECT_CREATIVE", status: "PLANNING" }, "用户明确选择创意");
       }
+      if (
+        input.action === "CONFIRM_ASSET" &&
+        run.status === "WAITING_FOR_ASSET_REVIEW"
+      ) {
+        if (!input.assetKey || !this.production.acceptProductionAsset) {
+          throw new DomainValidationError("请选择需要确认的制作资产");
+        }
+        const set = await this.production.acceptProductionAsset(
+          run,
+          input.assetKey
+        );
+        const nextPatch =
+          set.status === "READY"
+            ? {
+                productionAssetSet: set,
+                stage: "SCRIPT" as const,
+                status: "PLANNING" as const,
+                blocker: undefined
+              }
+            : set.status === "PLANNED" && run.assetPaidScope
+              ? run.assetConsent &&
+                  run.assetConsent.scopeHash === run.assetPaidScope.hash
+                ? {
+                    productionAssetSet: set,
+                    status: "ASSET_PREPARING" as const,
+                    blocker: undefined
+                  }
+                : {
+                    productionAssetSet: set,
+                    status: "READY_FOR_ASSET_PAID_CONFIRM" as const,
+                    blocker: undefined
+                  }
+              : set.status === "PREPARING"
+                ? {
+                    productionAssetSet: set,
+                    status: "ASSET_PREPARING" as const,
+                    blocker: undefined
+                  }
+                : {
+                    productionAssetSet: set,
+                    status: "WAITING_FOR_ASSET_REVIEW" as const
+                  };
+        return this.save(
+          run,
+          owner,
+          nextPatch,
+          set.status === "READY"
+            ? "用户确认最后一个低置信制作资产，进入脚本"
+            : set.status === "PLANNED" && run.assetPaidScope
+              ? run.assetConsent
+                ? "低置信制作资产已确认，继续生成本轮剩余已授权角色/场景资产"
+                : "已有参考资产已确认，等待本轮新增角色/场景资产的积分确认"
+              : "用户确认一个制作资产，继续处理剩余资产"
+        );
+      }
       if (input.action === "CONFIRM_SCRIPT" && run.status === "WAITING_FOR_SCRIPT_REVIEW") {
+        if (run.options.directorPipeline === "V8") {
+          if (!run.script || !run.v8Screenplay ||
+              run.v8Screenplay.status !== "DRAFT" ||
+              run.v8Screenplay.sourceScriptHash !== run.script.contentHash ||
+              run.v8Screenplay.screenplayHash !== hashValue(run.v8Screenplay.screenplay)) {
+            throw new DomainValidationError("V8 详细剧本的版本/来源已变化，不能确认；请重新审核");
+          }
+          if (input.confirmV8Screenplay !== true ||
+              input.screenplayHash !== run.v8Screenplay.screenplayHash) {
+            throw new DomainValidationError(
+              "必须在查看 V8 全场次与逐句台词后，明确确认当前剧本版本；旧版点击或旧哈希不得代替确认"
+            );
+          }
+          const confirmed = await this.production.confirmScript(run);
+          return this.save(run, owner, {
+            script: confirmed,
+            v8Screenplay: {
+              ...run.v8Screenplay,
+              status: "CONFIRMED" as const,
+              sourceScriptHash: confirmed.contentHash,
+              approvedAt: new Date().toISOString()
+            },
+            pendingInstall: "CONFIRM_SCRIPT",
+            status: "PLANNING"
+          }, "用户明确确认完整 V8 剧本，同步确认同源 ScriptDraft；正式导演仍待独立验收");
+        }
         return this.save(run, owner, { script: await this.production.confirmScript(run), pendingInstall: "CONFIRM_SCRIPT", status: "PLANNING" }, "用户明确确认脚本");
       }
+      if (input.action === "CONFIRM_V8_DIRECTOR" && run.status === "WAITING_FOR_DIRECTOR_REVIEW" && run.options.directorPipeline === "V8") {
+        assertV8DecisionBinding(run);
+        if (input.confirmV8Review !== true || input.artifactHash !== run.v8Director?.contentHash) throw new DomainValidationError("请明确审核并采用当前 V8 导演版本；旧哈希无效");
+        const { contentHash: _hash, ...base } = run.v8Director!;
+        return this.save(run, owner, { v8Director: sealV8({ ...base, status: "CONFIRMED" as const, approvedAt: new Date().toISOString() }),
+          stage: "DIRECTOR", status: "PLANNING", paidScope: undefined, consent: undefined }, "用户明确采用 V8 导演，锁定镜头、台词及揭晓时机");
+      }
+      if (input.action === "CONFIRM_V8_PROMPTS" && run.status === "WAITING_FOR_PROMPT_REVIEW" && run.options.directorPipeline === "V8") {
+        assertV8PromptBinding(run, false);
+        if (input.confirmV8Review !== true || input.artifactHash !== run.v8Prompts?.contentHash || !this.production.validatePromptsV8) throw new DomainValidationError("请阅读全部镜头提示词及角色声线后明确采用当前版本；旧哈希无效");
+        await this.production.validatePromptsV8(run);
+        const { contentHash: _hash, ...base } = run.v8Prompts!;
+        return this.save(run, owner, { v8Prompts: sealV8({ ...base, status: "CONFIRMED" as const, approvedAt: new Date().toISOString() }),
+          stage: "PREFLIGHT", status: "PLANNING", paidScope: undefined, consent: undefined }, "用户明确采用逐镜 PromptPackage；重新准备独立的本轮付费范围");
+      }
       if (input.action === "CONFIRM_PLAN" && run.status === "WAITING_FOR_PLAN_REVIEW") {
+        if (run.options.directorPipeline === "V8") {
+          assertV8PlanBinding(run);
+          if (input.confirmV8Review !== true || input.artifactHash !== run.productionPlan?.contentHash) throw new DomainValidationError("请明确审核当前 V8 正式分镜及表演、揭晓时机；旧哈希无效");
+        }
         return this.save(run, owner, { productionPlan: await this.production.confirmPlan(run), pendingInstall: "CONFIRM_PLAN", status: "PLANNING" }, "用户明确确认分镜");
       }
       throw new DomainValidationError("当前任务阶段不接受此审核操作");
+    });
+  }
+
+  /** Edit a new V8 detailed screenplay before user sign-off; no paid effects. */
+  async updateV8Screenplay(projectId: string, id: string, input: {
+    expectedRevision: number;
+    screenplay: unknown;
+  }): Promise<SmartGenerationRun> {
+    return this.exclusive(projectId, id, async (run, owner) => {
+      if (run.revision !== input.expectedRevision) {
+        throw new DomainValidationError("V8 剧本已经更新，请刷新后重试");
+      }
+      const draftReview = run.status === "WAITING_FOR_SCRIPT_REVIEW" && run.stage === "SCRIPT" &&
+        run.v8Screenplay?.status === "DRAFT" && run.script?.status === "DRAFT";
+      const reopen = ["DIRECTOR", "PREFLIGHT"].includes(run.stage) &&
+        ["WAITING_FOR_DIRECTOR_REVIEW", "WAITING_FOR_PLAN_REVIEW", "WAITING_FOR_PROMPT_REVIEW", "READY_FOR_PAID_CONFIRM", "BLOCKED", "FAILED"].includes(run.status);
+      if (run.options.directorPipeline !== "V8" || (!draftReview && !reopen) || run.pendingInstall ||
+          !run.v8Screenplay || !run.script || run.attemptIds.length > 0 || run.consent) {
+        throw new DomainValidationError(
+          "只能在 V8 生成前审核阶段修改，已提交或正在审批的任务请新建一轮；已确认剧本将保存为新版本"
+        );
+      }
+      const proposal = v8DetailedProposalSchema.parse(input.screenplay);
+      if (hashValue(proposal) === run.v8Screenplay.screenplayHash) return run;
+      if (!this.production.reviseV8Screenplay) {
+        throw new DomainValidationError("V8 剧本人工编辑服务尚未配置");
+      }
+      await this.production.assertCurrent(run);
+      const revised = await this.production.reviseV8Screenplay(run, proposal);
+      return this.save(run, owner, {
+        script: revised,
+        v8Screenplay: {
+          format: "PVS_V8_SCREENPLAY_V1",
+          status: "DRAFT",
+          screenplay: proposal,
+          screenplayHash: hashValue(proposal),
+          sourceScriptHash: revised.contentHash,
+          brief: run.options.requestText
+        },
+        productionPlan: undefined,
+        v8Director: undefined, v8Prompts: undefined,
+        directorV3Plan: undefined,
+        seedancePromptDrafts: undefined,
+        paidScope: undefined,
+        consent: undefined,
+        attemptIds: [],
+        stage: "SCRIPT",
+        status: "PLANNING",
+        pendingInstall: "SCRIPT",
+        blocker: undefined
+      }, "用户修改 V8 详细剧本并创建新版本；原有剧本版本保留，导演和付费确认全部失效");
+    });
+  }
+
+  private assertV8Editable(run: SmartGenerationRun, expectedRevision: number) {
+    if (run.revision !== expectedRevision) throw new DomainValidationError("V8 任务版本已更新，请刷新后编辑");
+    if (run.options.directorPipeline !== "V8" || run.pendingInstall || run.attemptIds.length ||
+        !["WAITING_FOR_DIRECTOR_REVIEW", "WAITING_FOR_PLAN_REVIEW", "WAITING_FOR_PROMPT_REVIEW", "READY_FOR_PAID_CONFIRM", "BLOCKED", "FAILED"].includes(run.status) ||
+        !["DIRECTOR", "PREFLIGHT"].includes(run.stage)) throw new DomainValidationError("当前阶段不能覆盖 V8 内容，请在生成前审核阶段编辑或新建一轮");
+  }
+  async updateDirectorV8(projectId: string, id: string, input: { expectedRevision: number; visualGuidance: Record<string, string> }) {
+    return this.exclusive(projectId, id, async (run, owner) => {
+      this.assertV8Editable(run, input.expectedRevision);
+      await this.production.assertCurrent(run);
+      assertV8DecisionBinding(run);
+      const decision = structuredClone(run.v8Director!.decision);
+      const shots = decision.clips.flatMap(c => c.shots);
+      for (const [shotId, guidance] of Object.entries(input.visualGuidance)) {
+        const shot = shots.find(s => s.shotId === shotId);
+        if (!shot || !guidance.trim() || guidance.length > 1200) throw new DomainValidationError("请填写当前来源镜头的构图、站位或视线指令，不能改写剧本约束");
+        shot.visualGuidance = guidance.trim();
+      }
+      const { contentHash: _d, ...decisionBase } = decision;
+      const record = sealV8({ revision: run.v8Director!.revision + 1, status: "DRAFT" as const,
+        generationTarget: run.v8Director!.generationTarget, decision: sealV8(decisionBase) });
+      return this.save(run, owner, { v8Director: record, productionPlan: undefined, v8Prompts: undefined,
+        paidScope: undefined, consent: undefined, stage: "DIRECTOR", status: "WAITING_FOR_DIRECTOR_REVIEW", blocker: undefined },
+        "用户修改导演视觉/站位要求，新版需重新采用；正式分镜、Prompt 和付费范围失效");
+    });
+  }
+  async updatePlanV8(projectId: string, id: string, input: { expectedRevision: number; segments: ProductionPlanSegmentRevision[] }) {
+    return this.exclusive(projectId, id, async (run, owner) => {
+      this.assertV8Editable(run, input.expectedRevision);
+      await this.production.assertCurrent(run);
+      assertV8PlanBinding(run);
+      const all = run.productionPlan!.scenes.flatMap(s => s.clips.flatMap(c => c.segments));
+      const allowed = new Set(["id", "shotSize", "cameraPosition", "cameraAngle", "cameraMovement", "composition", "lighting"]);
+      if (new Set(input.segments.map(s => s.id)).size !== input.segments.length || input.segments.some(s =>
+        !all.some(a => a.id === s.id) || Object.keys(s).some(k => !allowed.has(k)))) throw new DomainValidationError("V8 正式分镜只能编辑当前镜头的构图、站位、机位与灯光，动作/台词/时长修改请返回剧本");
+      const productionPlan = reviseProductionPlanDraft(run.productionPlan!, { segments: input.segments });
+      assertV8PlanBinding({ ...run, productionPlan });
+      return this.save(run, owner, { productionPlan, v8Prompts: undefined, paidScope: undefined, consent: undefined,
+        pendingInstall: "DIRECTOR", stage: "DIRECTOR", status: "PLANNING", blocker: undefined },
+        "用户创建正式分镜新版本，需重新审核分镜和 Prompt；原版本保留，付费范围失效");
+    });
+  }
+  async compilePromptV8(projectId: string, id: string, input: { expectedRevision: number; voiceBindings: V8PromptRecord["voiceBindings"]; packages?: unknown }) {
+    return this.exclusive(projectId, id, async (run, owner) => {
+      this.assertV8Editable(run, input.expectedRevision);
+      await this.production.assertCurrent(run);
+      assertV8PlanBinding(run);
+      if (!this.production.compilePromptsV8) throw new DomainValidationError("V8 正式提示词编译器未配置");
+      const record = await this.production.compilePromptsV8(run, v8VoiceBindingsSchema.parse(input.voiceBindings));
+      if (input.packages !== undefined && hashValue(input.packages) !== hashValue(record.packages)) {
+        throw new DomainValidationError("自由文本 Prompt 无法保证动作、台词、声线和揭晓一致；请编辑正式镜头或声线后重新编译，禁止直接删改硬约束");
+      }
+      return this.save(run, owner, { v8Prompts: record, paidScope: undefined, consent: undefined,
+        stage: "PREFLIGHT", status: "WAITING_FOR_PROMPT_REVIEW", blocker: undefined },
+        "声线及逐镜 Prompt 已保存新版本；请阅读原句、声音和后期文案并明确采用");
+    });
+  }
+
+  /** Explicit AI rework of a saved, unspent V3 script.
+   * Keeps the original ScriptDraft/plan history and invalidates all downstream
+   * director prompts and approval scopes, requiring fresh script sign-off.
+   */
+  async repairScriptV3(projectId: string, id: string, input: {
+    expectedRevision: number;
+    confirmScriptRepair: boolean;
+  }): Promise<SmartGenerationRun> {
+    return this.exclusive(projectId, id, async (run, owner) => {
+      this.assertDirectorV3Editable(run, input.expectedRevision);
+      if (input.confirmScriptRepair !== true)
+        throw new DomainValidationError("必须确认只重新编排当前剧本，并使旧分镜和费用范围失效");
+      if (run.consent || run.assetConsent && run.status === "ASSET_PREPARING" ||
+          run.attemptIds.length > 0 || !this.production.repairNarrativeScriptV3 || !run.script) {
+        throw new DomainValidationError("当前任务已经授权真实生成或缺少剧本修订能力，不能自动重写旧付费范围");
+      }
+      const revised = await this.production.repairNarrativeScriptV3(run);
+      if (revised.feasibility.status !== "PASS")
+        throw new DomainValidationError("修订后的剧本必须先通过叙事与时长质检");
+      return this.save(run, owner, {
+        script: revised.script, scriptFeasibility: revised.feasibility,
+        productionPlan: undefined, directorV3Plan: undefined,
+        seedancePromptDrafts: undefined, paidScope: undefined,
+        consent: undefined, pendingInstall: undefined,
+        stage: "SCRIPT", status: "WAITING_FOR_SCRIPT_REVIEW",
+        blocker: undefined
+      }, "用户请求按剧情重编每段时长并补足叙事；创建新剧本版本，全部旧分镜与费用范围失效，待人工确认");
+    });
+  }
+
+  async updateScriptV3(projectId: string, id: string, input: {
+    expectedRevision: number;
+    beats: NonNullable<SmartGenerationRun["script"]>["beats"];
+  }): Promise<SmartGenerationRun> {
+    return this.exclusive(projectId, id, async (run, owner) => {
+      this.assertDirectorV3Editable(run, input.expectedRevision);
+      if (!run.script || !this.production.reviseScriptV3) {
+        throw new DomainValidationError(
+          "Director V3 脚本编辑服务尚未准备"
+        );
+      }
+      const revised = await this.production.reviseScriptV3(
+        run,
+        input.beats
+      );
+      return this.save(
+        run,
+        owner,
+        {
+          script: revised.script,
+          scriptFeasibility: revised.feasibility,
+          productionPlan: undefined,
+          directorV3Plan: undefined,
+          seedancePromptDrafts: undefined,
+          paidScope: undefined,
+          consent: undefined,
+          attemptIds: [],
+          pendingInstall: "SCRIPT",
+          stage: "SCRIPT",
+          status: "PLANNING",
+          blocker: undefined
+        },
+        "用户修改 Director V3 剧本；只使分镜、Prompt 与生成前检查失效，旧历史版本保留"
+      );
+    });
+  }
+
+  async updateClipContractV3(projectId: string, id: string, input: {
+    expectedRevision: number;
+    clipId: string;
+    purpose: string;
+    location: string;
+    actionDescriptions: string[];
+    camera: {
+      shotSize: string;
+      position: string;
+      angle: string;
+      movement: string;
+    };
+    audio: {
+      ambience: string[];
+      sfx: string[];
+      dialogueOrOs: Array<{
+        kind: "DIALOGUE" | "OS";
+        text: string;
+      }>;
+    };
+  }): Promise<SmartGenerationRun> {
+    return this.exclusive(projectId, id, async (run, owner) => {
+      this.assertDirectorV3Editable(run, input.expectedRevision);
+      if (!run.productionPlan || !run.directorV3Plan) {
+        throw new DomainValidationError(
+          "Director V3 分镜尚未准备"
+        );
+      }
+      const clips = run.productionPlan.scenes.flatMap(
+        (scene) => scene.clips
+      );
+      const index = clips.findIndex(
+        (clip) => clip.id === input.clipId
+      );
+      if (index < 0) {
+        throw new DomainValidationError(
+          "找不到需要修改的当前分镜"
+        );
+      }
+      const current =
+        run.directorV3Plan.clipContracts[index];
+      if (!current) {
+        throw new DomainValidationError(
+          "找不到分镜对应的 Clip Contract"
+        );
+      }
+      if (
+        input.actionDescriptions.length !==
+        current.actions.length
+      ) {
+        throw new DomainValidationError(
+          "动作数量不能在当前编辑中直接增删；如需重构动作数量，请先修改剧本"
+        );
+      }
+      const updatedContract =
+        directorV3ClipContractSchema.parse({
+          ...current,
+          purpose: input.purpose,
+          location: input.location,
+          actions: current.actions.map(
+            (action, actionIndex) => ({
+              ...action,
+              description:
+                input.actionDescriptions[actionIndex]
+            })
+          ),
+          camera: input.camera,
+          audio: {
+            ...current.audio,
+            mode: "NATIVE",
+            ambience: input.audio.ambience,
+            sfx: input.audio.sfx,
+            dialogueOrOs: input.audio.dialogueOrOs,
+            bgm: false
+          }
+        });
+      const {
+        contentHash: _oldHash,
+        ...planWithoutHash
+      } = run.directorV3Plan;
+      const nextBase = {
+        ...planWithoutHash,
+        clipContracts:
+          run.directorV3Plan.clipContracts.map(
+            (contract, contractIndex) =>
+              contractIndex === index
+                ? updatedContract
+                : contract
+          ),
+        createdAt: new Date().toISOString()
+      };
+      const nextPlan = directorV3PlanSchema.parse({
+        ...nextBase,
+        contentHash: hashValue(nextBase)
+      });
+      return this.save(
+        run,
+        owner,
+        {
+          directorV3Plan: nextPlan,
+          productionPlan: undefined,
+          seedancePromptDrafts: undefined,
+          paidScope: undefined,
+          consent: undefined,
+          stage: "DIRECTOR",
+          status: "PLANNING",
+          blocker: undefined
+        },
+        "用户修改 Director V3 分镜；只重建正式分镜、Prompt 与生成前检查，剧本保持不变"
+      );
+    });
+  }
+
+  async updatePromptV3(projectId: string, id: string, input: {
+    expectedRevision: number;
+    clipId: string;
+    prompt: string;
+  }): Promise<SmartGenerationRun> {
+    return this.exclusive(projectId, id, async (run, owner) => {
+      this.assertDirectorV3Editable(run, input.expectedRevision);
+      if (
+        !run.productionPlan ||
+        !run.directorV3Plan ||
+        !run.seedancePromptDrafts
+      ) {
+        throw new DomainValidationError(
+          "Director V3 最终 Prompt 尚未准备"
+        );
+      }
+      const clips = run.productionPlan.scenes.flatMap(
+        (scene) => scene.clips
+      );
+      const index = clips.findIndex(
+        (clip) => clip.id === input.clipId
+      );
+      const contract =
+        index >= 0
+          ? run.directorV3Plan.clipContracts[index]
+          : undefined;
+      if (!contract) {
+        throw new DomainValidationError(
+          "找不到 Prompt 对应的 Clip Contract"
+        );
+      }
+      assertSeedancePromptV3(input.prompt, contract);
+      const draftIndex =
+        run.seedancePromptDrafts.findIndex(
+          (draft) => draft.clipId === input.clipId
+        );
+      if (draftIndex < 0) {
+        throw new DomainValidationError(
+          "找不到需要修改的 Seedance Prompt"
+        );
+      }
+      const current =
+        run.seedancePromptDrafts[draftIndex]!;
+      const {
+        contentHash: _contentHash,
+        ...draftWithoutHash
+      } = current;
+      const nextBase = {
+        ...draftWithoutHash,
+        promptText: input.prompt,
+        status: "DRAFT" as const,
+        updatedAt: new Date().toISOString()
+      };
+      const updatedDraft =
+        seedancePromptV3DraftSchema.parse({
+          ...nextBase,
+          contentHash: hashValue(nextBase)
+        });
+      const drafts = run.seedancePromptDrafts.map(
+        (draft, itemIndex) =>
+          itemIndex === draftIndex
+            ? updatedDraft
+            : draft
+      );
+      return this.save(
+        run,
+        owner,
+        {
+          seedancePromptDrafts: drafts,
+          paidScope: undefined,
+          consent: undefined,
+          stage: "PREFLIGHT",
+          status: "PLANNING",
+          blocker: undefined
+        },
+        "用户只修改当前 Seedance Prompt；剧本与分镜保持不变，旧 Preflight/付费确认失效"
+      );
+    });
+  }
+
+  async updateAssetPrompt(projectId: string, id: string, input: {
+    expectedRevision: number;
+    assetKey: string;
+    prompt: string;
+  }): Promise<SmartGenerationRun> {
+    return this.exclusive(projectId, id, async (run, owner) => {
+      if (run.revision !== input.expectedRevision) {
+        throw new DomainValidationError("任务版本已更新，请刷新后再修改制作资产提示词");
+      }
+      if (run.status !== "READY_FOR_ASSET_PAID_CONFIRM") {
+        throw new DomainValidationError("当前阶段不能修改待生成制作资产提示词");
+      }
+      const entry = run.productionAssetSet?.entries.find(item => item.key === input.assetKey);
+      if (!entry || entry.source !== "DREAMINA_GENERATED" || entry.status !== "PLANNED") {
+        throw new DomainValidationError("请选择尚未提交生成的制作资产");
+      }
+      const normalized = input.prompt.trim();
+      if (!normalized) throw new DomainValidationError("制作资产提示词不能为空");
+      if (entry.generationPrompt === normalized) return run;
+      if (!this.production.updateProductionAssetPrompt) {
+        throw new DomainValidationError("制作资产提示词修改能力尚未配置");
+      }
+      await this.production.assertCurrent(run);
+      const updated = await this.production.updateProductionAssetPrompt(
+        run,
+        input.assetKey,
+        normalized
+      );
+      return this.save(
+        run,
+        owner,
+        {
+          productionAssetSet: updated.set,
+          assetPaidScope: updated.paidScope,
+          assetConsent: undefined,
+          stage: "ASSET_PREP",
+          status: "READY_FOR_ASSET_PAID_CONFIRM",
+          blocker: undefined
+        },
+        "用户修改制作资产提示词；已重新计算生成请求与积分确认范围，旧确认失效"
+      );
+    });
+  }
+
+  async regenerateAsset(projectId: string, id: string, input: {
+    expectedRevision: number;
+    assetKey: string;
+    prompt?: string;
+  }): Promise<SmartGenerationRun> {
+    return this.exclusive(projectId, id, async (run, owner) => {
+      if (run.revision !== input.expectedRevision) {
+        throw new DomainValidationError("任务版本已更新，请刷新后再重新生成制作资产");
+      }
+      if (run.status !== "WAITING_FOR_ASSET_REVIEW") {
+        throw new DomainValidationError("当前阶段没有可重新生成的制作资产");
+      }
+      if (!this.production.regenerateProductionAsset) {
+        throw new DomainValidationError("制作资产重新生成能力尚未配置");
+      }
+      await this.production.assertCurrent(run);
+      const regenerated = await this.production.regenerateProductionAsset(
+        run,
+        input.assetKey,
+        input.prompt
+      );
+      return this.save(
+        run,
+        owner,
+        {
+          productionAssetSet: regenerated.set,
+          assetPaidScope: regenerated.paidScope,
+          assetConsent: undefined,
+          stage: "ASSET_PREP",
+          status: "READY_FOR_ASSET_PAID_CONFIRM",
+          blocker: undefined
+        },
+        "用户选择重新生成制作资产；已保留旧图片记录，并要求重新确认本次图片生成积分"
+      );
+    });
+  }
+
+  async confirmAssetPaid(projectId: string, id: string, input: {
+    scopeHash: string;
+    confirmPaidAssetGeneration: boolean;
+    acceptedUnknownCostRisk: boolean;
+  }): Promise<SmartGenerationRun> {
+    return this.exclusive(projectId, id, async (run, owner) => {
+      if (
+        input.confirmPaidAssetGeneration !== true ||
+        !run.assetPaidScope ||
+        input.scopeHash !== run.assetPaidScope.hash
+      ) {
+        throw new DomainValidationError(
+          "必须明确确认当前角色/场景资产与费用范围"
+        );
+      }
+      if (run.assetConsent) {
+        if (
+          run.assetConsent.scopeHash !== input.scopeHash ||
+          run.assetConsent.acceptedUnknownCostRisk !==
+            input.acceptedUnknownCostRisk
+        ) {
+          throw new DomainValidationError("不能变更已保存的制作资产付费确认");
+        }
+        return run;
+      }
+      if (run.status !== "READY_FOR_ASSET_PAID_CONFIRM") {
+        throw new DomainValidationError("当前任务尚未准备好制作资产付费确认");
+      }
+      if (
+        run.assetPaidScope.assets.some(item => item.costStatus === "UNKNOWN") &&
+        input.acceptedUnknownCostRisk !== true
+      ) {
+        throw new DomainValidationError(
+          "制作资产成本未知，需要明确接受积分风险"
+        );
+      }
+      if (!this.production.validateAssetPaidScope) {
+        throw new DomainValidationError("制作资产付费校验服务尚未配置");
+      }
+      await this.production.validateAssetPaidScope(run);
+      return this.save(
+        run,
+        owner,
+        {
+          assetConsent: {
+            scopeHash: input.scopeHash,
+            approvedAt: new Date().toISOString(),
+            acceptedUnknownCostRisk: input.acceptedUnknownCostRisk,
+            source: "EXPLICIT_SMART_RUN_ASSET_PAID_CONFIRMATION"
+          },
+          stage: "ASSET_PREP",
+          status: "ASSET_PREPARING",
+          blocker: undefined
+        },
+        "已保存本轮角色/场景制作资产的明确积分确认；不覆盖重做或新增资产"
+      );
+    });
+  }
+
+  async retryAsset(projectId: string, id: string, input: {
+    expectedRevision: number;
+    assetKey: string;
+    prompt?: string;
+  }): Promise<SmartGenerationRun> {
+    return this.exclusive(projectId, id, async (run, owner) => {
+      if (run.revision !== input.expectedRevision) {
+        throw new DomainValidationError("任务版本已更新，请刷新后再处理制作资产");
+      }
+      if (
+        run.status !== "BLOCKED" ||
+        run.blocker?.code !== "ASSET_REMOTE_RESULT_STALE"
+      ) {
+        throw new DomainValidationError("当前任务没有可重新准备的悬挂制作资产");
+      }
+      if (!this.production.retryProductionAsset) {
+        throw new DomainValidationError("制作资产恢复服务尚未配置");
+      }
+      await this.production.assertCurrent(run);
+      const retried = await this.production.retryProductionAsset(
+        run,
+        input.assetKey,
+        input.prompt
+      );
+      return this.save(
+        run,
+        owner,
+        {
+          productionAssetSet: retried.set,
+          assetPaidScope: retried.paidScope,
+          assetConsent: undefined,
+          stage: "ASSET_PREP",
+          status: "READY_FOR_ASSET_PAID_CONFIRM",
+          blocker: undefined
+        },
+        "悬挂制作资产已重新准备；尚未提交新任务，必须重新确认本轮制作资产积分范围"
+      );
     });
   }
 
@@ -155,6 +1344,17 @@ export class SmartGenerationService {
       }
       await this.production.assertCurrent(run);
       await this.production.validatePaidScope(run);
+      // A historical PASS report must not grandfather a mechanically divided
+      // script into a new, irrevocable paid generation approval.
+      if (run.options.directorVersion === 3 && run.options.directorPipeline !== "V8" && run.script) {
+        const audit = auditNarrativeTiming(run.script);
+        if (!isScriptDurationWithinTolerance(run.script.targetDurationMs, audit.totalMs) ||
+            audit.issues.some(issue => issue.severity === "REVISE")) {
+          throw new DomainValidationError(
+            "当前剧本节奏或剧情衔接未通过最新质量审核。请先在剧本面板重新编排并审核；旧镜头和费用范围不能沿用。"
+          );
+        }
+      }
       return this.save(run, owner, { consent: { scopeHash: input.scopeHash, approvedAt: new Date().toISOString(), acceptedUnknownCostRisk: input.acceptedUnknownCostRisk, source: "EXPLICIT_SMART_RUN_PAID_CONFIRMATION" }, stage: "APPROVAL", status: "APPROVING", blocker: undefined }, "已保存用户本次明确付费确认；只覆盖上述请求，不覆盖重做或新镜头");
     });
   }
@@ -162,7 +1362,72 @@ export class SmartGenerationService {
   async resume(projectId: string, id: string): Promise<SmartGenerationRun> {
     return this.exclusive(projectId, id, async (run, owner) => {
       if (closedSmartStatuses.includes(run.status) || run.status === "REVIEW_READY") return run;
-      if (["WAITING_FOR_CREATIVE_REVIEW", "WAITING_FOR_SCRIPT_REVIEW", "WAITING_FOR_PLAN_REVIEW", "READY_FOR_PAID_CONFIRM"].includes(run.status)) return run;
+      if (
+        run.workflowVersion === 2 &&
+        run.productionAssetSet &&
+        this.production.reconcileProductionAssetReview
+      ) {
+        await this.production.assertCurrent(run);
+        const reconciled = await this.production.reconcileProductionAssetReview(run);
+        if (
+          reconciled.contentHash !== run.productionAssetSet.contentHash &&
+          reconciled.status === "NEEDS_REVIEW"
+        ) {
+          return this.save(
+            run,
+            owner,
+            {
+              productionAssetSet: reconciled,
+              script: undefined,
+              v8Screenplay: undefined, v8Director: undefined, v8Prompts: undefined,
+              productionPlan: undefined,
+              paidScope: undefined,
+              consent: undefined,
+              stage: "ASSET_PREP",
+              status: "WAITING_FOR_ASSET_REVIEW",
+              blocker: undefined
+            },
+            "检测到旧任务中有 AI 生成资产未记录人工确认；已退回制作资产看图确认，并使旧脚本/分镜失效"
+          );
+        }
+      }
+      if (
+        run.workflowVersion === 2 &&
+        run.stage === "ASSET_PREP" &&
+        run.status === "BLOCKED" &&
+        run.blocker?.code === "PRODUCTION_ASSET_GENERATION_FAILED" &&
+        run.productionAssetSet
+      ) {
+        if (!this.production.recoverProductionAssetResults) {
+          throw new DomainValidationError("原图片结果恢复功能尚未配置");
+        }
+        await this.production.assertCurrent(run);
+        const recovered = await this.production.recoverProductionAssetResults(run);
+        if (recovered.contentHash === run.productionAssetSet.contentHash) {
+          throw new DomainValidationError(
+            "当前失败不属于可直接接回的图片结果；请核查原即梦任务后再决定是否重新生成"
+          );
+        }
+        return this.save(
+          run,
+          owner,
+          {
+            productionAssetSet: recovered,
+            status: "ASSET_PREPARING",
+            blocker: undefined
+          },
+          "仅重新查询、接收原即梦任务图片，保留原提交编号与积分确认，不产生新的图片生成请求"
+        );
+      }
+      if ([
+        "WAITING_FOR_CREATIVE_REVIEW",
+        "WAITING_FOR_ASSET_REVIEW",
+        "READY_FOR_ASSET_PAID_CONFIRM",
+        "WAITING_FOR_SCRIPT_REVIEW",
+        "WAITING_FOR_PLAN_REVIEW",
+        "WAITING_FOR_DIRECTOR_REVIEW", "WAITING_FOR_PROMPT_REVIEW",
+        "READY_FOR_PAID_CONFIRM"
+      ].includes(run.status)) return run;
       if (run.blocker?.retryable === false) throw new DomainValidationError(run.blocker.message);
       return this.save(run, owner, { status: this.runnable(run.stage), blocker: undefined }, "用户恢复原检查点，不扩展付费范围或重提未知任务");
     });
@@ -205,6 +1470,27 @@ export class SmartGenerationService {
       if (run.status !== "REVIEW_READY" || !await this.production.finalConfirmed(run)) throw new DomainValidationError("请在成片页确认当前视频后再结束任务");
       return this.save(run, owner, { status: "COMPLETED" }, "最终成片已确认；发布仍由独立发布流程处理");
     });
+  }
+
+  /**
+   * Recover only one explicitly authorized SmartRun after an unclean process exit.
+   * Never inspect or release any unrelated project lease. Existing owner matching
+   * in releaseAbandoned prevents an observed lease race from stealing a new one.
+   */
+  async recoverAbandonedScoped(projectId: string, runId: string): Promise<boolean> {
+    const run = await this.repo.get(projectId, runId);
+    if (!run) return false;
+    const lease = await this.repo.lease(projectId, runId);
+    if (!lease) return false;
+    let dead = false;
+    try {
+      process.kill(lease.pid, 0);
+    } catch (error) {
+      dead = (error as NodeJS.ErrnoException).code === "ESRCH";
+    }
+    if (!dead) return false;
+    await this.repo.releaseAbandoned(projectId, runId, lease.owner);
+    return true;
   }
 
   /** Release only provably dead OS owners. A live/unknown owner is never displaced by a timeout. */

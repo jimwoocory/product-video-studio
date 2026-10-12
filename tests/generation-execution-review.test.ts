@@ -290,6 +290,33 @@ test("submit unknown -> reconcile -> download -> ACCEPT persists full recovery/r
     await generation.createGenerationRequest(request);
     await generation.createPreflightReport(preflight);
     await generation.createUserApproval(approval);
+    // Simulate a separately approved scene; REDO must not revoke this chain.
+    const otherRequest = {
+      ...request,
+      id: `request-other-${randomUUID()}`,
+      clipId: `clip-other-${randomUUID()}`,
+      compiledPromptId: `prompt-other-${randomUUID()}`,
+      requestHash: H.two
+    };
+    const otherPreflight = {
+      ...preflight,
+      id: `preflight-other-${randomUUID()}`,
+      generationRequestId: otherRequest.id,
+      requestHash: otherRequest.requestHash,
+      reportHash: H.three
+    };
+    const otherApproval = {
+      ...approval,
+      id: `approval-other-${randomUUID()}`,
+      generationRequestId: otherRequest.id,
+      requestHash: otherRequest.requestHash,
+      preflightReportId: otherPreflight.id,
+      preflightHash: otherPreflight.reportHash,
+      approvalHash: H.four
+    };
+    await generation.createGenerationRequest(otherRequest);
+    await generation.createPreflightReport(otherPreflight);
+    await generation.createUserApproval(otherApproval);
 
     const attempt = {
       ...makeAttempt(),
@@ -411,6 +438,18 @@ test("submit unknown -> reconcile -> download -> ACCEPT persists full recovery/r
     assert.equal(staleRequest?.status, "STALE");
     assert.equal(stalePreflight?.status, "STALE");
     assert.equal(staleApproval?.status, "STALE");
+    assert.equal(
+      (await db.generationRequestRecord.findUnique({ where: {id:otherRequest.id} }))?.status,
+      "CURRENT"
+    );
+    assert.equal(
+      (await db.preflightReportRecord.findUnique({ where: {id:otherPreflight.id} }))?.status,
+      "PASS"
+    );
+    assert.equal(
+      (await db.userApprovalRecord.findUnique({ where: {id:otherApproval.id} }))?.status,
+      "ACTIVE"
+    );
 
     const commands = await providerAudit.listCommandAttempts(projectId);
     assert.deepEqual(

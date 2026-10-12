@@ -1,3 +1,4 @@
+import type { V8PaidRequestGuard } from "./v8-paid-request-guard.js";
 import { randomUUID } from "node:crypto";
 import type { GenerationRepository } from "../ports/generation-repository.js";
 import type { WorkflowRepository } from "../ports/workflow-repository.js";
@@ -30,7 +31,8 @@ export type ApprovalBatchResult = {
 export class ApprovalService {
   constructor(
     private readonly generationRepo: GenerationRepository,
-    private readonly workflowRepo: WorkflowRepository
+    private readonly workflowRepo: WorkflowRepository,
+    private readonly v8Guard?: V8PaidRequestGuard
   ) {}
 
   async approveCurrentRequests(
@@ -68,6 +70,13 @@ export class ApprovalService {
       );
     }
 
+    for (const request of requests) {
+      if (request.v8Binding) {
+        if (!this.v8Guard) throw new DomainValidationError("V8 付费校验器未配置，禁止直接批准");
+        await this.v8Guard(request);
+        if (input.reuseMatchingApprovals) throw new DomainValidationError("V8 不允许复用旧付费审批，请核查本轮检查点");
+      }
+    }
     const hasUnknownSubmission = existingAttempts.some(
       (item) =>
         item.status === "SUBMISSION_OUTCOME_UNKNOWN" ||

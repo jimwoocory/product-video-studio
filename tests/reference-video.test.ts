@@ -19,6 +19,7 @@ import type {
   StructuredAiRuntime
 } from "../src/application/ports/structured-ai-runtime.js";
 import { LocalArtifactStore } from "../src/adapters/store/local-artifact-store.js";
+import { referenceVideoNeedsBrowserPreview } from "../src/adapters/media/reference-video-media.js";
 import { ReferenceVideoAnalysisService } from "../src/application/services/reference-video-analysis.js";
 import { AiGenerationService } from "../src/application/services/ai-generation.js";
 import { makeProductTruth } from "./fixtures.js";
@@ -225,6 +226,33 @@ function runFile(
     );
   });
 }
+
+test("HEVC reference video needs a browser H.264 preview while H.264 does not", () => {
+  const base = {
+    durationMs: 1000,
+    width: 1920,
+    height: 1080,
+    frameRate: 30,
+    hasAudio: true,
+    sceneCutTimestampsMs: []
+  };
+  assert.equal(
+    referenceVideoNeedsBrowserPreview({
+      ...base,
+      videoCodec: "hevc",
+      audioCodec: "aac"
+    }),
+    true
+  );
+  assert.equal(
+    referenceVideoNeedsBrowserPreview({
+      ...base,
+      videoCodec: "h264",
+      audioCodec: "aac"
+    }),
+    false
+  );
+});
 
 test("uploaded MP4 becomes a structured ReferenceVideoProfile with sampled visual media", async (t) => {
   const ffmpegAvailable = await runFile("ffmpeg", ["-version"]);
@@ -455,7 +483,7 @@ test("Creative and Script bind the active ReferenceVideoProfile and only receive
   );
 });
 
-test("Reference Video UI separates analysis reference from Dreamina direct reference and can reuse the same Artifact", () => {
+test("Reference Video UI imports the active analysis into intelligent one-click production", () => {
   const profile = activeProfile("project-ui-reference");
   const workspace = {
     project: {
@@ -472,18 +500,29 @@ test("Reference Video UI separates analysis reference from Dreamina direct refer
   const referenceHtml = renderReferenceVideoPage({
     workspace,
     profile,
-    history: [profile]
+    history: [profile],
+    previewArtifactId: "reference-preview-h264"
   });
   assert.match(referenceHtml, /分析参考/);
-  assert.match(referenceHtml, /生成直参/);
+  assert.match(referenceHtml, /导入智能生成/);
   assert.match(referenceHtml, /只学习结构、节奏和制作方法/);
+  assert.match(referenceHtml, /\/smart\?useReference=1/);
   assert.match(
     referenceHtml,
+    /\/api\/artifacts\/reference-preview-h264\/content/
+  );
+  assert.doesNotMatch(
+    referenceHtml,
     new RegExp(
-      "referenceArtifactId=" + profile.videoArtifactId
+      "/api/artifacts/" + profile.videoArtifactId + "/content"
     )
   );
+  assert.match(referenceHtml, /H\.264 兼容预览/);
+  assert.doesNotMatch(referenceHtml, /referenceArtifactId=/);
 
+  // The old single-clip renderer remains covered only as a hidden compatibility
+  // surface; normal Reference Video / Intelligent Generation navigation no longer
+  // routes users into it.
   const agentHtml = renderAgentProjectPage({
     workspace,
     tasks: [],

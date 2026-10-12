@@ -36,6 +36,8 @@ import {
   type AgentReferenceLimits
 } from "./agent-reference-adaptation.js";
 
+import { buildAssetImageBindings, assertNamedImageAspectRatio } from "./asset-image-bindings.js";
+
 const operationLabel: Record<DreaminaVideoOperation, string> = {
   text2video: "文生视频",
   image2video: "图生视频",
@@ -294,6 +296,17 @@ export class AgentModeService {
       });
     } catch (error) {
       missing.push(error instanceof Error ? error.message : String(error));
+    }
+    if (generationProfile) {
+      try {
+        assertNamedImageAspectRatio({
+          promptText: task.requestText,
+          requestedRatio: task.aspectRatio,
+          aspectRatioMode: generationProfile.aspectRatioMode
+        });
+      } catch (error) {
+        missing.push(error instanceof Error ? error.message : String(error));
+      }
     }
     const modelCapability = generationProfile?.modelVersion
       ? operationCapability.models.find(
@@ -575,11 +588,17 @@ export class AgentModeService {
       };
     });
 
+    const imageBindings = buildAssetImageBindings({
+      promptText: task.requestText,
+      assetManifest,
+      dreaminaOperation: selected.operation
+    });
     const compiledPromptHash = hashValue({
       agentTaskId: task.id,
       promptText: task.requestText,
       generationProfile,
-      assetManifest
+      assetManifest,
+      ...(imageBindings.length ? { imageBindings } : {})
     });
     const requestWithoutHash = {
       id: randomUUID(),
@@ -593,6 +612,7 @@ export class AgentModeService {
       model:
         generationProfile.modelVersion ?? "dreamina-fixed-model",
       promptText: task.requestText,
+      ...(imageBindings.length ? { imageBindings } : {}),
       assetManifest,
       durationMs: task.durationMs,
       aspectRatio: generationProfile.aspectRatio ?? "AUTO",
