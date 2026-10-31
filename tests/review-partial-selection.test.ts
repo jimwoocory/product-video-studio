@@ -225,6 +225,29 @@ test("accepted clips plus explicit SKIP decisions can complete without generatin
     assert.equal(skipped.decision.generationAttemptId, undefined);
     assert.equal(skipped.projectStatus, "GENERATION_REVIEW");
 
+    const nextPreflight = { ...preflight, id: `preflight-${randomUUID()}`, reportHash: hash("preflight-submitting") };
+    const nextApproval = { ...approval, id: `approval-${randomUUID()}`, preflightReportId: nextPreflight.id, preflightHash: nextPreflight.reportHash, approvalHash: hash("approval-submitting") };
+    await generation.createPreflightReport(nextPreflight);
+    await generation.createUserApproval(nextApproval);
+    const submittingAttempt = {
+      ...makeAttempt(),
+      id: `attempt-${randomUUID()}`,
+      projectId,
+      clipId: acceptedClipId,
+      attemptNumber: 2,
+      generationRequestId: request.id,
+      requestHash,
+      preflightReportId: nextPreflight.id,
+      userApprovalId: nextApproval.id,
+      approvalHash: nextApproval.approvalHash,
+      submissionFingerprint: hash("fingerprint-submitting"),
+      status: "SUBMITTING" as const
+    };
+    await workflow.createGenerationAttempt(submittingAttempt);
+    const whileSubmitting = await service.finalizeUsingAcceptedClips({ projectId });
+    assert.equal(whileSubmitting.projectStatus, "GENERATION_REVIEW");
+    await workflow.updateGenerationAttemptStatus(submittingAttempt.id, { status: "FAILED" });
+
     const finalized = await service.finalizeUsingAcceptedClips({ projectId });
     assert.equal(finalized.projectStatus, "READY_TO_ASSEMBLE");
     assert.deepEqual(finalized.acceptedClipIds, [acceptedClipId]);
@@ -234,8 +257,8 @@ test("accepted clips plus explicit SKIP decisions can complete without generatin
     );
     assert.deepEqual(finalized.pendingClipIds, []);
     assert.equal(
-      (await workflow.listGenerationAttempts(projectId)).length,
-      1,
+      (await workflow.listGenerationAttempts(projectId)).filter((item) => item.clipId === unusedClipId).length,
+      0,
       "unneeded clips must not require GenerationAttempt records"
     );
 

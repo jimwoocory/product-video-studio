@@ -115,6 +115,7 @@ export class ReviewService {
     const openBlockers = await this.workflow.listOpenBlockers(projectId);
     const hasUnknownSubmission = attempts.some(
       (item) =>
+        item.status === "SUBMITTING" ||
         item.status === "SUBMISSION_OUTCOME_UNKNOWN" ||
         item.status === "RECONCILING"
     );
