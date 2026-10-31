@@ -353,24 +353,9 @@ export class GenerationExecutionService {
     });
     const command = await this.beginCommand(attempt, "SUBMIT");
 
+    let handle: Awaited<ReturnType<VideoProvider["submit"]>>;
     try {
-      const handle = await this.provider.submit(request);
-      const evidence = await this.collectProviderEvidence(
-        attempt,
-        command,
-        "SUBMIT"
-      );
-      await this.finishCommand(attempt.id, command, {
-        ...evidence,
-        completedAt: new Date().toISOString(),
-        exitCode: evidence.exitCode ?? 0,
-        timedOut: evidence.timedOut ?? false
-      });
-      return this.workflow.updateGenerationAttemptStatus(attempt.id, {
-        status: "SUBMITTED",
-        providerHandle: handle,
-        submittedAt: new Date().toISOString()
-      });
+      handle = await this.provider.submit(request);
     } catch (error) {
       if (error instanceof SubmissionOutcomeUnknownError) {
         const evidence = await this.collectProviderEvidence(
@@ -413,6 +398,20 @@ export class GenerationExecutionService {
         errorMessage: error instanceof Error ? error.message : String(error)
       });
     }
+
+    const submitted = await this.workflow.updateGenerationAttemptStatus(attempt.id, {
+      status: "SUBMITTED",
+      providerHandle: handle,
+      submittedAt: new Date().toISOString()
+    });
+    const evidence = await this.collectProviderEvidence(attempt, command, "SUBMIT");
+    await this.finishCommand(attempt.id, command, {
+      ...evidence,
+      completedAt: new Date().toISOString(),
+      exitCode: evidence.exitCode ?? 0,
+      timedOut: evidence.timedOut ?? false
+    });
+    return this.requireAttempt(submitted.id);
   }
 
   async pollAttempt(attemptId: string): Promise<GenerationAttempt> {

@@ -51,6 +51,7 @@ export class ApprovalService {
 
     const hasUnknownSubmission = existingAttempts.some(
       (item) =>
+        item.status === "SUBMITTING" ||
         item.status === "SUBMISSION_OUTCOME_UNKNOWN" ||
         item.status === "RECONCILING"
     );
